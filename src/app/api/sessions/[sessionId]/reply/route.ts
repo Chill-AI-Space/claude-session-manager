@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getDb, getSetting } from "@/lib/db";
 import { SessionRow } from "@/lib/types";
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import { killSessionProcesses } from "@/lib/process-detector";
 
 export const dynamic = "force-dynamic";
@@ -41,13 +41,12 @@ export async function POST(
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  // Build clean env without Claude Code vars
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) {
-    if (key.startsWith("CLAUDE")) delete env[key];
-  }
+  const { getCleanEnv } = await import("@/lib/utils");
+  const env = getCleanEnv();
 
   const encoder = new TextEncoder();
+  let proc: ChildProcess;
+
   const stream = new ReadableStream({
     start(controller) {
       const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
@@ -64,7 +63,7 @@ export async function POST(
         args.push("--dangerously-skip-permissions");
       }
 
-      const proc = spawn(
+      proc = spawn(
         "claude",
         args,
         {
@@ -75,11 +74,11 @@ export async function POST(
       );
 
       // Close stdin to prevent hanging on permission prompts
-      proc.stdin.end();
+      proc.stdin!.end();
 
       let buffer = "";
 
-      proc.stdout.on("data", (data: Buffer) => {
+      proc.stdout!.on("data", (data: Buffer) => {
         buffer += data.toString();
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
@@ -121,7 +120,7 @@ export async function POST(
         }
       });
 
-      proc.stderr.on("data", (data: Buffer) => {
+      proc.stderr!.on("data", (data: Buffer) => {
         const text = data.toString();
         controller.enqueue(
           encoder.encode(
@@ -169,6 +168,14 @@ export async function POST(
         );
         controller.close();
       });
+    },
+    cancel() {
+      // Client disconnected — kill the subprocess
+      try {
+        proc?.kill("SIGTERM");
+      } catch {
+        // already dead
+      }
     },
   });
 

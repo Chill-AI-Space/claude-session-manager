@@ -20,7 +20,9 @@ function formatTime(ts: string): string {
   });
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+import { memo } from "react";
+
+export const MessageBubble = memo(function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.type === "user";
   const content = message.content;
 
@@ -157,4 +159,4 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       </div>
     </div>
   );
-}
+});

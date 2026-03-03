@@ -29,7 +29,7 @@ export function ReplyInput({ sessionId, onSend, queueSize = 0 }: ReplyInputProps
   };
 
   return (
-    <div className="border-t border-border px-6 py-3 shrink-0 max-w-[900px]">
+    <div className="border-t border-border px-6 py-3 shrink-0">
       <div className="flex gap-2 items-end">
         <textarea
           ref={textareaRef}
@@ -41,7 +41,7 @@ export function ReplyInput({ sessionId, onSend, queueSize = 0 }: ReplyInputProps
               ? `${queueSize} message${queueSize > 1 ? "s" : ""} queued — type next...`
               : "Reply to this session..."
           }
-          rows={1}
+          rows={4}
           className="flex-1 resize-none bg-muted/30 border border-input rounded px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <Button

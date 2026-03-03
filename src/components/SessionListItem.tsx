@@ -9,6 +9,7 @@ import { GitBranch } from "lucide-react";
 interface SessionListItemProps {
   session: SessionListItem;
   selected: boolean;
+  snippet?: string;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -77,15 +78,12 @@ function truncatePreview(text: string | null, maxLen: number): string | null {
   return firstLine.slice(0, maxLen) + "...";
 }
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-  return n.toString();
-}
+import { formatTokens } from "@/lib/utils";
 
 export function SessionListItemComponent({
   session,
   selected,
+  snippet,
 }: SessionListItemProps) {
   const title = getSessionTitle(session);
   const lastMessagePreview = truncatePreview(session.last_message, 120);
@@ -94,7 +92,7 @@ export function SessionListItemComponent({
 
   return (
     <Link
-      href={`/sessions/${session.session_id}`}
+      href={`/claude-sessions/${session.session_id}`}
       className={cn(
         "block px-3 py-2.5 mx-1 rounded cursor-pointer transition-colors",
         selected
@@ -115,12 +113,16 @@ export function SessionListItemComponent({
             </span>
           </div>
 
-          {/* Row 2: Last message preview */}
-          {lastMessagePreview && (
+          {/* Row 2: Last message preview or Gemini snippet */}
+          {snippet ? (
+            <p className="text-[11px] text-amber-500/80 mt-0.5 line-clamp-2 leading-relaxed">
+              {snippet}
+            </p>
+          ) : lastMessagePreview ? (
             <p className="text-[11px] text-muted-foreground/80 mt-0.5 line-clamp-1 leading-relaxed">
               {lastMessagePreview}
             </p>
-          )}
+          ) : null}
 
           {/* Row 3: Meta — timestamps, branch, tokens */}
           <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground/60 flex-wrap">

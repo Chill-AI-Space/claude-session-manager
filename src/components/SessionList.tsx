@@ -2,16 +2,17 @@
 
 import { SessionListItem } from "@/lib/types";
 import { SessionListItemComponent } from "./SessionListItem";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { GeminiResult } from "./SessionSearch";
 import { Loader2 } from "lucide-react";
 import { useParams } from "next/navigation";
 
 interface SessionListProps {
   sessions: SessionListItem[];
   loading: boolean;
+  geminiResults?: GeminiResult[];
 }
 
-export function SessionList({ sessions, loading }: SessionListProps) {
+export function SessionList({ sessions, loading, geminiResults }: SessionListProps) {
   const params = useParams();
   const currentSessionId = params?.sessionId as string | undefined;
 
@@ -23,7 +24,21 @@ export function SessionList({ sessions, loading }: SessionListProps) {
     );
   }
 
-  if (sessions.length === 0) {
+  // If Gemini results are active, filter and reorder sessions
+  let displaySessions = sessions;
+  const snippetMap = new Map<string, string>();
+
+  if (geminiResults && geminiResults.length > 0) {
+    const geminiIds = new Set(geminiResults.map((r) => r.session_id));
+    const geminiOrder = new Map(geminiResults.map((r, i) => [r.session_id, i]));
+    geminiResults.forEach((r) => snippetMap.set(r.session_id, r.snippet));
+
+    displaySessions = sessions
+      .filter((s) => geminiIds.has(s.session_id))
+      .sort((a, b) => (geminiOrder.get(a.session_id) ?? 0) - (geminiOrder.get(b.session_id) ?? 0));
+  }
+
+  if (displaySessions.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs p-4 text-center">
         No sessions found
@@ -33,14 +48,14 @@ export function SessionList({ sessions, loading }: SessionListProps) {
 
   // Group by project
   const grouped = new Map<string, SessionListItem[]>();
-  for (const session of sessions) {
+  for (const session of displaySessions) {
     const key = session.project_dir;
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key)!.push(session);
   }
 
   return (
-    <ScrollArea className="flex-1 min-h-0">
+    <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="py-1">
         {Array.from(grouped.entries()).map(([projectDir, projectSessions]) => (
           <div key={projectDir} className="mb-0.5">
@@ -55,11 +70,12 @@ export function SessionList({ sessions, loading }: SessionListProps) {
                 key={session.session_id}
                 session={session}
                 selected={session.session_id === currentSessionId}
+                snippet={snippetMap.get(session.session_id)}
               />
             ))}
           </div>
         ))}
       </div>
-    </ScrollArea>
+    </div>
   );
 }

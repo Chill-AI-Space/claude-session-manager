@@ -1,7 +1,11 @@
 import Database from "better-sqlite3";
 import path from "path";
+import os from "os";
+import fs from "fs";
 
 const DB_PATH = path.join(process.cwd(), "data", "sessions.db");
+const SETTINGS_DIR = path.join(os.homedir(), ".config", "claude-session-manager");
+const SETTINGS_PATH = path.join(SETTINGS_DIR, "settings.json");
 
 let _db: Database.Database | null = null;
 
@@ -71,37 +75,43 @@ function initTables(db: Database.Database) {
   if (!colNames.has("generated_title")) {
     db.exec("ALTER TABLE sessions ADD COLUMN generated_title TEXT");
   }
+  if (!colNames.has("embedding")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN embedding BLOB");
+  }
 }
 
 const SETTING_DEFAULTS: Record<string, string> = {
   auto_kill_terminal_on_reply: "false",
   dangerously_skip_permissions: "false",
+  vector_search_top_k: "20",
 };
 
+function readSettingsFile(): Record<string, string> {
+  try {
+    const data = fs.readFileSync(SETTINGS_PATH, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+function writeSettingsFile(settings: Record<string, string>): void {
+  fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+}
+
 export function getSetting(key: string): string {
-  const db = getDb();
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
-    | { value: string }
-    | undefined;
-  return row?.value ?? SETTING_DEFAULTS[key] ?? "";
+  const saved = readSettingsFile();
+  return saved[key] ?? SETTING_DEFAULTS[key] ?? "";
 }
 
 export function setSetting(key: string, value: string): void {
-  const db = getDb();
-  db.prepare(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  ).run(key, value);
+  const saved = readSettingsFile();
+  saved[key] = value;
+  writeSettingsFile(saved);
 }
 
 export function getAllSettings(): Record<string, string> {
-  const db = getDb();
-  const rows = db.prepare("SELECT key, value FROM settings").all() as {
-    key: string;
-    value: string;
-  }[];
-  const result = { ...SETTING_DEFAULTS };
-  for (const row of rows) {
-    result[row.key] = row.value;
-  }
-  return result;
+  const saved = readSettingsFile();
+  return { ...SETTING_DEFAULTS, ...saved };
 }

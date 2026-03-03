@@ -5,19 +5,23 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const encoder = new TextEncoder();
 
+  let keepalive: ReturnType<typeof setInterval>;
+  let removeListener: () => void;
+
   const stream = new ReadableStream({
     start(controller) {
       // Send keepalive every 30s
-      const keepalive = setInterval(() => {
+      keepalive = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(": keepalive\n\n"));
         } catch {
           clearInterval(keepalive);
+          removeListener?.();
         }
       }, 30000);
 
       // Listen for file changes
-      const removeListener = addChangeListener((event) => {
+      removeListener = addChangeListener((event) => {
         try {
           controller.enqueue(
             encoder.encode(
@@ -28,12 +32,10 @@ export async function GET() {
           // stream closed
         }
       });
-
-      // Cleanup on close
-      const originalCancel = controller.close.bind(controller);
-      // Note: ReadableStream doesn't have a built-in cancel callback from the server side.
-      // The keepalive interval and listener will be cleaned up when the process exits.
-      // For a more robust solution, we'd need AbortController integration.
+    },
+    cancel() {
+      clearInterval(keepalive);
+      removeListener?.();
     },
   });
 

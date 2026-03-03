@@ -29,32 +29,30 @@ function runClaude(prompt: string, env: NodeJS.ProcessEnv): Promise<string> {
       stderr += data.toString();
     });
 
+    const timeoutHandle = setTimeout(() => {
+      proc.kill("SIGTERM");
+      reject(new Error("Timeout generating titles"));
+    }, 90_000);
+
     proc.on("close", (code) => {
+      clearTimeout(timeoutHandle);
       if (code === 0) {
         resolve(stdout);
       } else {
         reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
       }
     });
-    proc.on("error", reject);
+    proc.on("error", (err) => {
+      clearTimeout(timeoutHandle);
+      reject(err);
+    });
 
     proc.stdin.write(prompt);
     proc.stdin.end();
-
-    setTimeout(() => {
-      proc.kill("SIGTERM");
-      reject(new Error("Timeout generating titles"));
-    }, 90_000);
   });
 }
 
-function getCleanEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) {
-    if (key.startsWith("CLAUDE")) delete env[key];
-  }
-  return env;
-}
+import { getCleanEnv } from "./utils";
 
 /**
  * Generate titles for a batch of sessions. Returns number generated.
@@ -123,16 +121,25 @@ ${sessionsText}`;
   return { generated, total: sessions.length };
 }
 
+// Concurrency guard — only one chain at a time
+let titleGenerationRunning = false;
+
 /**
- * Generate all missing titles in batches. Fire-and-forget.
+ * Generate all missing titles in batches. Skips if already running.
  */
 export async function generateAllMissingTitles(): Promise<void> {
-  for (let i = 0; i < 25; i++) {
-    try {
-      const { generated } = await generateTitleBatch(20);
-      if (generated === 0) break;
-    } catch {
-      break;
+  if (titleGenerationRunning) return;
+  titleGenerationRunning = true;
+  try {
+    for (let i = 0; i < 25; i++) {
+      try {
+        const { generated } = await generateTitleBatch(20);
+        if (generated === 0) break;
+      } catch {
+        break;
+      }
     }
+  } finally {
+    titleGenerationRunning = false;
   }
 }

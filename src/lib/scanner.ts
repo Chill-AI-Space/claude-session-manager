@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { globSync } from "glob";
+import { glob } from "glob";
 import fs from "fs";
 import path from "path";
 
@@ -143,13 +143,20 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
   }
 }
 
+const BATCH_SIZE = 30; // yield to event loop every N files
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 export async function scanSessions(
   mode: "full" | "incremental" = "incremental"
 ): Promise<ScanResult> {
   const start = Date.now();
   const db = getDb();
 
-  const jsonlFiles = globSync("**/*.jsonl", {
+  // Use async glob to avoid blocking during file discovery
+  const jsonlFiles = await glob("**/*.jsonl", {
     cwd: CLAUDE_DIR,
     absolute: true,
   });
@@ -210,10 +217,10 @@ export async function scanSessions(
       last_activity = @last_activity
   `);
 
-  const batchInsert = db.transaction(() => {
-    for (const filePath of jsonlFiles) {
+  // Process files in batches — yield between batches to keep event loop responsive
+  const insertBatch = db.transaction((batch: typeof jsonlFiles) => {
+    for (const filePath of batch) {
       const sessionId = path.basename(filePath, ".jsonl");
-      // Skip non-UUID files (like sessions-index.json parsed as jsonl)
       if (
         !sessionId.match(
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -225,20 +232,22 @@ export async function scanSessions(
       const stat = fs.statSync(filePath);
       const fileMtime = stat.mtimeMs;
 
-      // Incremental: skip if mtime hasn't changed
       if (mode === "incremental" && existingMtimes.has(sessionId)) {
         const existingMtime = existingMtimes.get(sessionId)!;
         if (Math.abs(existingMtime - fileMtime) < 1000) {
           sessionsSkipped++;
-          // Still track project dir
-          const dirName = path.basename(path.dirname(filePath));
-          projectDirs.add(dirName);
+          projectDirs.add(path.basename(path.dirname(filePath)));
           continue;
         }
       }
 
       const metadata = extractMetadataFromJsonl(filePath);
       if (!metadata) continue;
+
+      // Skip internal utility sessions created by this app (title generation, etc.)
+      if (metadata.firstPrompt?.startsWith("Generate a short descriptive title")) {
+        continue;
+      }
 
       const dirName = path.basename(path.dirname(filePath));
       projectDirs.add(dirName);
@@ -265,8 +274,16 @@ export async function scanSessions(
 
       sessionsScanned++;
     }
+  });
 
-    // Update projects
+  // Process in batches with event loop yields between them
+  for (let i = 0; i < jsonlFiles.length; i += BATCH_SIZE) {
+    insertBatch(jsonlFiles.slice(i, i + BATCH_SIZE));
+    await yieldToEventLoop();
+  }
+
+  // Update projects
+  const updateProjects = db.transaction(() => {
     for (const projectDir of projectDirs) {
       const stats = db
         .prepare(
@@ -291,8 +308,7 @@ export async function scanSessions(
       });
     }
   });
-
-  batchInsert();
+  updateProjects();
 
   return {
     sessionsScanned,
