@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (search) {
-    query += ` AND (first_prompt LIKE @search OR custom_name LIKE @search OR session_id LIKE @search)`;
+    query += ` AND (first_prompt LIKE @search OR last_message LIKE @search OR generated_title LIKE @search OR custom_name LIKE @search OR session_id LIKE @search)`;
     params.search = `%${search}%`;
   }
 
@@ -67,6 +67,8 @@ export async function GET(request: NextRequest) {
     display_name:
       row.project_path.split("/").pop() || row.project_dir,
     first_prompt: row.first_prompt,
+    last_message: row.last_message,
+    generated_title: row.generated_title,
     custom_name: row.custom_name,
     tags: row.tags ? JSON.parse(row.tags) : [],
     pinned: row.pinned === 1,

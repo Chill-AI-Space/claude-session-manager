@@ -23,6 +23,7 @@ interface JsonlMetadata {
   claudeVersion: string | null;
   model: string | null;
   firstPrompt: string | null;
+  lastMessage: string | null;
   messageCount: number;
   totalInputTokens: number;
   totalOutputTokens: number;
@@ -41,6 +42,7 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
     let claudeVersion: string | null = null;
     let model: string | null = null;
     let firstPrompt: string | null = null;
+    let lastMessage: string | null = null;
     let messageCount = 0;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
@@ -66,7 +68,7 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
             modifiedAt = ts;
           }
 
-          if (obj.type === "user" && !firstPrompt) {
+          if (obj.type === "user") {
             const msg = obj.message;
             if (msg) {
               const text =
@@ -86,7 +88,11 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
                 !text.startsWith("[Request interrupted") &&
                 text.trim().length > 5
               ) {
-                firstPrompt = text.slice(0, 500);
+                if (!firstPrompt) {
+                  firstPrompt = text.slice(0, 500);
+                }
+                // Always update — last one wins
+                lastMessage = text.slice(0, 300);
               }
             }
           }
@@ -125,6 +131,7 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
       claudeVersion,
       model,
       firstPrompt,
+      lastMessage,
       messageCount,
       totalInputTokens,
       totalOutputTokens,
@@ -165,12 +172,12 @@ export async function scanSessions(
   const upsertSession = db.prepare(`
     INSERT INTO sessions (
       session_id, jsonl_path, project_dir, project_path,
-      git_branch, claude_version, model, first_prompt,
+      git_branch, claude_version, model, first_prompt, last_message,
       message_count, total_input_tokens, total_output_tokens,
       created_at, modified_at, file_mtime, file_size, last_scanned_at
     ) VALUES (
       @session_id, @jsonl_path, @project_dir, @project_path,
-      @git_branch, @claude_version, @model, @first_prompt,
+      @git_branch, @claude_version, @model, @first_prompt, @last_message,
       @message_count, @total_input_tokens, @total_output_tokens,
       @created_at, @modified_at, @file_mtime, @file_size, @last_scanned_at
     )
@@ -182,6 +189,7 @@ export async function scanSessions(
       claude_version = COALESCE(@claude_version, sessions.claude_version),
       model = COALESCE(@model, sessions.model),
       first_prompt = COALESCE(@first_prompt, sessions.first_prompt),
+      last_message = COALESCE(@last_message, sessions.last_message),
       message_count = @message_count,
       total_input_tokens = @total_input_tokens,
       total_output_tokens = @total_output_tokens,
@@ -244,6 +252,7 @@ export async function scanSessions(
         claude_version: metadata.claudeVersion,
         model: metadata.model,
         first_prompt: metadata.firstPrompt,
+        last_message: metadata.lastMessage,
         message_count: metadata.messageCount,
         total_input_tokens: metadata.totalInputTokens,
         total_output_tokens: metadata.totalOutputTokens,

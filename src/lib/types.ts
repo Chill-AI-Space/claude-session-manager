@@ -7,6 +7,8 @@ export interface SessionRow {
   claude_version: string | null;
   model: string | null;
   first_prompt: string | null;
+  last_message: string | null;
+  generated_title: string | null;
   message_count: number;
   total_input_tokens: number;
   total_output_tokens: number;
@@ -37,6 +39,8 @@ export interface SessionListItem {
   project_path: string;
   display_name: string;
   first_prompt: string | null;
+  last_message: string | null;
+  generated_title: string | null;
   custom_name: string | null;
   tags: string[];
   pinned: boolean;

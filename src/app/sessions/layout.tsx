@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { SessionList } from "@/components/SessionList";
 import { SessionSearch } from "@/components/SessionSearch";
 import { SessionListItem, ProjectListItem } from "@/lib/types";
-import { RefreshCw, Loader2, PanelLeft, PanelLeftClose, Settings } from "lucide-react";
+import { RefreshCw, Loader2, PanelLeft, PanelLeftClose, Settings, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,8 @@ export default function SessionsLayout({
     "modified"
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [generatingTitles, setGeneratingTitles] = useState(false);
+  const [titleStats, setTitleStats] = useState<string | null>(null);
 
   const fetchSessions = useCallback(async () => {
     const params = new URLSearchParams();
@@ -53,6 +55,35 @@ export default function SessionsLayout({
     });
     await Promise.all([fetchSessions(), fetchProjects()]);
     setScanning(false);
+  };
+
+  const generateTitles = async () => {
+    setGeneratingTitles(true);
+    setTitleStats(null);
+    try {
+      let totalGenerated = 0;
+      // Generate in batches until done
+      for (let i = 0; i < 20; i++) {
+        const res = await fetch("/api/sessions/generate-titles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ limit: 20 }),
+        });
+        const data = await res.json();
+        if (data.generated === 0 || data.error) break;
+        totalGenerated += data.generated;
+        setTitleStats(`${totalGenerated} titles generated...`);
+        // Refresh list to show new titles
+        await fetchSessions();
+      }
+      setTitleStats(totalGenerated > 0 ? `${totalGenerated} titles generated` : "All sessions have titles");
+      setTimeout(() => setTitleStats(null), 3000);
+    } catch {
+      setTitleStats("Error generating titles");
+      setTimeout(() => setTitleStats(null), 3000);
+    } finally {
+      setGeneratingTitles(false);
+    }
   };
 
   useEffect(() => {
@@ -118,8 +149,26 @@ export default function SessionsLayout({
 
           <SessionList sessions={sessions} loading={loading} />
 
-          {/* Settings link */}
-          <div className="border-t border-border p-2">
+          {/* Footer */}
+          <div className="border-t border-border p-2 space-y-1">
+            {titleStats && (
+              <div className="px-3 py-1 text-[10px] text-muted-foreground/70 flex items-center gap-1.5">
+                {generatingTitles && <Loader2 className="h-3 w-3 animate-spin" />}
+                {titleStats}
+              </div>
+            )}
+            <button
+              onClick={generateTitles}
+              disabled={generatingTitles}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground rounded transition-colors w-full text-left disabled:opacity-50"
+            >
+              {generatingTitles ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              Generate titles
+            </button>
             <Link
               href="/sessions/settings"
               className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground rounded transition-colors"

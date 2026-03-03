@@ -26,6 +26,8 @@ function initTables(db: Database.Database) {
       claude_version TEXT,
       model TEXT,
       first_prompt TEXT,
+      last_message TEXT,
+      generated_title TEXT,
       message_count INTEGER DEFAULT 0,
       total_input_tokens INTEGER DEFAULT 0,
       total_output_tokens INTEGER DEFAULT 0,
@@ -59,6 +61,16 @@ function initTables(db: Database.Database) {
       value TEXT NOT NULL
     );
   `);
+
+  // Migrations: add columns that may not exist in older DBs
+  const cols = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+  const colNames = new Set(cols.map((c) => c.name));
+  if (!colNames.has("last_message")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN last_message TEXT");
+  }
+  if (!colNames.has("generated_title")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN generated_title TEXT");
+  }
 }
 
 const SETTING_DEFAULTS: Record<string, string> = {
