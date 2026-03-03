@@ -84,6 +84,37 @@ export default function SettingsPage() {
           </label>
         </div>
 
+        <div className="space-y-6">
+          <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+            Permissions
+          </h2>
+
+          <label className="flex items-start gap-3 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={settings.dangerously_skip_permissions === "true"}
+              onChange={(e) =>
+                updateSetting(
+                  "dangerously_skip_permissions",
+                  e.target.checked ? "true" : "false"
+                )
+              }
+              className="mt-1 h-4 w-4 rounded border-input accent-primary"
+            />
+            <div className="space-y-1">
+              <div className="text-sm font-medium">
+                Dangerously skip permissions
+              </div>
+              <div className="text-xs text-muted-foreground leading-relaxed">
+                Pass <code className="px-1 py-0.5 bg-muted rounded text-[11px]">--dangerously-skip-permissions</code> when
+                resuming sessions from the web interface and when opening in terminal.
+                Claude will execute all tool calls without asking for confirmation.
+                Use this only if you understand the risks.
+              </div>
+            </div>
+          </label>
+        </div>
+
         {saving && (
           <div className="text-xs text-muted-foreground flex items-center gap-1.5">
             <Loader2 className="h-3 w-3 animate-spin" />

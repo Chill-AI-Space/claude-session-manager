@@ -63,6 +63,7 @@ function initTables(db: Database.Database) {
 
 const SETTING_DEFAULTS: Record<string, string> = {
   auto_kill_terminal_on_reply: "false",
+  dangerously_skip_permissions: "false",
 };
 
 export function getSetting(key: string): string {

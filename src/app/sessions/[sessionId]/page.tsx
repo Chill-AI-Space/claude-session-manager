@@ -4,10 +4,11 @@ import { useEffect, useState, useCallback, useRef, use } from "react";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Zap, Terminal, X } from "lucide-react";
+import { Loader2, GitBranch, Hash, Zap, Terminal, X, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
+import Link from "next/link";
 
 interface SessionDetailData {
   session_id: string;
@@ -42,6 +43,9 @@ export default function SessionDetailPage({
   // Track if user has replied at least once
   const [hasReplied, setHasReplied] = useState(false);
 
+  // Settings for status bar
+  const [settings, setSettingsData] = useState<Record<string, string> | null>(null);
+
   const fetchSession = useCallback(async () => {
     try {
       const res = await fetch(`/api/sessions/${sessionId}`);
@@ -70,6 +74,8 @@ export default function SessionDetailPage({
     queueRef.current = [];
     processingRef.current = false;
     fetchSession();
+    // Fetch settings for status bar
+    fetch("/api/settings").then(r => r.json()).then(setSettingsData).catch(() => {});
   }, [sessionId, fetchSession]);
 
   // Process next message in queue
@@ -327,6 +333,36 @@ export default function SessionDetailPage({
         onSend={handleSend}
         queueSize={queueSize}
       />
+
+      {/* Active settings status bar */}
+      {settings && (() => {
+        const SETTING_LABELS: Record<string, string> = {
+          dangerously_skip_permissions: "Skip Permissions",
+          auto_kill_terminal_on_reply: "Auto-Kill Terminal",
+        };
+        const enabled = Object.entries(settings)
+          .filter(([, v]) => v === "true")
+          .map(([k]) => SETTING_LABELS[k] || k);
+
+        if (enabled.length === 0) return null;
+
+        return (
+          <div className="px-6 pb-4 pt-0 shrink-0 max-w-[900px]">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground/60">
+              <span>
+                {enabled.join(", ")}
+              </span>
+              <Link
+                href="/sessions/settings"
+                className="flex items-center gap-1 hover:text-muted-foreground transition-colors"
+                title="Settings"
+              >
+                <Settings className="h-3 w-3" />
+              </Link>
+            </div>
+          </div>
+        );
+      })()}
     </>
   );
 }

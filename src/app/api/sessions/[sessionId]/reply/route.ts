@@ -50,17 +50,23 @@ export async function POST(
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
+      const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
+      const args = [
+        "--resume",
+        sessionId,
+        "-p",
+        message,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+      ];
+      if (skipPermissions) {
+        args.push("--dangerously-skip-permissions");
+      }
+
       const proc = spawn(
         "claude",
-        [
-          "--resume",
-          sessionId,
-          "-p",
-          message,
-          "--output-format",
-          "stream-json",
-          "--verbose",
-        ],
+        args,
         {
           cwd: session.project_path,
           env,

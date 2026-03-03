@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDb, getSetting } from "@/lib/db";
 import { SessionRow } from "@/lib/types";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -24,7 +24,9 @@ export async function POST(
   }
 
   const cwd = session.project_path;
-  const shellCmd = `cd "${cwd}" && claude --resume "${sessionId}"`;
+  const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
+  const skipFlag = skipPermissions ? " --dangerously-skip-permissions" : "";
+  const shellCmd = `cd "${cwd}" && claude --resume "${sessionId}"${skipFlag}`;
 
   // Check if iTerm2 is running
   let useIterm = false;

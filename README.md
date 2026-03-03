@@ -10,7 +10,7 @@ A localhost web UI for browsing, searching, and managing Claude Code sessions. T
 - **Open in Terminal** — one click to resume any session in Terminal.app/iTerm2
 - **Live status** — green dot on sessions that are currently running in a terminal
 - **Search & filter** — by project, text query, sort by modified/created/tokens
-- **Settings** — auto-kill terminal sessions when replying from web (prevents conversation divergence)
+- **Settings** — auto-kill terminal, dangerously skip permissions, with live status bar showing active flags
 
 ## Architecture
 
@@ -77,6 +77,17 @@ src/
     ├── SessionList.tsx             # Sidebar session list
     └── StatusBadge.tsx             # Active/inactive indicator
 ```
+
+## Settings
+
+Available at **Settings** (gear icon in sidebar):
+
+| Setting | What it does |
+|---------|-------------|
+| **Auto-kill terminal on reply** | Kills running terminal session before sending a web reply, preventing conversation divergence |
+| **Dangerously skip permissions** | Passes `--dangerously-skip-permissions` to Claude CLI — skips all tool confirmation prompts |
+
+Active settings are shown as a subtle status line below the reply input, with a gear icon linking to settings.
 
 ## Requirements
 
