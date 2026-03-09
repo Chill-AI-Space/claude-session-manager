@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getDb, getSetting } from "@/lib/db";
+import { getDb, getSetting, logAction } from "@/lib/db";
 import { SessionRow } from "@/lib/types";
 import { openInTerminal } from "@/lib/terminal-launcher";
 
@@ -27,6 +27,7 @@ export async function POST(
 
   try {
     const { terminal } = await openInTerminal(shellCmd);
+    logAction("service", "open_in_terminal", terminal, sessionId);
     return Response.json({ ok: true, terminal });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";

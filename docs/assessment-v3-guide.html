@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skillset Assessment v3 — Complete Methodology</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d28;
+    --surface2: #232736;
+    --border: #2d3148;
+    --text: #e1e4ed;
+    --text-dim: #8b90a5;
+    --accent: #6c8cff;
+    --green: #4ade80;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --orange: #fb923c;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 0;
+  }
+  .hero {
+    background: linear-gradient(135deg, #1e2a5e 0%, #0f1117 60%, #1a1030 100%);
+    padding: 60px 40px 50px;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+    background: linear-gradient(90deg, #6c8cff, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero .subtitle {
+    color: var(--text-dim);
+    font-size: 1.05rem;
+    max-width: 700px;
+  }
+  .hero .meta {
+    margin-top: 20px;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .hero .meta span {
+    background: var(--surface2);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+  .hero .meta span b { color: var(--text); }
+  .container { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 40px;
+  }
+  .toc h3 { color: var(--accent); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 14px; }
+  .toc ol { padding-left: 20px; }
+  .toc li { margin-bottom: 6px; }
+  .toc a { color: var(--text-dim); text-decoration: none; font-size: 0.95rem; }
+  .toc a:hover { color: var(--accent); }
+
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--border);
+    color: var(--accent);
+  }
+  h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 24px 0 12px;
+    color: var(--text);
+  }
+  h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 16px 0 8px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  p { margin-bottom: 14px; color: var(--text); }
+  .dim { color: var(--text-dim); }
+
+  blockquote {
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    margin: 16px 0;
+    background: var(--surface);
+    border-radius: 0 8px 8px 0;
+    font-style: italic;
+    color: var(--text-dim);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 24px;
+    font-size: 0.9rem;
+  }
+  th {
+    background: var(--surface2);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    border-bottom: 2px solid var(--border);
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:hover td { background: var(--surface); }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .badge-match { background: rgba(74,222,128,0.15); color: var(--green); }
+  .badge-partial { background: rgba(251,191,36,0.15); color: var(--yellow); }
+  .badge-no { background: rgba(248,113,113,0.15); color: var(--red); }
+  .badge-mh { background: rgba(248,113,113,0.1); color: var(--red); border: 1px solid rgba(248,113,113,0.2); }
+  .badge-nth { background: rgba(108,140,255,0.1); color: var(--accent); border: 1px solid rgba(108,140,255,0.2); }
+
+  code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    color: var(--orange);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    overflow-x: auto;
+    margin: 16px 0 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: var(--text-dim);
+  }
+  pre code { background: none; padding: 0; color: inherit; }
+
+  .formula-box {
+    background: linear-gradient(135deg, var(--surface), var(--surface2));
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    padding: 24px;
+    margin: 20px 0;
+    text-align: center;
+  }
+  .formula-box .formula {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem;
+    color: var(--accent);
+    margin: 8px 0;
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .card h4 { margin-top: 0; }
+  .card .value {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 8px 0;
+  }
+  .card .value.green { color: var(--green); }
+  .card .value.yellow { color: var(--yellow); }
+  .card .value.red { color: var(--red); }
+  .card .label { color: var(--text-dim); font-size: 0.85rem; }
+
+  .threshold-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin: 20px 0;
+  }
+  .threshold-card {
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+  }
+  .threshold-card.match { background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.2); }
+  .threshold-card.partial { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2); }
+  .threshold-card.no-match { background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.2); }
+  .threshold-card h4 { margin: 0 0 12px; }
+  .threshold-card .conditions { text-align: left; font-size: 0.85rem; color: var(--text-dim); }
+  .threshold-card .conditions li { margin-bottom: 6px; }
+
+  ul, ol { padding-left: 24px; margin-bottom: 16px; }
+  li { margin-bottom: 6px; color: var(--text); }
+
+  .stat-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .stat-row .job-name { flex: 1; font-weight: 500; }
+  .stat-row .pct {
+    font-size: 1.4rem;
+    font-weight: 700;
+    min-width: 70px;
+    text-align: right;
+  }
+  .stat-bar {
+    flex: 2;
+    height: 8px;
+    background: var(--surface2);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .stat-bar-fill { height: 100%; border-radius: 4px; }
+
+  .note {
+    background: rgba(108,140,255,0.08);
+    border: 1px solid rgba(108,140,255,0.2);
+    border-radius: 8px;
+    padding: 16px;
+    margin: 16px 0;
+    font-size: 0.9rem;
+  }
+  .note strong { color: var(--accent); }
+
+  @media (max-width: 700px) {
+    .hero { padding: 30px 20px; }
+    .hero h1 { font-size: 1.6rem; }
+    .threshold-grid { grid-template-columns: 1fr; }
+    .hero .meta { gap: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Assessment v3 Methodology</h1>
+  <p class="subtitle">Complete scoring logic, prompts, and decision thresholds used for candidate evaluation against job strategies on the Skillset platform.</p>
+  <div class="meta">
+    <span><b>Version</b> 3.0</span>
+    <span><b>Date</b> March 2026</span>
+    <span><b>Jobs Evaluated</b> 3</span>
+    <span><b>Candidates</b> 46</span>
+    <span><b>Agreement Rate</b> 43.5%</span>
+  </div>
+</div>
+
+<div class="container">
+
+<nav class="toc">
+  <h3>Contents</h3>
+  <ol>
+    <li><a href="#groups">6 Assessment Groups</a></li>
+    <li><a href="#scoring">Scoring Formula</a></li>
+    <li><a href="#thresholds">Decision Thresholds</a></li>
+    <li><a href="#cap">Responsibilities Cap</a></li>
+    <li><a href="#implementation">Implementation Code</a></li>
+    <li><a href="#pipeline">Data Pipeline & API</a></li>
+    <li><a href="#results">Results & Agreement Analysis</a></li>
+  </ol>
+</nav>
+
+<!-- SECTION 1: Assessment Groups -->
+<section id="groups">
+<h2>1. Six Assessment Groups</h2>
+<p>v3 uses 6 parallel LLM prompts to evaluate candidates, replacing the sequential 15-prompt v1 system.</p>
+
+<h3>1.1 Core Experience</h3>
+<p>Evaluates <code>previous_role</code> and <code>responsibilities</code> using a 6-level "Levels of Work" framework:</p>
+<table>
+  <tr><th>Level</th><th>Description</th><th>Time Window</th></tr>
+  <tr><td>Hands On</td><td>Execution-focused</td><td>5 years</td></tr>
+  <tr><td>Diagnosis</td><td>Problem-solving</td><td>5 years</td></tr>
+  <tr><td>Systems</td><td>Process design</td><td>5 years</td></tr>
+  <tr><td>Integration</td><td>Cross-functional</td><td>7 years</td></tr>
+  <tr><td>Business</td><td>Strategic outcomes</td><td>10 years</td></tr>
+  <tr><td>Global</td><td>Ecosystem-wide</td><td>15 years</td></tr>
+</table>
+<p class="dim"><b>Overqualification gate:</b> If delta between candidate LoW and job LoW >= +2, result = <code>false</code></p>
+
+<h3>1.2 Skills & Knowledge</h3>
+<blockquote>Requires POSITIVE evidence of something related. There must be a specific skill, project, or responsibility you can point to. Without such evidence, return <code>false</code>, not <code>partially</code>.</blockquote>
+
+<h3>1.3 Experience Quantitative</h3>
+<ul>
+  <li><b>Total years:</b> Tolerant ranges (min &times; 0.9 to max &times; 1.3); flags over-experience (&times;2, &times;3)</li>
+  <li><b>Context experience:</b> Direct or strong indirect evidence</li>
+  <li><b>Industry fit:</b> Narrow matching; consulting/vendor = implied evidence</li>
+</ul>
+
+<h3>1.4 People Management</h3>
+<p>Direct management only (not dotted-line). Team size: <code>partially</code> up to 2&times; smaller than required. Composition: explicit or inferred.</p>
+
+<h3>1.5 Education & Credentials</h3>
+<div class="note">
+  <strong>Critical v3 change:</strong> Missing education data = <code>partially</code>, not <code>false</code>. "No data &ne; absence of education."
+</div>
+<p>Degree equivalencies: Master &harr; Specialist, PhD &harr; Candidate of Sciences, LLM &harr; Master</p>
+
+<h3>1.6 Logistics & Preferences</h3>
+<p><b>Languages</b> — 5 implied evidence sources: CV language, work location, education, cultural markers, international company context.</p>
+<p>Proficiency: 1 step below = <code>partially</code>; 2+ steps below = <code>false</code>.</p>
+<p><b>Timezone</b> — within range = <code>true</code>; 1-2h outside = <code>partially</code>; 3+h = <code>false</code>.</p>
+</section>
+
+<!-- SECTION 2: Scoring -->
+<section id="scoring">
+<h2>2. Scoring Formula</h2>
+
+<h3>Fit Values</h3>
+<table>
+  <tr><th>final_fit</th><th>Value</th><th>Meaning</th></tr>
+  <tr><td><span class="badge badge-match">true</span></td><td>1.0</td><td>Criterion fully met</td></tr>
+  <tr><td><span class="badge badge-partial">partially</span></td><td>0.5</td><td>Partial evidence or 1 step below</td></tr>
+  <tr><td><span class="badge badge-no">false</span></td><td>0.0</td><td>No evidence or major gap</td></tr>
+</table>
+
+<h3>Weights</h3>
+<table>
+  <tr><th>Type</th><th>Base</th><th>&times; Critical</th><th>&times; Important</th></tr>
+  <tr><td><span class="badge badge-mh">must_have</span></td><td>1.5</td><td>3.0</td><td>2.0</td></tr>
+  <tr><td><span class="badge badge-nth">nice_to_have</span></td><td>0.5</td><td>0.5</td><td>0.33</td></tr>
+  <tr><td>responsibilities</td><td>1.5 (min)</td><td>&mdash;</td><td>&mdash;</td></tr>
+</table>
+
+<div class="formula-box">
+  <div class="dim" style="font-size:0.85rem">Score Calculation</div>
+  <div class="formula">score = (&Sigma; fit<sub>i</sub> &times; weight<sub>i</sub>) / (&Sigma; weight<sub>i</sub>) &times; 100</div>
+  <div class="dim" style="font-size:0.8rem;margin-top:8px">where the sum runs over all criteria including responsibilities</div>
+</div>
+
+<h3>Must-Have Ratio</h3>
+<div class="formula-box">
+  <div class="formula">MH ratio = count(must_have where fit=true) / count(all must_have)</div>
+</div>
+</section>
+
+<!-- SECTION 3: Thresholds -->
+<section id="thresholds">
+<h2>3. Decision Thresholds</h2>
+
+<div class="threshold-grid">
+  <div class="threshold-card match">
+    <h4 style="color:var(--green)">MATCH</h4>
+    <ul class="conditions">
+      <li>score &ge; 65 AND zero false must-haves</li>
+      <li><em>OR</em> score &ge; 75 AND &le;1 false MH AND MH ratio &ge; 0.7</li>
+    </ul>
+  </div>
+  <div class="threshold-card partial">
+    <h4 style="color:var(--yellow)">PARTIAL_MATCH</h4>
+    <ul class="conditions">
+      <li>score &ge; 45 AND &le;2 false must-haves</li>
+      <li><em>OR</em> score &ge; 35 AND zero false must-haves</li>
+    </ul>
+  </div>
+  <div class="threshold-card no-match">
+    <h4 style="color:var(--red)">NO_MATCH</h4>
+    <ul class="conditions">
+      <li>All other cases</li>
+      <li>Also forced if base_score &lt; 35 (responsibilities cap)</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<!-- SECTION 4: Responsibilities Cap -->
+<section id="cap">
+<h2>4. Responsibilities Cap (v3 Innovation)</h2>
+<p>Prevents generic responsibility descriptions from masking fundamental mismatches:</p>
+<ol>
+  <li>Calculate <code>base_score</code> (score without <code>responsibilities</code> segment)</li>
+  <li>If <code>base_score &lt; 35</code> &rarr; decision capped at NO_MATCH</li>
+  <li>If any critical must-have = <code>false</code> &rarr; responsibilities cannot elevate to MATCH</li>
+</ol>
+</section>
+
+<!-- SECTION 5: Implementation -->
+<section id="implementation">
+<h2>5. Implementation (Python)</h2>
+<pre><code>def calc_v3_score(assessment):
+    fit_values = {'true': 1.0, 'partially': 0.5, 'false': 0.0}
+    weights = {'must_have': 1.5, 'nice_to_have': 0.5}
+
+    resp_items = [a for a in assessment if a['segment'] == 'responsibilities']
+    other_items = [a for a in assessment if a['segment'] != 'responsibilities']
+
+    base_weighted, base_max = 0, 0
+    false_must_haves, must_have_true, must_have_total = 0, 0, 0
+
+    for item in other_items:
+        w = weights.get(item['requirement'], 1.0)
+        val = fit_values.get(item['fit'], 0.0)
+        base_weighted += val * w
+        base_max += w
+        if item['requirement'] == 'must_have':
+            must_have_total += 1
+            if item['fit'] == 'true': must_have_true += 1
+            elif item['fit'] == 'false': false_must_haves += 1
+
+    resp_weighted = sum(fit_values.get(r['fit'], 0) * 1.5 for r in resp_items)
+    resp_max = len(resp_items) * 1.5
+
+    score = ((base_weighted + resp_weighted) / (base_max + resp_max) * 100)
+    base_score = (base_weighted / base_max * 100) if base_max else 0
+    mh_ratio = must_have_true / must_have_total if must_have_total else 0
+
+    # Decision
+    verdict = 'NO_MATCH'
+    if (score >= 65 and false_must_haves == 0) or \
+       (score >= 75 and false_must_haves <= 1 and mh_ratio >= 0.7):
+        verdict = 'MATCH'
+    elif (score >= 45 and false_must_haves <= 2) or \
+         (score >= 35 and false_must_haves == 0):
+        verdict = 'PARTIAL_MATCH'
+
+    # Responsibilities cap
+    if base_score < 35:
+        verdict = 'NO_MATCH'
+
+    return {'score': round(score,1), 'base_score': round(base_score,1),
+            'verdict': verdict, 'false_must_haves': false_must_haves,
+            'must_have_ratio': round(mh_ratio, 2)}</code></pre>
+</section>
+
+<!-- SECTION 6: Pipeline -->
+<section id="pipeline">
+<h2>6. Data Pipeline & API</h2>
+
+<h3>Endpoints</h3>
+<table>
+  <tr><th>Endpoint</th><th>Method</th><th>Purpose</th><th>Body</th></tr>
+  <tr><td><code>/api/app/jobs/detail</code></td><td>POST</td><td>Job title & company</td><td><code>{jobId}</code></td></tr>
+  <tr><td><code>/api/app/jobs/candidates/list</code></td><td>POST</td><td>Candidate list</td><td><code>{filter: {jobId, stage: "pool"}, nav: {offset, limit}}</code></td></tr>
+  <tr><td><code>/api/app/jobs/candidates/detail</code></td><td>POST</td><td>CV + assessment</td><td><code>{jobCandidateId}</code></td></tr>
+</table>
+<p class="dim">Auth: <code>x-access-token</code> header with session token. Base URL: <code>core.skillset.ae</code></p>
+
+<h3>Assessment Data Structure</h3>
+<pre><code>{
+  "segment": "skill",           // criterion type
+  "key": ["Strategy Dev"],      // what's being evaluated
+  "requirement": "must_have",   // or "nice_to_have"
+  "final_fit": "true",          // or "partially" or "false"
+  "reasoning": "Evidence..."    // LLM explanation
+}</code></pre>
+
+<p><b>Segments:</b> location, previous_role, education_degree, field_of_study, industry, skill, language, total_experience, context_experience, people_management_composition, responsibilities, work_format, employment_type, certification, companies, region</p>
+</section>
+
+<!-- SECTION 7: Results -->
+<section id="results">
+<h2>7. Results & Agreement Analysis</h2>
+
+<h3>Jobs Evaluated</h3>
+<table>
+  <tr><th>Job ID</th><th>Title</th><th>Company</th><th>Pool Size</th></tr>
+  <tr><td>103834</td><td>Manager-Talent Acquisition</td><td>Damac</td><td>25</td></tr>
+  <tr><td>92603</td><td>Product Manager</td><td>Astra Tech</td><td>11</td></tr>
+  <tr><td>91473</td><td>Client Accountant</td><td>Bazaar Accounting</td><td>10</td></tr>
+</table>
+
+<h3>v3 vs Platform Agreement</h3>
+
+<div class="stat-row">
+  <span class="job-name">TA Manager @ Damac</span>
+  <div class="stat-bar"><div class="stat-bar-fill" style="width:44%;background:var(--yellow)"></div></div>
+  <span class="pct" style="color:var(--yellow)">44%</span>
+</div>
+<div class="stat-row">
+  <span class="job-name">Product Manager @ Astra Tech</span>
+  <div class="stat-bar"><div class="stat-bar-fill" style="width:27.3%;background:var(--red)"></div></div>
+  <span class="pct" style="color:var(--red)">27%</span>
+</div>
+<div class="stat-row">
+  <span class="job-name">Client Accountant @ Bazaar</span>
+  <div class="stat-bar"><div class="stat-bar-fill" style="width:60%;background:var(--green)"></div></div>
+  <span class="pct" style="color:var(--green)">60%</span>
+</div>
+<div class="stat-row" style="border-top:2px solid var(--border);padding-top:16px;margin-top:8px">
+  <span class="job-name" style="font-weight:700">Overall (46 candidates)</span>
+  <div class="stat-bar"><div class="stat-bar-fill" style="width:43.5%;background:var(--orange)"></div></div>
+  <span class="pct" style="color:var(--orange)">43.5%</span>
+</div>
+
+<h3>Distribution Comparison</h3>
+<table>
+  <tr><th>Job</th><th colspan="3">v3 Verdicts</th><th colspan="3">Platform Verdicts</th><th>Upgrades</th><th>Downgrades</th></tr>
+  <tr><th></th><th style="color:var(--green)">Match</th><th style="color:var(--yellow)">Partial</th><th style="color:var(--red)">No</th><th style="color:var(--green)">Match</th><th style="color:var(--yellow)">Partial</th><th style="color:var(--red)">No</th><th></th><th></th></tr>
+  <tr><td>TA Manager</td><td>17</td><td>6</td><td>2</td><td>7</td><td>12</td><td>6</td><td>14</td><td>0</td></tr>
+  <tr><td>Product Manager</td><td>9</td><td>2</td><td>0</td><td>3</td><td>6</td><td>2</td><td>8</td><td>0</td></tr>
+  <tr><td>Client Accountant</td><td>5</td><td>3</td><td>2</td><td>1</td><td>7</td><td>2</td><td>4</td><td>0</td></tr>
+  <tr style="font-weight:700;border-top:2px solid var(--border)"><td>Total</td><td>31</td><td>11</td><td>4</td><td>11</td><td>25</td><td>10</td><td>26</td><td>0</td></tr>
+</table>
+
+<h3>Key Finding</h3>
+<div class="card-grid">
+  <div class="card">
+    <h4>v3 Bias</h4>
+    <div class="value yellow">+26 upgrades</div>
+    <div class="label">v3 consistently rates candidates higher than platform. Zero downgrades across all 46 candidates.</div>
+  </div>
+  <div class="card">
+    <h4>Root Cause</h4>
+    <div class="value" style="font-size:1.2rem;color:var(--accent)">Threshold gap</div>
+    <div class="label">v3 threshold (score &ge; 65 + 0 false MH = MATCH) is more lenient than platform's hidden logic which appears to require stricter matching for must-have criteria.</div>
+  </div>
+  <div class="card">
+    <h4>Best Accuracy</h4>
+    <div class="value green">60%</div>
+    <div class="label">Client Accountant role (simpler criteria, fewer ambiguous nice-to-haves) shows highest agreement.</div>
+  </div>
+</div>
+
+<div class="note">
+  <strong>v3 Insight:</strong> v3 is significantly more lenient than the platform. 26 upgrades, 0 downgrades. The threshold gap (score &ge; 65 + 0 false MH = MATCH) is more generous than the platform's hidden logic.
+</div>
+</section>
+
+<!-- SECTION 8: v3.1 -->
+<section id="v31">
+<h2>8. v3.1 &mdash; Responsibilities as Critical Must-Have</h2>
+<p>Based on recruiter feedback: responsibilities should be treated as a critical must-have, not a regular criterion.</p>
+
+<table>
+  <tr><th>Parameter</th><th>v3</th><th>v3.1</th></tr>
+  <tr><td>Responsibilities weight</td><td>1.5</td><td><strong>3.0</strong></td></tr>
+  <tr><td>Resp false = false MH?</td><td>No</td><td><strong>Yes</strong></td></tr>
+  <tr><td>Resp in MH ratio?</td><td>No</td><td><strong>Yes</strong></td></tr>
+</table>
+
+<p>v3.1 creates differentiation within verdict groups: candidates with <code>resp=true</code> score significantly higher than those with <code>resp=partially/false</code>.</p>
+</section>
+
+<!-- SECTION 9: v4 Calibration -->
+<section id="v4">
+<h2>9. v4 &mdash; Calibrated Against Expert Evaluations</h2>
+
+<p>Senior recruiter (Olya) manually evaluated 37 of 46 candidates. We tested 15 scoring variants to maximize agreement with her expert verdicts.</p>
+
+<h3>Calibration Results</h3>
+<div class="stat-row">
+  <span class="job-name">v3.1 (baseline)</span>
+  <div class="stat-bar"><div class="stat-bar-fill" style="width:75.7%;background:var(--yellow)"></div></div>
+  <span class="pct" style="color:var(--yellow)">75.7%</span>
+</div>
+<div class="stat-row" style="border-top:2px solid var(--border);padding-top:16px;margin-top:8px">
+  <span class="job-name" style="font-weight:700">v4 (calibrated)</span>
+  <div class="stat-bar"><div class="stat-bar-fill" style="width:86.5%;background:var(--green)"></div></div>
+  <span class="pct" style="color:var(--green)">86.5%</span>
+</div>
+
+<div class="card-grid">
+  <div class="card">
+    <h4>Improvement</h4>
+    <div class="value green">+4 fixed</div>
+    <div class="label">4 disagreements resolved, 0 existing agreements broken. Clean net positive.</div>
+  </div>
+  <div class="card">
+    <h4>Remaining</h4>
+    <div class="value yellow">5 disagree</div>
+    <div class="label">3 of 5 are AI assessment quality issues (not fixable by formula), 2 are threshold conflicts.</div>
+  </div>
+  <div class="card">
+    <h4>Direction</h4>
+    <div class="value" style="font-size:1.2rem;color:var(--accent)">All downgrades</div>
+    <div class="label">Every disagreement was v3.1 being too lenient. v4 rules only tighten, never loosen.</div>
+  </div>
+</div>
+
+<h3>v4 Rules</h3>
+<table>
+  <tr><th>Rule</th><th>Logic</th><th>Rationale</th></tr>
+  <tr>
+    <td><strong>Role Cap</strong></td>
+    <td>If <code>previous_role</code> (must_have) = <code>partially</code> &rarr; MATCH blocked, max = PARTIAL_MATCH</td>
+    <td>When the candidate's actual role doesn't fully match the requirement, even high scores on other criteria shouldn't override this. Expert consistently rates these as PARTIAL.</td>
+  </tr>
+  <tr>
+    <td><strong>Score Floor</strong></td>
+    <td>If total score &lt; 70% &rarr; MATCH blocked, max = PARTIAL_MATCH</td>
+    <td>65-69% is borderline territory. Expert treats these as PARTIAL, not MATCH.</td>
+  </tr>
+</table>
+
+<h3>Fixed by v4</h3>
+<table>
+  <tr><th>Candidate</th><th>Job</th><th>v3.1</th><th>v4</th><th>Expert</th><th>Rule</th></tr>
+  <tr style="background:rgba(74,222,128,0.08)"><td>Oumaima Hajjouji</td><td>Damac</td><td style="color:var(--green)">MATCH</td><td style="color:var(--yellow)">PARTIAL</td><td style="color:var(--yellow)">PARTIAL</td><td>Role Cap</td></tr>
+  <tr style="background:rgba(74,222,128,0.08)"><td>Ahmed Eldesouky</td><td>Damac</td><td style="color:var(--green)">MATCH</td><td style="color:var(--yellow)">PARTIAL</td><td style="color:var(--yellow)">PARTIAL</td><td>Role Cap</td></tr>
+  <tr style="background:rgba(74,222,128,0.08)"><td>Syed Huzaifa Shahid</td><td>Astra Tech</td><td style="color:var(--green)">MATCH</td><td style="color:var(--yellow)">PARTIAL</td><td style="color:var(--yellow)">PARTIAL</td><td>Score Floor (69.7%)</td></tr>
+  <tr style="background:rgba(74,222,128,0.08)"><td>Anil Paul</td><td>Bazaar</td><td style="color:var(--green)">MATCH</td><td style="color:var(--yellow)">PARTIAL</td><td style="color:var(--yellow)">PARTIAL</td><td>Role Cap</td></tr>
+</table>
+
+<h3>Remaining Disagreements</h3>
+<table>
+  <tr><th>Candidate</th><th>v4</th><th>Expert</th><th>Root Cause</th></tr>
+  <tr style="background:rgba(248,113,113,0.08)"><td>Natia Darsavelidze</td><td style="color:var(--green)">MATCH 79.7%</td><td style="color:var(--red)">NO_MATCH</td><td>AI marked role=true, but expert says "tasks were administrative, not leadership"</td></tr>
+  <tr style="background:rgba(248,113,113,0.08)"><td>Ali Mirza</td><td style="color:var(--yellow)">PARTIAL 75%</td><td style="color:var(--red)">NO_MATCH</td><td>"Hasn't done recruitment in 5-6 years" &mdash; recency not captured in criteria</td></tr>
+  <tr style="background:rgba(248,113,113,0.08)"><td>Nikos Kritselis</td><td style="color:var(--green)">MATCH 76.3%</td><td style="color:var(--red)">NO_MATCH</td><td>"Overqualified, Head of Credit Cards" &mdash; overqualification concept missing from criteria</td></tr>
+  <tr style="background:rgba(248,113,113,0.08)"><td>Gowrishankar T S</td><td style="color:var(--green)">MATCH 73.7%</td><td style="color:var(--yellow)">PARTIAL</td><td>resp=partially at 72.2%, but tightening conflicts with Ethisam (same pattern, expert=MATCH)</td></tr>
+  <tr style="background:rgba(248,113,113,0.08)"><td>Rayan T.</td><td style="color:var(--yellow)">PARTIAL 61.8%</td><td style="color:var(--red)">NO_MATCH</td><td>2 false MH; tightening PARTIAL threshold would break other agreements</td></tr>
+</table>
+
+<h3>Key Insight</h3>
+<div class="note">
+  <strong>Formula vs. Assessment Quality:</strong> 3 of 5 remaining disagreements are <em>AI assessment quality issues</em> &mdash; the LLM that generates per-criterion fit values is too generous (marks criteria as "true" when the expert would say "partially" or "false"). Fixing these requires better <strong>assessment prompts</strong> (recency awareness, overqualification detection, deeper role analysis), not scoring formula changes.
+</div>
+
+<h3>Variants Tested</h3>
+<p class="dim">15 scoring approaches were evaluated. Key findings:</p>
+<table>
+  <tr><th>Approach</th><th>Result</th></tr>
+  <tr><td>Weight adjustments (MH partially=0.3, role weight=3.0)</td><td>No effect on verdicts &mdash; scores shift but don't cross thresholds</td></tr>
+  <tr><td>Higher thresholds (MATCH &ge; 75/80%)</td><td>Fix 3 but break 5 &mdash; net negative</td></tr>
+  <tr><td>MH partially as 0.5 false MH</td><td>Fix 4 but break 7 &mdash; net negative</td></tr>
+  <tr><td>Stricter PARTIAL (max 1 false MH)</td><td>Fix 3 but break 9 &mdash; destructive</td></tr>
+  <tr style="background:rgba(74,222,128,0.08)"><td><strong>Rule-based caps (v4)</strong></td><td><strong>Fix 4, break 0 &mdash; only net positive variant</strong></td></tr>
+</table>
+</section>
+
+</div>
+
+<div style="text-align:center;padding:40px;color:var(--text-dim);font-size:0.8rem;border-top:1px solid var(--border)">
+  Skillset Assessment v3&rarr;v4 Methodology &mdash; Generated March 2026
+</div>
+
+</body>
+</html>

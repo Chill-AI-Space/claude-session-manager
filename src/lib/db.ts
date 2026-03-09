@@ -66,6 +66,62 @@ function initTables(db: Database.Database) {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS actions_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      action TEXT NOT NULL,
+      details TEXT,
+      session_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_actions_log_created ON actions_log(created_at DESC);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS share_links (
+      slug TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      password TEXT NOT NULL,
+      url TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_share_links_session ON share_links(session_id);
+  `);
+
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
+      session_id UNINDEXED,
+      content,
+      tokenize='unicode61 remove_diacritics 1'
+    );
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS context_source_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS context_sources (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      label TEXT,
+      config TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (group_id) REFERENCES context_source_groups(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS context_group_projects (
+      group_id TEXT NOT NULL,
+      pattern TEXT NOT NULL,
+      PRIMARY KEY (group_id, pattern),
+      FOREIGN KEY (group_id) REFERENCES context_source_groups(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_context_sources_group ON context_sources(group_id);
+  `);
+
   // Migrations: add columns that may not exist in older DBs
   const cols = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
   const colNames = new Set(cols.map((c) => c.name));
@@ -78,12 +134,200 @@ function initTables(db: Database.Database) {
   if (!colNames.has("embedding")) {
     db.exec("ALTER TABLE sessions ADD COLUMN embedding BLOB");
   }
+  if (!colNames.has("last_message_role")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN last_message_role TEXT");
+  }
+  if (!colNames.has("titled_at_count")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN titled_at_count INTEGER DEFAULT 0");
+  }
+  // actions_log migrations
+  const actionCols = db.prepare("PRAGMA table_info(actions_log)").all() as { name: string }[];
+  const actionColNames = new Set(actionCols.map((c) => c.name));
+  if (!actionColNames.has("payload")) {
+    db.exec("ALTER TABLE actions_log ADD COLUMN payload TEXT");
+  }
+}
+
+export interface ActionLogEntry {
+  id: number;
+  type: "service" | "settings";
+  action: string;
+  details: string | null;
+  session_id: string | null;
+  payload: string | null;
+  created_at: string;
+}
+
+export function logAction(
+  type: "service" | "settings",
+  action: string,
+  details?: string,
+  sessionId?: string,
+  payload?: string
+): void {
+  try {
+    getDb()
+      .prepare(
+        "INSERT INTO actions_log (type, action, details, session_id, payload) VALUES (?, ?, ?, ?, ?)"
+      )
+      .run(type, action, details ?? null, sessionId ?? null, payload ?? null);
+  } catch {
+    // Non-critical — don't break the main flow
+  }
+}
+
+export function indexSessionContent(sessionId: string, text: string): void {
+  try {
+    const db = getDb();
+    db.prepare("DELETE FROM sessions_fts WHERE session_id = ?").run(sessionId);
+    if (text.trim()) {
+      db.prepare("INSERT INTO sessions_fts(session_id, content) VALUES (?, ?)").run(sessionId, text);
+    }
+  } catch { /* Non-critical */ }
+}
+
+export function searchSessionContent(query: string): string[] {
+  try {
+    const db = getDb();
+    // Escape FTS5 special chars and wrap in quotes for phrase-safe matching
+    const escaped = query.replace(/"/g, '""');
+    const rows = db
+      .prepare("SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH ? ORDER BY rank LIMIT 100")
+      .all(`"${escaped}"`) as { session_id: string }[];
+    return rows.map((r) => r.session_id);
+  } catch {
+    return [];
+  }
+}
+
+export interface ShareLink {
+  slug: string;
+  session_id: string;
+  password: string;
+  url: string;
+  created_at: string;
+}
+
+export function getShareLink(sessionId: string): ShareLink | null {
+  return (
+    getDb()
+      .prepare("SELECT * FROM share_links WHERE session_id = ? LIMIT 1")
+      .get(sessionId) as ShareLink | undefined
+  ) ?? null;
+}
+
+export function upsertShareLink(sessionId: string, slug: string, password: string, url: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO share_links (slug, session_id, password, url)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(slug) DO UPDATE SET url=excluded.url`
+    )
+    .run(slug, sessionId, password, url);
+}
+
+export function deleteShareLink(sessionId: string): void {
+  getDb().prepare("DELETE FROM share_links WHERE session_id = ?").run(sessionId);
+}
+
+export function getActionsLog(opts: {
+  limit?: number;
+  action?: string;
+  sessionId?: string;
+  type?: string;
+  since?: string;
+} = {}): ActionLogEntry[] {
+  const { limit = 500, action, sessionId, type, since } = opts;
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (action) {
+    // Support comma-separated actions: "crash_detected,auto_retry_failed"
+    const actions = action.split(",").map(a => a.trim()).filter(Boolean);
+    if (actions.length === 1) {
+      conditions.push("action = ?");
+      params.push(actions[0]);
+    } else if (actions.length > 1) {
+      conditions.push(`action IN (${actions.map(() => "?").join(",")})`);
+      params.push(...actions);
+    }
+  }
+  if (sessionId) {
+    conditions.push("session_id = ?");
+    params.push(sessionId);
+  }
+  if (type) {
+    conditions.push("type = ?");
+    params.push(type);
+  }
+  if (since) {
+    conditions.push("created_at >= ?");
+    params.push(since);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  params.push(limit);
+  return getDb()
+    .prepare(`SELECT * FROM actions_log ${where} ORDER BY created_at DESC LIMIT ?`)
+    .all(...params) as ActionLogEntry[];
+}
+
+export interface ActionStats {
+  total_24h: number;
+  crashes_24h: number;
+  retries_24h: number;
+  retries_failed_24h: number;
+  stalls_24h: number;
+  replies_24h: number;
+  last_crash: string | null;
+  last_action: string | null;
+}
+
+export function getActionStats(): ActionStats {
+  const db = getDb();
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
+
+  const counts = db.prepare(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN action = 'crash_detected' THEN 1 ELSE 0 END) as crashes,
+      SUM(CASE WHEN action IN ('auto_retry_fired','stall_continue_fired') THEN 1 ELSE 0 END) as retries,
+      SUM(CASE WHEN action IN ('auto_retry_failed','stall_continue_failed') THEN 1 ELSE 0 END) as retries_failed,
+      SUM(CASE WHEN action = 'stall_detected' THEN 1 ELSE 0 END) as stalls,
+      SUM(CASE WHEN action = 'reply' THEN 1 ELSE 0 END) as replies
+    FROM actions_log WHERE created_at >= ?
+  `).get(since) as Record<string, number>;
+
+  const lastCrash = db.prepare(
+    "SELECT created_at FROM actions_log WHERE action = 'crash_detected' ORDER BY created_at DESC LIMIT 1"
+  ).get() as { created_at: string } | undefined;
+
+  const lastAction = db.prepare(
+    "SELECT created_at FROM actions_log ORDER BY created_at DESC LIMIT 1"
+  ).get() as { created_at: string } | undefined;
+
+  return {
+    total_24h: counts.total ?? 0,
+    crashes_24h: counts.crashes ?? 0,
+    retries_24h: counts.retries ?? 0,
+    retries_failed_24h: counts.retries_failed ?? 0,
+    stalls_24h: counts.stalls ?? 0,
+    replies_24h: counts.replies ?? 0,
+    last_crash: lastCrash?.created_at ?? null,
+    last_action: lastAction?.created_at ?? null,
+  };
 }
 
 const SETTING_DEFAULTS: Record<string, string> = {
   auto_kill_terminal_on_reply: "false",
   dangerously_skip_permissions: "false",
   vector_search_top_k: "20",
+  teamhub_enabled: "true",
+  context_guard_enabled: "false",
+  context_guard_min_messages: "6",
+  context_guard_block_threshold: "90",
+  context_guard_warn_threshold: "80",
+  new_session_from_reply: "true",
 };
 
 function readSettingsFile(): Record<string, string> {
@@ -114,4 +358,91 @@ export function setSetting(key: string, value: string): void {
 export function getAllSettings(): Record<string, string> {
   const saved = readSettingsFile();
   return { ...SETTING_DEFAULTS, ...saved };
+}
+
+// ── Context Source Groups ──────────────────────────────────────────────────────
+
+export interface ContextSourceRow {
+  id: string;
+  group_id: string;
+  type: "github" | "url" | "local";
+  label: string | null;
+  config: string; // JSON
+}
+
+export interface ContextSourceGroupRow {
+  id: string;
+  name: string;
+  enabled: number;
+  created_at: string;
+}
+
+export interface ContextSourceGroupFull {
+  id: string;
+  name: string;
+  enabled: boolean;
+  sources: Array<{ id: string; type: string; label: string | null; config: Record<string, unknown> }>;
+  patterns: string[];
+}
+
+export function getContextSourceGroups(): ContextSourceGroupFull[] {
+  const db = getDb();
+  const groups = db.prepare("SELECT * FROM context_source_groups ORDER BY created_at ASC").all() as ContextSourceGroupRow[];
+  return groups.map((g) => {
+    const sources = db
+      .prepare("SELECT * FROM context_sources WHERE group_id = ? ORDER BY created_at ASC")
+      .all(g.id) as ContextSourceRow[];
+    const patterns = (
+      db.prepare("SELECT pattern FROM context_group_projects WHERE group_id = ?").all(g.id) as { pattern: string }[]
+    ).map((r) => r.pattern);
+    return {
+      id: g.id,
+      name: g.name,
+      enabled: g.enabled === 1,
+      sources: sources.map((s) => ({
+        id: s.id,
+        type: s.type,
+        label: s.label,
+        config: (() => { try { return JSON.parse(s.config); } catch { return {}; } })(),
+      })),
+      patterns,
+    };
+  });
+}
+
+export function upsertContextSourceGroup(
+  id: string,
+  name: string,
+  enabled: boolean,
+  sources: Array<{ id: string; type: string; label: string | null; config: Record<string, unknown> }>,
+  patterns: string[]
+): void {
+  const db = getDb();
+  const upsertGroup = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO context_source_groups (id, name, enabled) VALUES (?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name=excluded.name, enabled=excluded.enabled`
+    ).run(id, name, enabled ? 1 : 0);
+
+    // Replace sources
+    db.prepare("DELETE FROM context_sources WHERE group_id = ?").run(id);
+    for (const s of sources) {
+      db.prepare(
+        "INSERT INTO context_sources (id, group_id, type, label, config) VALUES (?, ?, ?, ?, ?)"
+      ).run(s.id, id, s.type, s.label ?? null, JSON.stringify(s.config));
+    }
+
+    // Replace patterns
+    db.prepare("DELETE FROM context_group_projects WHERE group_id = ?").run(id);
+    for (const p of patterns) {
+      if (p.trim()) {
+        db.prepare("INSERT OR IGNORE INTO context_group_projects (group_id, pattern) VALUES (?, ?)").run(id, p.trim());
+      }
+    }
+  });
+  upsertGroup();
+}
+
+export function deleteContextSourceGroup(id: string): void {
+  getDb().prepare("DELETE FROM context_source_groups WHERE id = ?").run(id);
 }

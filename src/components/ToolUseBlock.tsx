@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight, ChevronDown, Wrench } from "lucide-react";
+import { ChevronRight, ChevronDown, Wrench, Check, Copy, FolderOpen } from "lucide-react";
 
 interface ToolUseBlockProps {
   name: string;
@@ -56,12 +56,63 @@ function getToolSummary(
   }
 }
 
+const PATH_TOOLS = new Set(["Read", "Write", "Edit"]);
+
+function CopyablePath({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+
+  function handleReveal(e: React.MouseEvent) {
+    e.stopPropagation();
+    fetch("/api/open-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: text, action: "reveal" }),
+    });
+    setRevealed(true);
+    setTimeout(() => setRevealed(false), 1500);
+  }
+
+  function handleCopy(e: React.MouseEvent) {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <span className="text-muted-foreground truncate font-mono inline-flex items-center gap-1">
+      <span
+        className="truncate cursor-pointer hover:text-foreground hover:underline underline-offset-2 transition-colors"
+        title="Open in Finder"
+        onClick={handleReveal}
+      >
+        {text}
+      </span>
+      {revealed ? (
+        <FolderOpen className="h-2.5 w-2.5 shrink-0 text-green-500" />
+      ) : copied ? (
+        <Check className="h-2.5 w-2.5 shrink-0 text-green-500" />
+      ) : (
+        <button
+          onClick={handleCopy}
+          title="Copy path"
+          className="opacity-0 group-hover/tool:opacity-60 hover:!opacity-100 transition-opacity"
+        >
+          <Copy className="h-2.5 w-2.5 shrink-0" />
+        </button>
+      )}
+    </span>
+  );
+}
+
 export function ToolUseBlock({ name, input, result }: ToolUseBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const summary = getToolSummary(name, input);
+  const isCopyable = PATH_TOOLS.has(name) && summary;
 
   return (
-    <div className="border border-border rounded-md overflow-hidden text-xs">
+    <div className="group/tool border border-border rounded-md overflow-hidden text-xs">
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors text-left"
@@ -75,11 +126,13 @@ export function ToolUseBlock({ name, input, result }: ToolUseBlockProps) {
         <span className="font-medium text-blue-500">
           {getToolLabel(name)}
         </span>
-        {summary && (
+        {summary && (isCopyable ? (
+          <CopyablePath text={summary} />
+        ) : (
           <span className="text-muted-foreground truncate font-mono">
             {summary}
           </span>
-        )}
+        ))}
       </button>
 
       {expanded && (

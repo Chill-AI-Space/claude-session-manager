@@ -21,6 +21,7 @@ export interface SessionRow {
   pinned: number;
   archived: number;
   last_scanned_at: string;
+  last_message_role?: string | null;
 }
 
 export interface ProjectRow {
@@ -53,6 +54,7 @@ export interface SessionListItem {
   total_input_tokens: number;
   total_output_tokens: number;
   is_active?: boolean;
+  last_message_role?: string | null;
 }
 
 export interface ProjectListItem {
@@ -82,7 +84,7 @@ export type ContentBlock =
 
 export interface ParsedMessage {
   uuid: string;
-  type: "user" | "assistant";
+  type: "user" | "assistant" | "compact_boundary";
   timestamp: string;
   content: string | ContentBlock[];
   model?: string;
@@ -94,6 +96,12 @@ export interface ParsedMessage {
   };
   git_branch?: string;
   cwd?: string;
+  // compact_boundary only
+  compactMetadata?: {
+    trigger?: string;
+    tokensBefore?: number;
+    tokensAfter?: number;
+  };
 }
 
 export interface SessionDetail {

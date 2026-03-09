@@ -13,6 +13,10 @@ function asString(s: string): string {
  * Returns which terminal was used.
  */
 export async function openInTerminal(shellCmd: string): Promise<{ terminal: string }> {
+  if (process.platform !== "darwin") {
+    throw new Error("openInTerminal is only supported on macOS");
+  }
+
   let useIterm = false;
   try {
     const { stdout } = await execFileAsync("osascript", [

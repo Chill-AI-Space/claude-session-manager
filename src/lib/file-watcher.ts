@@ -1,11 +1,8 @@
 import fs from "fs";
 import path from "path";
+import { claudeProjectsDir } from "./utils";
 
-const CLAUDE_DIR = path.join(
-  process.env.HOME || "~",
-  ".claude",
-  "projects"
-);
+const CLAUDE_DIR = claudeProjectsDir();
 
 type ChangeCallback = (event: {
   type: "session_updated" | "session_created";

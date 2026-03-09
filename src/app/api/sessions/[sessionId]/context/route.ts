@@ -1,0 +1,171 @@
+import { NextRequest } from "next/server";
+import { getDb, getSetting } from "@/lib/db";
+import { SessionRow } from "@/lib/types";
+import { readFileSync } from "fs";
+
+export const dynamic = "force-dynamic";
+
+/** Extract readable text from JSONL — only user/assistant text, no tool noise */
+function extractMessages(jsonlContent: string): string {
+  const lines = jsonlContent.split("\n").filter((l) => l.trim());
+  const parts: string[] = [];
+
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line);
+      if (obj.type !== "user" && obj.type !== "assistant") continue;
+
+      const role = obj.type === "user" ? "USER" : "CLAUDE";
+      const msg = obj.message;
+      if (!msg) continue;
+
+      let text = "";
+      if (typeof msg.content === "string") {
+        text = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        text = msg.content
+          .filter((b: { type: string; text?: string }) => b.type === "text" && b.text)
+          .map((b: { text: string }) => b.text)
+          .join("\n");
+      }
+
+      if (!text.trim()) continue;
+      parts.push(`${role}: ${text.trim()}`);
+    } catch {
+      // skip malformed lines
+    }
+  }
+
+  return parts.join("\n\n");
+}
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ sessionId: string }> }
+) {
+  const { sessionId } = await params;
+  const body = await req.json();
+  const question = body.question;
+
+  if (!question || typeof question !== "string") {
+    return Response.json({ error: "question is required" }, { status: 400 });
+  }
+
+  const db = getDb();
+  const session = db
+    .prepare("SELECT jsonl_path, generated_title, custom_name FROM sessions WHERE session_id = ?")
+    .get(sessionId) as Pick<SessionRow, "jsonl_path" | "generated_title" | "custom_name"> | undefined;
+
+  if (!session) {
+    return Response.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  let transcript: string;
+  try {
+    const content = readFileSync(session.jsonl_path, "utf-8");
+    transcript = extractMessages(content);
+  } catch {
+    return Response.json({ error: "Could not read session file" }, { status: 500 });
+  }
+
+  // If transcript is tiny, just return it as-is — no need for AI
+  if (transcript.length < 2000) {
+    return Response.json({
+      context: transcript,
+      method: "full",
+      gemini_configured: !!getSetting("gemini_api_key") || !!process.env.GEMINI_API_KEY,
+    });
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY || getSetting("gemini_api_key");
+  if (!apiKey) {
+    // Fallback: last messages + first message (more relevant than just first 4000 chars)
+    const fallback = smartTruncate(transcript, 4000);
+    return Response.json({ context: fallback, method: "truncated", gemini_configured: false });
+  }
+
+  // Gemini: extract relevant context for the new question
+  const title = session.custom_name || session.generated_title || "Untitled";
+  const geminiPrompt = `You are a context extractor. A user had a coding session titled "${title}" with an AI assistant. Now they want to start a NEW session with a new question.
+
+Extract ONLY the parts from the previous session that are relevant to their new question. Include:
+- Key decisions, architecture choices, file paths mentioned
+- Code snippets or patterns that relate to the new question
+- Any problems/solutions that provide useful background
+
+Skip:
+- Greetings, acknowledgements, unrelated discussion
+- Tool calls and their raw output (summarize what was done instead)
+- Anything not relevant to the new question
+
+Previous session transcript (may be long):
+${transcript.slice(0, 30000)}
+
+New question the user wants to ask:
+"${question.slice(0, 500)}"
+
+Return a concise summary (500-2000 chars) of ONLY the relevant context. If nothing is relevant, return "No relevant context from previous session."`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: geminiPrompt }] }],
+        }),
+        signal: controller.signal,
+      }
+    );
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const fallback = smartTruncate(transcript, 4000);
+      return Response.json({ context: fallback, method: "truncated", gemini_configured: true });
+    }
+
+    const data = await res.json();
+    const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+
+    if (!text || text.length < 10) {
+      const fallback = smartTruncate(transcript, 4000);
+      return Response.json({ context: fallback, method: "truncated", gemini_configured: true });
+    }
+
+    return Response.json({ context: text, method: "gemini", gemini_configured: true });
+  } catch {
+    const fallback = smartTruncate(transcript, 4000);
+    return Response.json({ context: fallback, method: "truncated", gemini_configured: true });
+  }
+}
+
+/** Smart truncation: first message + last messages (more useful than head-only) */
+function smartTruncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+
+  const messages = text.split(/\n\n(?=(?:USER|CLAUDE): )/);
+  if (messages.length <= 2) return text.slice(0, maxLen);
+
+  const first = messages[0];
+  const budget = maxLen - first.length - 100; // 100 for separator
+  if (budget <= 0) return text.slice(0, maxLen);
+
+  // Take last messages that fit
+  const tail: string[] = [];
+  let used = 0;
+  for (let i = messages.length - 1; i >= 1; i--) {
+    if (used + messages[i].length > budget) break;
+    tail.unshift(messages[i]);
+    used += messages[i].length;
+  }
+
+  if (tail.length === 0) return text.slice(0, maxLen);
+
+  const skipped = messages.length - 1 - tail.length;
+  const separator = skipped > 0 ? `\n\n[... ${skipped} messages skipped ...]\n\n` : "\n\n";
+  return first + separator + tail.join("\n\n");
+}

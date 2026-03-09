@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     // Step 2: Send narrowed list to Gemini for semantic ranking
     const sessionSummaries = sessions
       .map((s, i) => {
-        const project = s.project_path.split("/").pop() || "unknown";
+        const project = s.project_path.split(/[\\/]/).pop() || "unknown";
         const title = s.custom_name || s.generated_title || "";
         const first = (s.first_prompt || "").slice(0, 300);
         const last = (s.last_message || "").slice(0, 200);

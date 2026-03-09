@@ -1,13 +1,210 @@
-import { getDb } from "./db";
+import { getDb, indexSessionContent, logAction, getSetting } from "./db";
 import { glob } from "glob";
 import fs from "fs";
 import path from "path";
+import { spawn } from "child_process";
+import { getCleanEnv, claudeProjectsDir, SPAWN_SHELL } from "./utils";
+import type { SessionRow } from "./types";
 
-const CLAUDE_DIR = path.join(
-  process.env.HOME || "~",
-  ".claude",
-  "projects"
-);
+// ── Server-side auto-retry ────────────────────────────────────────────────────
+
+/** Session IDs with a pending server-side retry — prevents double-scheduling. */
+const retryScheduled = new Set<string>();
+
+// ── Server-side stall detection + auto-continue ───────────────────────────────
+
+/** Session IDs already scheduled for stall-continue — prevents double-scheduling. */
+const stallScheduled = new Set<string>();
+
+/**
+ * How long (ms) a session must be silent (no JSONL writes) while active
+ * before we consider it "stalled" and potentially auto-continue it.
+ */
+const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Ask a small LLM (claude-haiku-4-5) whether the last assistant message
+ * is asking the user for clarification/input.
+ * Returns true = Claude is waiting for user, false = Claude just stopped mid-task.
+ */
+async function isWaitingForUser(lastAssistantText: string): Promise<boolean> {
+  if (!lastAssistantText.trim()) return false;
+
+  // Cheap heuristic first — avoid API call when obvious
+  const lower = lastAssistantText.toLowerCase();
+  const waitingPatterns = [
+    /\?\s*$/, // ends with question mark
+    /which (option|approach|do you|would you)/,
+    /do you want/,
+    /should i (proceed|continue|go ahead)/,
+    /let me know/,
+    /please (confirm|clarify|specify|choose|select|provide)/,
+    /what (would|do) you (like|prefer|want)/,
+    /готов|подтверди|выбери|какой вариант|хотите|скажи/,
+  ];
+  const looksLikeQuestion = waitingPatterns.some((re) => re.test(lower));
+
+  // If clearly asking a question, trust the heuristic — no API call needed
+  if (looksLikeQuestion) return true;
+
+  // For ambiguous cases: call Haiku to classify
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return false;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 5,
+        messages: [{
+          role: "user",
+          content: `Is this message asking the user for clarification, confirmation, or a decision before proceeding? Answer only YES or NO.\n\nMessage:\n${lastAssistantText.slice(0, 1500)}`,
+        }],
+      }),
+    });
+
+    if (!response.ok) return false;
+    const json = await response.json();
+    const answer = json.content?.[0]?.text?.trim().toUpperCase() ?? "";
+    return answer.startsWith("YES");
+  } catch {
+    return false; // default: assume not waiting, safe to continue
+  }
+}
+
+/**
+ * Send "continue" to a stalled session if Claude is not waiting for user input.
+ */
+async function serverAutoContinue(sessionId: string): Promise<void> {
+  const db = getDb();
+  const session = db
+    .prepare("SELECT project_path, last_message_role, last_message, jsonl_path FROM sessions WHERE session_id = ?")
+    .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path"> & { last_message: string | null } | undefined;
+
+  if (!session) return;
+  if (getSetting("auto_continue_on_stall") !== "true") return;
+
+  // Re-check: session must still be active (process still running) with assistant as last message
+  const { isSessionActive } = await import("./process-detector");
+  if (!isSessionActive(sessionId)) return;
+
+  // Re-check mtime — if it changed, session is no longer stalled
+  try {
+    const mtime = fs.statSync(session.jsonl_path).mtimeMs;
+    if (Date.now() - mtime < STALL_THRESHOLD_MS) return;
+  } catch {
+    return;
+  }
+
+  if (session.last_message_role !== "assistant") return;
+
+  // Get last assistant text from JSONL for LLM classification
+  const lastAssistantText = extractLastAssistantText(session.jsonl_path);
+  const waiting = await isWaitingForUser(lastAssistantText);
+
+  if (waiting) {
+    logAction("service", "stall_continue_skipped", "Claude is asking user a question", sessionId);
+    return;
+  }
+
+  logAction("service", "stall_continue_fired", `stalled >${STALL_THRESHOLD_MS / 60_000}min`, sessionId);
+
+  const proc = spawn(
+    "claude",
+    ["--resume", sessionId, "-p", "continue", "--output-format", "stream-json", "--verbose"],
+    { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"], shell: SPAWN_SHELL }
+  );
+  proc.stdout?.resume();
+  proc.stderr?.resume();
+  proc.on("close", (code) => {
+    logAction("service", code === 0 ? "stall_continue_done" : "stall_continue_failed", `exit:${code}`, sessionId);
+  });
+}
+
+function scheduleStallContinue(sessionId: string, delayMs = 60_000): void {
+  if (stallScheduled.has(sessionId)) return;
+  stallScheduled.add(sessionId);
+  setTimeout(async () => {
+    stallScheduled.delete(sessionId);
+    await serverAutoContinue(sessionId);
+  }, delayMs);
+}
+
+/** Extract the last assistant text block from a JSONL file for LLM classification. */
+function extractLastAssistantText(jsonlPath: string): string {
+  try {
+    const lines = fs.readFileSync(jsonlPath, "utf-8").split("\n").filter(Boolean).reverse();
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type !== "assistant" || !obj.message?.content) continue;
+        const content = obj.message.content;
+        if (typeof content === "string") return content;
+        if (Array.isArray(content)) {
+          const text = content
+            .filter((b: { type: string; text?: string }) => b.type === "text" && b.text)
+            .map((b: { text: string }) => b.text)
+            .join("\n");
+          if (text.trim()) return text;
+        }
+      } catch { /* skip malformed */ }
+    }
+  } catch { /* ignore */ }
+  return "";
+}
+
+/**
+ * Spawn `claude --resume {id} -p "continue"` in the background.
+ * Called automatically 30s after a crash is detected during scanning.
+ */
+function serverAutoRetry(sessionId: string): void {
+  const db = getDb();
+  const session = db
+    .prepare("SELECT project_path, last_message_role FROM sessions WHERE session_id = ?")
+    .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role"> | undefined;
+
+  // Bail if session recovered on its own or setting was disabled
+  if (!session || session.last_message_role !== "tool_result") return;
+  if (getSetting("auto_retry_on_crash") === "false") return;
+
+  logAction("service", "auto_retry_fired", "server-side 30s timeout", sessionId);
+
+  const proc = spawn(
+    "claude",
+    ["--resume", sessionId, "-p", "continue", "--output-format", "stream-json", "--verbose"],
+    { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"], shell: SPAWN_SHELL }
+  );
+
+  // Drain stdout/stderr so buffers don't block the process
+  proc.stdout?.resume();
+  proc.stderr?.resume();
+
+  proc.on("close", (code) => {
+    logAction(
+      "service",
+      code === 0 ? "auto_retry_done" : "auto_retry_failed",
+      `exit:${code}`,
+      sessionId
+    );
+  });
+}
+
+function scheduleServerAutoRetry(sessionId: string, delayMs = 30_000): void {
+  if (retryScheduled.has(sessionId)) return; // already queued
+  retryScheduled.add(sessionId);
+  setTimeout(() => {
+    retryScheduled.delete(sessionId);
+    serverAutoRetry(sessionId);
+  }, delayMs);
+}
+
+const CLAUDE_DIR = claudeProjectsDir();
 
 interface ScanResult {
   sessionsScanned: number;
@@ -24,11 +221,13 @@ interface JsonlMetadata {
   model: string | null;
   firstPrompt: string | null;
   lastMessage: string | null;
+  lastMessageRole: string | null;
   messageCount: number;
   totalInputTokens: number;
   totalOutputTokens: number;
   createdAt: string;
   modifiedAt: string;
+  fullText: string;
 }
 
 function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
@@ -43,7 +242,9 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
     let model: string | null = null;
     let firstPrompt: string | null = null;
     let lastMessage: string | null = null;
+    let lastMessageRole: string | null = null;
     let messageCount = 0;
+    const textParts: string[] = [];
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let createdAt = "";
@@ -55,6 +256,13 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
 
         if (obj.type === "user" || obj.type === "assistant") {
           messageCount++;
+          // Detect tool_result messages (Claude died mid-execution)
+          if (obj.type === "user" && Array.isArray(obj.message?.content) &&
+              obj.message.content.every((b: { type: string }) => b.type === "tool_result")) {
+            lastMessageRole = "tool_result";
+          } else {
+            lastMessageRole = obj.type;
+          }
 
           if (!sessionId && obj.sessionId) sessionId = obj.sessionId;
           if (!projectPath && obj.cwd) projectPath = obj.cwd;
@@ -93,6 +301,7 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
                 }
                 // Always update — last one wins
                 lastMessage = text.slice(0, 300);
+                textParts.push(text);
               }
             }
           }
@@ -106,6 +315,15 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
                 (usage.cache_read_input_tokens || 0) +
                 (usage.cache_creation_input_tokens || 0);
               totalOutputTokens += usage.output_tokens || 0;
+            }
+            // Index assistant text too
+            const content = obj.message?.content;
+            if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block.type === "text" && block.text) {
+                  textParts.push(block.text);
+                }
+              }
             }
           }
         }
@@ -132,11 +350,13 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
       model,
       firstPrompt,
       lastMessage,
+      lastMessageRole,
       messageCount,
       totalInputTokens,
       totalOutputTokens,
       createdAt,
       modifiedAt,
+      fullText: textParts.join("\n"),
     };
   } catch {
     return null;
@@ -179,12 +399,12 @@ export async function scanSessions(
   const upsertSession = db.prepare(`
     INSERT INTO sessions (
       session_id, jsonl_path, project_dir, project_path,
-      git_branch, claude_version, model, first_prompt, last_message,
+      git_branch, claude_version, model, first_prompt, last_message, last_message_role,
       message_count, total_input_tokens, total_output_tokens,
       created_at, modified_at, file_mtime, file_size, last_scanned_at
     ) VALUES (
       @session_id, @jsonl_path, @project_dir, @project_path,
-      @git_branch, @claude_version, @model, @first_prompt, @last_message,
+      @git_branch, @claude_version, @model, @first_prompt, @last_message, @last_message_role,
       @message_count, @total_input_tokens, @total_output_tokens,
       @created_at, @modified_at, @file_mtime, @file_size, @last_scanned_at
     )
@@ -197,6 +417,7 @@ export async function scanSessions(
       model = COALESCE(@model, sessions.model),
       first_prompt = COALESCE(@first_prompt, sessions.first_prompt),
       last_message = COALESCE(@last_message, sessions.last_message),
+      last_message_role = COALESCE(@last_message_role, sessions.last_message_role),
       message_count = @message_count,
       total_input_tokens = @total_input_tokens,
       total_output_tokens = @total_output_tokens,
@@ -216,6 +437,9 @@ export async function scanSessions(
       session_count = @session_count,
       last_activity = @last_activity
   `);
+
+  // Collect FTS updates to apply after each batch (FTS operations outside transaction)
+  const ftsQueue: { sessionId: string; text: string }[] = [];
 
   // Process files in batches — yield between batches to keep event loop responsive
   const insertBatch = db.transaction((batch: typeof jsonlFiles) => {
@@ -245,12 +469,38 @@ export async function scanSessions(
       if (!metadata) continue;
 
       // Skip internal utility sessions created by this app (title generation, etc.)
+      // Also delete from DB if previously imported (race condition: first scan sees empty JSONL)
       if (metadata.firstPrompt?.startsWith("Generate a short descriptive title")) {
+        db.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
         continue;
       }
 
       const dirName = path.basename(path.dirname(filePath));
       projectDirs.add(dirName);
+
+      // Detect newly-crashed sessions: was not tool_result before, now is
+      if (metadata.lastMessageRole === "tool_result") {
+        const prev = db
+          .prepare("SELECT last_message_role FROM sessions WHERE session_id = ?")
+          .get(sessionId) as { last_message_role: string | null } | undefined;
+        if (prev?.last_message_role !== "tool_result") {
+          logAction("service", "crash_detected", `jsonl:${filePath}`, sessionId);
+          scheduleServerAutoRetry(sessionId);
+        }
+      }
+
+      // Detect stalled sessions: active, last role is assistant, silent for > threshold
+      // (file mtime check happens later in serverAutoContinue to avoid blocking the transaction)
+      if (metadata.lastMessageRole === "assistant") {
+        const silentMs = Date.now() - stat.mtimeMs;
+        if (silentMs > STALL_THRESHOLD_MS) {
+          const { isSessionActive } = require("./process-detector");
+          if (isSessionActive(sessionId)) {
+            logAction("service", "stall_detected", `silent:${Math.round(silentMs / 60_000)}min`, sessionId);
+            scheduleStallContinue(sessionId, 10_000); // short delay, real checks happen inside
+          }
+        }
+      }
 
       upsertSession.run({
         session_id: sessionId,
@@ -262,6 +512,7 @@ export async function scanSessions(
         model: metadata.model,
         first_prompt: metadata.firstPrompt,
         last_message: metadata.lastMessage,
+        last_message_role: metadata.lastMessageRole,
         message_count: metadata.messageCount,
         total_input_tokens: metadata.totalInputTokens,
         total_output_tokens: metadata.totalOutputTokens,
@@ -272,13 +523,19 @@ export async function scanSessions(
         last_scanned_at: new Date().toISOString(),
       });
 
+      ftsQueue.push({ sessionId, text: metadata.fullText });
       sessionsScanned++;
     }
   });
 
   // Process in batches with event loop yields between them
   for (let i = 0; i < jsonlFiles.length; i += BATCH_SIZE) {
+    ftsQueue.length = 0;
     insertBatch(jsonlFiles.slice(i, i + BATCH_SIZE));
+    // Index FTS content outside the main transaction
+    for (const { sessionId, text } of ftsQueue) {
+      indexSessionContent(sessionId, text);
+    }
     await yieldToEventLoop();
   }
 
@@ -302,7 +559,7 @@ export async function scanSessions(
       upsertProject.run({
         project_dir: projectDir,
         project_path: projectPath,
-        display_name: projectPath.split("/").pop() || projectDir,
+        display_name: projectPath.split(/[\\/]/).pop() || projectDir,
         session_count: stats.count,
         last_activity: stats.last_activity,
       });
@@ -318,6 +575,11 @@ export async function scanSessions(
   };
 }
 
+// Claude stores project dirs as cwd with path separators replaced by "-".
+// macOS: "/Users/vova/project" → "-Users-vova-project"
+// Windows: "C:\Users\vova\project" → "C--Users-vova-project" (drive colon kept)
 function dirToPath(dirName: string): string {
-  return dirName.replace(/-/g, "/").replace(/^\//, "/");
+  const restored = dirName.replace(/-/g, "/");
+  // On Windows, convert forward slashes to backslashes
+  return process.platform === "win32" ? restored.replace(/\//g, "\\") : restored;
 }

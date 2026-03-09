@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getSetting } from "@/lib/db";
+import { getSetting, logAction } from "@/lib/db";
 import { openInTerminal } from "@/lib/terminal-launcher";
 import { stat } from "fs/promises";
 import os from "os";
@@ -31,11 +31,13 @@ export async function POST(request: NextRequest) {
   }
 
   const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
+  const effort = getSetting("effort_level") || "high";
   const skipFlag = skipPermissions ? " --dangerously-skip-permissions" : "";
-  const shellCmd = `cd "${resolved}" && claude${skipFlag}`;
+  const shellCmd = `cd "${resolved}" && claude${skipFlag} --effort ${effort}`;
 
   try {
     const { terminal } = await openInTerminal(shellCmd);
+    logAction("service", "launch", resolved, undefined);
     return Response.json({ ok: true, terminal });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";

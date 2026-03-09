@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getDb, getSetting } from "@/lib/db";
+import { getDb, getSetting, logAction, getContextSourceGroups } from "@/lib/db";
 import { SessionRow } from "@/lib/types";
 import { spawn, ChildProcess } from "child_process";
 import { killSessionProcesses } from "@/lib/process-detector";
@@ -33,6 +33,51 @@ export async function POST(
     );
   }
 
+  logAction("service", "reply", `msg_len:${message.length}`, sessionId);
+
+  // Determine if this message warrants context injection
+  const { messageNeedsContext, getTeamHubContext, formatContextBlock } = await import("@/lib/teamhub");
+  const needsContext = messageNeedsContext(message);
+
+  let finalMessage = message;
+  const teamhubEnabled = getSetting("teamhub_enabled") !== "false"; // default: auto
+  if (needsContext && teamhubEnabled && session.project_path) {
+    try {
+      const ctx = await getTeamHubContext(session.project_path, message);
+      if (ctx) {
+        const block = formatContextBlock(ctx);
+        finalMessage = block + message;
+        logAction(
+          "service",
+          "teamhub_inject",
+          `hub:${ctx.hubName} ~${ctx.tokenEstimate}tok`,
+          sessionId,
+          block
+        );
+      }
+    } catch { /* teamhub unavailable — continue without context */ }
+  }
+
+  // Context Sources injection
+  if (needsContext && session.project_path) {
+    try {
+      const groups = getContextSourceGroups();
+      if (groups.length > 0) {
+        const { getContextForProject, formatContextBlock } = await import("@/lib/context-fetcher");
+        const contextResults = await getContextForProject(session.project_path, groups);
+        for (const { groupName, content, tokenEstimate } of contextResults) {
+          finalMessage = formatContextBlock(groupName, content) + finalMessage;
+          logAction(
+            "service",
+            "context_source_inject",
+            `group:${groupName} ~${tokenEstimate}tok`,
+            sessionId
+          );
+        }
+      }
+    } catch { /* non-critical */ }
+  }
+
   // Auto-kill terminal sessions if setting is enabled
   const autoKill = getSetting("auto_kill_terminal_on_reply") === "true";
   if (autoKill) {
@@ -49,15 +94,42 @@ export async function POST(
 
   const stream = new ReadableStream({
     start(controller) {
+      let closed = false;
+
+      function send(chunk: string) {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(chunk));
+        } catch {
+          closed = true;
+        }
+      }
+
+      function close() {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      }
+
       const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
+      const maxTurns = getSetting("max_turns") || "80";
+      const effort = getSetting("effort_level") || "high";
       const args = [
         "--resume",
         sessionId,
         "-p",
-        message,
+        finalMessage,
         "--output-format",
         "stream-json",
         "--verbose",
+        "--max-turns",
+        maxTurns,
+        "--effort",
+        effort,
       ];
       if (skipPermissions) {
         args.push("--dangerously-skip-permissions");
@@ -69,12 +141,20 @@ export async function POST(
         {
           cwd: session.project_path,
           env,
-          stdio: ["pipe", "pipe", "pipe"],
+          stdio: ["ignore", "pipe", "pipe"],
+          shell: process.platform === "win32",
         }
       );
 
-      // Close stdin to prevent hanging on permission prompts
-      proc.stdin!.end();
+      // Keepalive: send a ping every 15s so the SSE connection doesn't die
+      // during long tool-use cycles where no text is produced
+      const keepalive = setInterval(() => {
+        if (closed) {
+          clearInterval(keepalive);
+          return;
+        }
+        send(`: keepalive\n\n`);
+      }, 15_000);
 
       let buffer = "";
 
@@ -91,59 +171,43 @@ export async function POST(
             if (obj.type === "assistant" && obj.message?.content) {
               for (const block of obj.message.content) {
                 if (block.type === "text" && block.text) {
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ type: "text", text: block.text })}\n\n`
-                    )
-                  );
+                  send(`data: ${JSON.stringify({ type: "text", text: block.text })}\n\n`);
+                } else if (block.type === "tool_use") {
+                  send(`data: ${JSON.stringify({ type: "status", text: `Using tool: ${block.name}` })}\n\n`);
                 }
               }
             } else if (obj.type === "result") {
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: "done",
-                    result: obj.result,
-                    is_error: obj.is_error,
-                    cost: obj.total_cost_usd,
-                  })}\n\n`
-                )
-              );
+              send(`data: ${JSON.stringify({
+                type: "done",
+                result: obj.result,
+                is_error: obj.is_error,
+                cost: obj.total_cost_usd,
+              })}\n\n`);
             }
           } catch {
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ type: "chunk", text: line })}\n\n`
-              )
-            );
+            send(`data: ${JSON.stringify({ type: "chunk", text: line })}\n\n`);
           }
         }
       });
 
       proc.stderr!.on("data", (data: Buffer) => {
         const text = data.toString();
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ type: "error", text })}\n\n`
-          )
-        );
+        send(`data: ${JSON.stringify({ type: "error", text })}\n\n`);
       });
 
       proc.on("close", (code) => {
+        clearInterval(keepalive);
+
         if (buffer.trim()) {
           try {
             const obj = JSON.parse(buffer);
             if (obj.type === "result") {
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: "done",
-                    result: obj.result,
-                    is_error: obj.is_error,
-                    cost: obj.total_cost_usd,
-                  })}\n\n`
-                )
-              );
+              send(`data: ${JSON.stringify({
+                type: "done",
+                result: obj.result,
+                is_error: obj.is_error,
+                cost: obj.total_cost_usd,
+              })}\n\n`);
             }
           } catch {
             // ignore
@@ -151,22 +215,15 @@ export async function POST(
         }
 
         if (code !== 0 && code !== null) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ type: "error", text: `Process exited with code ${code}` })}\n\n`
-            )
-          );
+          send(`data: ${JSON.stringify({ type: "error", text: `Process exited with code ${code}` })}\n\n`);
         }
-        controller.close();
+        close();
       });
 
       proc.on("error", (err) => {
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ type: "error", text: err.message })}\n\n`
-          )
-        );
-        controller.close();
+        clearInterval(keepalive);
+        send(`data: ${JSON.stringify({ type: "error", text: err.message })}\n\n`);
+        close();
       });
     },
     cancel() {

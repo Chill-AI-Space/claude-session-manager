@@ -17,7 +17,15 @@ export function readSessionMessages(
     try {
       const obj = JSON.parse(line);
 
-      if (obj.type === "user" && obj.message?.role === "user") {
+      if (obj.type === "system" && obj.subtype === "compact_boundary") {
+        messages.push({
+          uuid: obj.uuid || "",
+          type: "compact_boundary",
+          timestamp: obj.timestamp || "",
+          content: obj.content || "Conversation compacted",
+          compactMetadata: obj.compactMetadata,
+        });
+      } else if (obj.type === "user" && obj.message?.role === "user") {
         // Skip tool_result-only messages (they're part of assistant flow)
         const content = obj.message.content;
         const isToolResultOnly =
@@ -26,6 +34,7 @@ export function readSessionMessages(
             (b: { type: string }) =>
               b.type === "tool_result"
           );
+        if (isToolResultOnly) continue;
 
         messages.push({
           uuid: obj.uuid || obj.messageId || "",

@@ -1,18 +1,12 @@
 "use client";
 
 import { Input } from "@/components/ui/input";
-import { ProjectListItem } from "@/lib/types";
 import { Search, X, DollarSign, HelpCircle, Loader2 } from "lucide-react";
 import { useState, useRef } from "react";
 
 interface SessionSearchProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
-  projects: ProjectListItem[];
-  selectedProject: string | null;
-  onProjectChange: (project: string | null) => void;
-  sortBy: "modified" | "created" | "tokens";
-  onSortChange: (sort: "modified" | "created" | "tokens") => void;
   onGeminiResults?: (results: GeminiResult[]) => void;
 }
 
@@ -20,16 +14,12 @@ export interface GeminiResult {
   session_id: string;
   snippet: string;
   relevance: string;
+  query?: string; // original search term, used for in-session highlighting
 }
 
 export function SessionSearch({
   searchQuery,
   onSearchChange,
-  projects,
-  selectedProject,
-  onProjectChange,
-  sortBy,
-  onSortChange,
   onGeminiResults,
 }: SessionSearchProps) {
   const [geminiQuery, setGeminiQuery] = useState("");
@@ -52,7 +42,9 @@ export function SessionSearch({
         setGeminiError(data.error);
         onGeminiResults?.([]);
       } else {
-        onGeminiResults?.(data.results || []);
+        onGeminiResults?.(
+          (data.results || []).map((r: GeminiResult) => ({ ...r, query: geminiQuery }))
+        );
       }
     } catch {
       setGeminiError("Search failed — check connection");
@@ -132,36 +124,6 @@ export function SessionSearch({
         </div>
       )}
 
-      <div className="flex gap-1.5">
-        <select
-          value={selectedProject || ""}
-          onChange={(e) =>
-            onProjectChange(e.target.value || null)
-          }
-          className="flex-1 h-7 text-xs bg-background border border-input rounded-md px-2 text-foreground"
-        >
-          <option value="">Projects ({projects.length})</option>
-          {projects.map((p) => (
-            <option key={p.project_dir} value={p.project_dir}>
-              {p.display_name} ({p.session_count})
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={sortBy}
-          onChange={(e) =>
-            onSortChange(
-              e.target.value as "modified" | "created" | "tokens"
-            )
-          }
-          className="h-7 text-xs bg-background border border-input rounded-md px-2 text-foreground"
-        >
-          <option value="modified">Recent</option>
-          <option value="created">Oldest</option>
-          <option value="tokens">Tokens</option>
-        </select>
-      </div>
     </div>
   );
 }

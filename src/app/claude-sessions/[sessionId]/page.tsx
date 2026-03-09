@@ -1,21 +1,106 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, use } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, useRef, use, useMemo } from "react";
+import { useTriggerNotification, clearTabBadge } from "@/hooks/useNotifications";
+import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
-import { ReplyInput } from "@/components/ReplyInput";
+import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Zap, Terminal, X, Settings } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, Send, AlertTriangle, PanelRightClose, PanelRight, Paperclip } from "lucide-react";
 import { formatTokens } from "@/lib/utils";
+import { getActivityStatus } from "@/lib/activity-status";
+import { getCachedSession, setCachedSession } from "@/lib/session-cache";
+import { checkContextGuard } from "@/lib/context-guard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import Link from "next/link";
+import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
+import { useAutodetect } from "@/hooks/useAutodetect";
+import { useSettingToggle } from "@/hooks/useSettingToggle";
+
+const CTX_MAX = 200_000;
+
+// Backoff polling schedule after activity ends: [delay_ms × 3 each] ≈ 20 min total
+const BACKOFF_DELAYS = [
+  ...Array(3).fill(3_000),
+  ...Array(3).fill(5_000),
+  ...Array(3).fill(10_000),
+  ...Array(3).fill(30_000),
+  ...Array(3).fill(60_000),
+  ...Array(3).fill(300_000),
+];
+
+/** Runs `callback` on an exponential backoff schedule. Restarts when `trigger` changes. */
+function useBackoffPoll(callback: () => void, trigger: number) {
+  const cbRef = useRef(callback);
+  cbRef.current = callback;
+  useEffect(() => {
+    if (trigger === 0) return;
+    let cancelled = false;
+    let idx = 0;
+    const next = () => {
+      if (cancelled || idx >= BACKOFF_DELAYS.length) return;
+      setTimeout(() => {
+        if (cancelled) return;
+        cbRef.current();
+        idx++;
+        next();
+      }, BACKOFF_DELAYS[idx]);
+    };
+    next();
+    return () => { cancelled = true; };
+  }, [trigger]);
+}
+
+function ContextBar({ tokens }: { tokens: number }) {
+  const pct = Math.min((tokens / CTX_MAX) * 100, 100);
+  const color =
+    pct >= 80 ? "bg-red-500" : pct >= 50 ? "bg-yellow-500" : "bg-green-500";
+  const textColor =
+    pct >= 80 ? "text-red-500" : pct >= 50 ? "text-yellow-500" : "text-green-500/80";
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden max-w-[140px]">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className={`text-[10px] font-mono shrink-0 ${textColor}`}>
+        {formatTokens(tokens)}<span className="text-muted-foreground/40">/200k</span>
+      </span>
+    </div>
+  );
+}
+
+const SETTING_LABELS: Record<string, string> = {
+  dangerously_skip_permissions: "Skip Permissions",
+  auto_kill_terminal_on_reply: "Auto-Kill Terminal",
+  context_guard_enabled: "Context Guard",
+};
+
+function FocusErrorBanner({ error }: { error: string }): React.ReactElement {
+  return (
+    <div className="flex items-start gap-1.5 px-4 pb-2 text-[11px] text-amber-600 dark:text-amber-400">
+      <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-px" />
+      <span>
+        {error}{" "}
+        <a
+          href="x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+          className="underline underline-offset-2 hover:opacity-80"
+        >
+          Open Accessibility settings
+        </a>
+        {" -- add Terminal.app or iTerm2."}
+      </span>
+    </div>
+  );
+}
 
 interface SessionDetailData {
   session_id: string;
   project_path: string;
   messages: ParsedMessage[];
+  messages_start: number;
+  messages_total: number;
   metadata: SessionRow;
   is_active: boolean;
 }
@@ -27,6 +112,8 @@ export default function SessionDetailPage({
 }) {
   const { sessionId } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const highlightQuery = searchParams.get("q") || null;
   const [data, setData] = useState<SessionDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,64 +123,390 @@ export default function SessionDetailPage({
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [streamStatus, setStreamStatus] = useState<string | null>(null);
+  // Track last time we received ANY data on the SSE stream (for stale detection)
+  const lastStreamEventRef = useRef<number>(0);
 
   // Message queue: messages waiting to be sent
   const queueRef = useRef<string[]>([]);
+  const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
   const processingRef = useRef(false);
   // Abort controller for cancelling in-flight requests on session switch
   const abortRef = useRef<AbortController | null>(null);
 
+  // Pagination for large sessions
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [earlierMessages, setEarlierMessages] = useState<ParsedMessage[]>([]);
+  const [earliestLoaded, setEarliestLoaded] = useState<number | null>(null);
+
+  // Highlight a specific message (from search)
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
   // Track if we've killed the terminal for this session (to hide the button)
   const [terminalKilled, setTerminalKilled] = useState(false);
-  // Track if user has replied at least once
   const [hasReplied, setHasReplied] = useState(false);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [focusError, setFocusError] = useState<string | null>(null);
+  const [focusOk, setFocusOk] = useState(false);
+
+  const replyInputRef = useRef<ReplyInputHandle>(null);
 
   // Settings for status bar
-  const [settings, setSettingsData] = useState<Record<string, string> | null>(null);
+  const [settings, setSettings] = useState<Record<string, string> | null>(null);
 
+  // Fold chat
+  const [folded, setFolded] = useState(false);
+
+  // Right panel collapse
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+
+  // Share
+  const [shareState, setShareState] = useState<"idle" | "loading" | "done">("idle");
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // Sent message confirmation (shown in right panel)
+  const [lastSentText, setLastSentText] = useState<string | null>(null);
+
+  // Skip Permissions warning
+  const [skipPermsDialog, setSkipPermsDialog] = useState<{ message: string } | null>(null);
+  const [skipPermsShown, setSkipPermsShown] = useState(false);
+
+  // Learnings
+  const [learnings, setLearnings] = useState<Record<string, unknown> | null>(null);
+  const [learningsLoading, setLearningsLoading] = useState(false);
+  const [learningsError, setLearningsError] = useState<string | null>(null);
+  const [learningsOpen, setLearningsOpen] = useState(false);
+
+  // New session mode
+  const [replyMode, setReplyMode] = useState<"reply" | "new">("reply");
+  const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
+  const [includeSummary, setIncludeSummary] = useState(true);
+  const [startingNewSession, setStartingNewSession] = useState(false);
+  const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
+  const [newSessionMessage, setNewSessionMessage] = useState("");
+  const newSessionInputRef = useRef<HTMLTextAreaElement>(null);
+  const newFileInputRef = useRef<HTMLInputElement>(null);
+  const [newSessionDragging, setNewSessionDragging] = useState(false);
+  const newDragCounterRef = useRef(0);
+  const newAutodetect = useAutodetect();
+  const skipPerms = useSettingToggle("dangerously_skip_permissions");
+
+  // Permission bridge
+  interface PendingPermission {
+    id: string;
+    sessionId: string;
+    toolName: string;
+    toolInput: Record<string, unknown>;
+    cwd: string;
+    createdAt: number;
+  }
+  const [pendingPermissions, setPendingPermissions] = useState<PendingPermission[]>([]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("theme") as "light" | "dark" | null;
+    setTheme(saved === "light" ? "light" : "dark");
+  }, []);
+
+  // Poll for pending permission requests (every 2s)
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/permissions/pending?sessionId=${sessionId}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setPendingPermissions(data);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [sessionId]);
+
+  const handlePermissionDecide = async (id: string, behavior: "allow" | "deny") => {
+    try {
+      await fetch(`/api/permissions/${id}/decide`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ behavior }),
+      });
+      setPendingPermissions((prev) => prev.filter((p) => p.id !== id));
+    } catch { /* ignore */ }
+  };
+
+  // Context Guard
+  const [contextGuardDialog, setContextGuardDialog] = useState<{
+    open: boolean;
+    message: string;
+    score: number;
+  } | null>(null);
+  const [contextGuardError, setContextGuardError] = useState<string | null>(null);
+
+  const prevTotalRef = useRef(0);
+  // Counter to invalidate stale fetches without using AbortController (avoids unhandled rejection in Next.js dev overlay)
+  const fetchGenRef = useRef(0);
   const fetchSession = useCallback(async ({ clearExtras = false } = {}) => {
+    const gen = ++fetchGenRef.current;
     try {
       const res = await fetch(`/api/sessions/${sessionId}`);
+      if (gen !== fetchGenRef.current) return; // stale
       if (!res.ok) {
         setError("Session not found");
         return;
       }
       const json = await res.json();
+      if (gen !== fetchGenRef.current) return; // stale
+      const prevTotal = prevTotalRef.current;
+      prevTotalRef.current = json.messages_total;
+      setCachedSession(sessionId, json);
       setData(json);
-      if (clearExtras) {
+      setEarliestLoaded(json.messages_start);
+      // Clear optimistic extras whenever server data has grown (prevents duplicates)
+      if (clearExtras || json.messages_total > prevTotal) {
         setExtraMessages([]);
       }
+      if (clearExtras) {
+        setEarlierMessages([]);
+      }
     } catch {
+      if (gen !== fetchGenRef.current) return; // stale
       setError("Failed to load session");
     } finally {
       setLoading(false);
     }
   }, [sessionId]);
 
+  // Backoff polling trigger — incremented to start a new backoff cycle
+  const [backoffTrigger, setBackoffTrigger] = useState(0);
+  const startBackoff = useCallback(() => setBackoffTrigger((t) => t + 1), []);
+  useBackoffPoll(fetchSession, backoffTrigger);
+
+  const loadEarlierMessages = useCallback(async () => {
+    if (earliestLoaded === null || earliestLoaded === 0) return;
+    setLoadingEarlier(true);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}?before=${earliestLoaded}`);
+      if (!res.ok) return;
+      const json = await res.json();
+      if (!Array.isArray(json.messages)) return;
+      setEarlierMessages((prev) => [...json.messages, ...prev]);
+      setEarliestLoaded(json.messages_start);
+    } catch {
+      // Network error — spinner disappears, user can retry by clicking button again
+    } finally {
+      setLoadingEarlier(false);
+    }
+  }, [sessionId, earliestLoaded]);
+
   useEffect(() => {
     // Abort any in-flight streaming request from previous session
-    abortRef.current?.abort();
+    abortRef.current?.abort("cancelled");
     abortRef.current = null;
 
-    setLoading(true);
     setError(null);
     setExtraMessages([]);
+    setEarlierMessages([]);
+    setHighlightId(null);
     setStreamingText("");
     setIsStreaming(false);
     setStreamError(null);
+    setStreamStatus(null);
+    lastStreamEventRef.current = 0;
     setTerminalKilled(false);
     setHasReplied(false);
     queueRef.current = [];
     processingRef.current = false;
-    fetchSession();
+    prevTotalRef.current = 0;
+
+    // Stale-while-revalidate: show cached data instantly, fetch fresh in background
+    const cached = getCachedSession(sessionId);
+    if (cached) {
+      setData(cached);
+      setEarliestLoaded(cached.messages_start);
+      prevTotalRef.current = cached.messages_total;
+      setLoading(false);
+    } else {
+      setLoading(true);
+      setEarliestLoaded(null);
+    }
+    fetchSession().catch(() => {});
     // Fetch settings for status bar
-    fetch("/api/settings").then(r => r.json()).then(setSettingsData).catch(() => {});
+    fetch("/api/settings").then(r => r.json()).then(setSettings).catch(() => {});
+    // Log UI load event
+    fetch("/api/actions-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "service", action: "ui_open_session", session_id: sessionId }),
+    }).catch(() => {});
 
     return () => {
       // Cleanup on unmount or session change
-      abortRef.current?.abort();
+      abortRef.current?.abort("cancelled");
     };
   }, [sessionId, fetchSession]);
+
+  // Auto-poll for new messages when session is active in terminal (not via web)
+  useEffect(() => {
+    if (!data?.is_active || isStreaming) return;
+    const id = setInterval(() => { fetchSession().catch(() => {}); }, 2000);
+    return () => clearInterval(id);
+  }, [data?.is_active, isStreaming, fetchSession]);
+
+  // Default folder for new session = current session's project path
+  useEffect(() => {
+    if (data?.project_path && !newSessionPath) {
+      setNewSessionPath(data.project_path);
+    }
+  }, [data?.project_path, newSessionPath]);
+
+  // Re-fetch when sidebar scan completes (catches inactive sessions that got new messages).
+  // Use a ref to avoid tearing down/re-adding the listener on every streaming state change.
+  const isStreamingRef = useRef(isStreaming);
+  useEffect(() => { isStreamingRef.current = isStreaming; }, [isStreaming]);
+  useEffect(() => {
+    const handler = () => { if (!isStreamingRef.current) fetchSession().catch(() => {}); };
+    window.addEventListener("sessions-scanned", handler);
+    return () => window.removeEventListener("sessions-scanned", handler);
+  }, [fetchSession]);
+
+  // Watchdog: detect dead streams and clean up
+  useEffect(() => {
+    if (!isStreaming) return;
+
+    // Case 1: session went inactive with no streaming text — stream died
+    if (!streamingText && !data?.is_active) {
+      const timer = setTimeout(() => {
+        setIsStreaming(false);
+        setStreamingText("");
+        setStreamStatus(null);
+        processingRef.current = false;
+        setQueuedMessages([...queueRef.current]);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+
+    // Case 2: no SSE events received for 45s — connection likely dropped silently
+    // (keepalive pings come every 15s, so 45s = 3 missed pings)
+    const check = setInterval(() => {
+      const elapsed = Date.now() - lastStreamEventRef.current;
+      if (lastStreamEventRef.current > 0 && elapsed > 45_000) {
+        setIsStreaming(false);
+        setStreamingText("");
+        setStreamStatus(null);
+        setStreamError("Connection lost — refreshing session data…");
+        processingRef.current = false;
+        setQueuedMessages([...queueRef.current]);
+        fetchSession({ clearExtras: true }).catch(() => {});
+      }
+    }, 5_000);
+    return () => clearInterval(check);
+  }, [isStreaming, streamingText, data?.is_active, fetchSession]);
+
+  // Build notification settings from fetched settings
+  const notifSettings = useMemo(() => {
+    if (!settings) return null;
+    return {
+      notify_sound: settings.notify_sound === "true",
+      notify_browser: settings.notify_browser === "true",
+      notify_tab_badge: settings.notify_tab_badge === "true",
+    };
+  }, [settings]);
+
+  const triggerNotification = useTriggerNotification(notifSettings);
+
+  // Always read from ref so effects with suppressed deps get the latest title
+  const dataRef = useRef(data);
+  useEffect(() => { dataRef.current = data; }, [data]);
+  const getSessionTitle = useCallback(() => {
+    const s = dataRef.current?.metadata;
+    if (!s) return "Claude";
+    return s.custom_name ?? s.generated_title ?? s.first_prompt?.slice(0, 60) ?? "Claude";
+  }, []);
+
+  // Clear tab badge when user opens this session
+  useEffect(() => {
+    clearTabBadge();
+  }, [sessionId]);
+
+  // Notify when web streaming finishes + start backoff to catch follow-up messages
+  const prevStreamingRef = useRef(false);
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current;
+    prevStreamingRef.current = isStreaming;
+    if (!wasStreaming || isStreaming) return; // only on transition true→false
+    if (!streamingText && !data?.messages?.length) return; // nothing happened
+    triggerNotification(getSessionTitle());
+    startBackoff();
+  }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Start backoff on initial load for recently-modified inactive sessions
+  const backoffInitRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!data || data.is_active || backoffInitRef.current === data.session_id) return;
+    backoffInitRef.current = data.session_id;
+    const ageMs = Date.now() - new Date(data.metadata.modified_at).getTime();
+    if (ageMs < 20 * 60 * 1000) startBackoff();
+  }, [data, startBackoff]);
+
+  // Notify when terminal session goes inactive + start backoff
+  const prevIsActiveRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const wasActive = prevIsActiveRef.current;
+    prevIsActiveRef.current = data?.is_active ?? null;
+    if (wasActive === true && data?.is_active === false && !isStreaming) {
+      triggerNotification(getSessionTitle());
+      startBackoff();
+    }
+  }, [data?.is_active]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-retry countdown for interrupted sessions
+  const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryInitRef = useRef<string | null>(null);
+  const RETRY_DELAY = 30;
+
+  const cancelRetry = useCallback(() => {
+    if (retryTimerRef.current) clearInterval(retryTimerRef.current);
+    retryTimerRef.current = null;
+    setRetryCountdown(null);
+  }, []);
+
+  const isInterrupted = !!(
+    data && !data.is_active &&
+    data.metadata.last_message_role === "tool_result" &&
+    !isStreaming
+  );
+
+  useEffect(() => {
+    if (!isInterrupted || settings?.auto_retry_on_crash === "false") return;
+    // Only start once per session
+    if (retryInitRef.current === sessionId) return;
+    retryInitRef.current = sessionId;
+
+    setRetryCountdown(RETRY_DELAY);
+    let remaining = RETRY_DELAY;
+    retryTimerRef.current = setInterval(() => {
+      remaining--;
+      setRetryCountdown(remaining);
+      if (remaining <= 0) {
+        cancelRetry();
+        // Fire "continue"
+        queueRef.current.push("continue");
+        setQueuedMessages([...queueRef.current]);
+        processQueueRef.current();
+      }
+    }, 1000);
+    return () => cancelRetry();
+  }, [isInterrupted, sessionId, settings?.auto_retry_on_crash, cancelRetry]);
+
+  // Cancel retry when user starts typing or streaming starts
+  useEffect(() => {
+    if (isStreaming && retryCountdown !== null) cancelRetry();
+  }, [isStreaming, retryCountdown, cancelRetry]);
+
+  // Stable ref so the retry timer (defined before processQueue) can call it
+  const processQueueRef = useRef<() => void>(() => {});
 
   // Process next message in queue
   const processQueue = useCallback(async () => {
@@ -101,6 +514,7 @@ export default function SessionDetailPage({
     const message = queueRef.current.shift();
     if (!message) return;
 
+    setQueuedMessages([...queueRef.current]);
     processingRef.current = true;
     setHasReplied(true);
 
@@ -112,9 +526,12 @@ export default function SessionDetailPage({
       content: message,
     };
     setExtraMessages((prev) => [...prev, userMsg]);
+    setLastSentText(message);
     setStreamingText("");
     setStreamError(null);
+    setStreamStatus(null);
     setIsStreaming(true);
+    lastStreamEventRef.current = Date.now();
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -159,11 +576,15 @@ export default function SessionDetailPage({
 
         for (const line of lines) {
           if (line.startsWith("data: ")) {
+            lastStreamEventRef.current = Date.now();
             try {
               const evt = JSON.parse(line.slice(6));
               if (evt.type === "text" || evt.type === "chunk") {
                 fullText += evt.text;
                 setStreamingText(fullText);
+                setStreamStatus(null);
+              } else if (evt.type === "status") {
+                setStreamStatus(evt.text);
               } else if (evt.type === "error") {
                 setStreamError(evt.text);
               } else if (evt.type === "done") {
@@ -174,6 +595,9 @@ export default function SessionDetailPage({
             } catch {
               // ignore parse errors
             }
+          } else if (line.startsWith(":")) {
+            // SSE comment (keepalive ping) — just update timestamp
+            lastStreamEventRef.current = Date.now();
           }
         }
       }
@@ -189,34 +613,299 @@ export default function SessionDetailPage({
         setExtraMessages((prev) => [...prev, assistantMsg]);
       }
       setStreamingText("");
-      setStreamError(null);
+      setStreamStatus(null);
 
-      // Re-fetch canonical data; clear extras only after server data arrives
-      fetchSession({ clearExtras: true });
+      // Only clear extras & error if we got a real response;
+      // otherwise keep the user's message and error visible
+      if (fullText) {
+        setStreamError(null);
+        fetchSession({ clearExtras: true }).catch(() => {});
+      } else {
+        // No response — start backoff poll so session data refreshes eventually
+        startBackoff();
+      }
     } catch (err) {
       // Don't show error if request was aborted (session switch)
-      if (err instanceof DOMException && err.name === "AbortError") return;
+      if ((err instanceof DOMException && err.name === "AbortError") || err === "cancelled") return;
+      const detail = err instanceof Error ? err.message : String(err);
       // Bake error into extraMessages so it persists after streaming ends
       const errorMsg: ParsedMessage = {
         uuid: `error-${Date.now()}`,
         type: "assistant",
         timestamp: new Date().toISOString(),
-        content: "Failed to send message",
+        content: `Failed to send message: ${detail}`,
       };
       setExtraMessages((prev) => [...prev, errorMsg]);
       setStreamError(null);
     } finally {
       setIsStreaming(false);
+      setLastSentText(null);
       processingRef.current = false;
-      // Process next queued message
-      processQueue();
+      // Schedule next message asynchronously to avoid concurrent streaming
+      setTimeout(() => processQueueRef.current(), 0);
     }
   }, [sessionId, fetchSession]);
+  processQueueRef.current = processQueue;
+
+  // Auto-find matching message for highlight query, loading earlier batches if needed
+  useEffect(() => {
+    if (!highlightQuery || !data || loadingEarlier) return;
+
+    const allLoaded = [...earlierMessages, ...data.messages, ...extraMessages];
+    const found = allLoaded.find((m) => {
+      const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      return text.toLowerCase().includes(highlightQuery.toLowerCase());
+    });
+
+    if (found) {
+      setHighlightId(found.uuid);
+    } else if ((earliestLoaded ?? 0) > 0) {
+      // Not found yet — load earlier batch
+      loadEarlierMessages();
+    }
+  }, [highlightQuery, data, earlierMessages, extraMessages, earliestLoaded, loadingEarlier, loadEarlierMessages]);
+
+  const handleSendDirect = useCallback((message: string) => {
+    setContextGuardError(null);
+    queueRef.current.push(message);
+    setQueuedMessages([...queueRef.current]);
+    processQueue();
+  }, [processQueue]);
 
   const handleSend = (message: string) => {
-    queueRef.current.push(message);
-    processQueue();
+    // Warn once per page load if skip-permissions is off
+    if (!skipPermsShown && settings?.dangerously_skip_permissions !== "true") {
+      setSkipPermsDialog({ message });
+      setSkipPermsShown(true);
+      return;
+    }
+
+    if (settings?.context_guard_enabled === "true" && data) {
+      const minMessages = parseInt(settings.context_guard_min_messages || "6", 10);
+      const messageCount = data.metadata?.message_count ?? 0;
+
+      if (messageCount >= minMessages) {
+        const result = checkContextGuard(
+          message,
+          data.metadata?.generated_title ?? null,
+          data.metadata?.first_prompt ?? null,
+        );
+
+        if (!result.skipped) {
+          const blockThreshold = parseInt(settings.context_guard_block_threshold || "90", 10);
+          const warnThreshold = parseInt(settings.context_guard_warn_threshold || "80", 10);
+
+          if (result.score >= blockThreshold) {
+            setContextGuardError(
+              `This message appears off-topic for this session (${result.score}% confidence). Start a new session instead.`
+            );
+            return;
+          }
+
+          if (result.score >= warnThreshold) {
+            setContextGuardDialog({ open: true, message, score: result.score });
+            return;
+          }
+        }
+      }
+    }
+
+    handleSendDirect(message);
   };
+
+  const insertAtNewSessionCursor = (text: string) => {
+    const textarea = newSessionInputRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = newSessionMessage.slice(0, start);
+    const after = newSessionMessage.slice(end);
+    const separator = before && !before.endsWith("\n") ? "\n" : "";
+    const newVal = before + separator + text + after;
+    setNewSessionMessage(newVal);
+    requestAnimationFrame(() => {
+      const pos = start + separator.length + text.length;
+      textarea.setSelectionRange(pos, pos);
+      textarea.focus();
+    });
+  };
+
+  const uploadNewSessionFiles = async (files: File[]) => {
+    for (const file of files) {
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        const data = await res.json();
+        insertAtNewSessionCursor(data.path || file.name);
+      } catch {
+        insertAtNewSessionCursor(file.name);
+      }
+    }
+  };
+
+  const handleNewSessionDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    newDragCounterRef.current = 0;
+    setNewSessionDragging(false);
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length > 0) uploadNewSessionFiles(files);
+  };
+
+  const handleNewSessionDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    newDragCounterRef.current++;
+    setNewSessionDragging(true);
+  };
+
+  const handleNewSessionDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    newDragCounterRef.current--;
+    if (newDragCounterRef.current <= 0) {
+      newDragCounterRef.current = 0;
+      setNewSessionDragging(false);
+    }
+  };
+
+  const handleNewSessionDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleNewSessionFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 0) await uploadNewSessionFiles(files);
+    if (newFileInputRef.current) newFileInputRef.current.value = "";
+  };
+
+  const handleNewSessionAutodetect = async () => {
+    const firstPath = await newAutodetect.detect(newSessionMessage);
+    if (firstPath) setNewSessionPath(firstPath);
+  };
+
+  const handleStartNewSession = async () => {
+    const msg = newSessionMessage.trim();
+    if (!msg || !newSessionPath || startingNewSession) return;
+    setStartingNewSession(true);
+    setError(null);
+
+    try {
+      let fullMessage = msg;
+
+      // Optionally prepend smart context from previous session
+      if (includeSummary) {
+        try {
+          const ctxRes = await fetch(`/api/sessions/${sessionId}/context`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question: msg }),
+          });
+          if (ctxRes.ok) {
+            const ctxData = await ctxRes.json();
+            if (ctxData.context && ctxData.context.length > 20) {
+              fullMessage = `<context>\nRelevant context from previous session:\n${ctxData.context}\n</context>\n\n${msg}`;
+            }
+          }
+        } catch { /* non-critical — send without context */ }
+      }
+
+      const res = await fetch("/api/sessions/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: newSessionPath, message: fullMessage }),
+      });
+
+      if (!res.ok) throw new Error("Failed to start session");
+
+      // Read SSE stream to get session_id, then navigate
+      if (res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let navigated = false;
+
+        const readStream = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const text = decoder.decode(value, { stream: true });
+              for (const line of text.split("\n")) {
+                if (!line.startsWith("data: ")) continue;
+                try {
+                  const obj = JSON.parse(line.slice(6));
+                  if (obj.type === "session_id" && obj.session_id && !navigated) {
+                    navigated = true;
+                    router.push(`/claude-sessions/${obj.session_id}`);
+                  }
+                } catch { /* skip non-JSON */ }
+              }
+            }
+          } catch { /* stream closed */ }
+        };
+
+        // Start reading but don't block — navigate happens inside
+        readStream();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start new session");
+      setStartingNewSession(false);
+    }
+  };
+
+  const removeQueued = (index: number) => {
+    queueRef.current.splice(index, 1);
+    setQueuedMessages([...queueRef.current]);
+  };
+
+  const cancelStreaming = useCallback(() => {
+    abortRef.current?.abort("cancelled");
+    setIsStreaming(false);
+    setStreamingText("");
+    setStreamError(null);
+    setStreamStatus(null);
+    setLastSentText(null);
+    processingRef.current = false;
+    // Also clear the queue
+    queueRef.current = [];
+    setQueuedMessages([]);
+  }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isInput = tag === "TEXTAREA" || tag === "INPUT";
+
+      // Escape → cancel streaming (works everywhere)
+      if (e.key === "Escape" && isStreaming) {
+        e.preventDefault();
+        cancelStreaming();
+        return;
+      }
+
+      // Cmd/Ctrl+L → focus reply input
+      if ((e.metaKey || e.ctrlKey) && e.key === "l") {
+        e.preventDefault();
+        replyInputRef.current?.focus();
+        return;
+      }
+
+      // Cmd/Ctrl+K → clear visible extras (only when not in input)
+      if ((e.metaKey || e.ctrlKey) && e.key === "k" && !isInput) {
+        e.preventDefault();
+        setExtraMessages([]);
+        setEarlierMessages([]);
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isStreaming, cancelStreaming]);
 
   // Redirect to session list if session not found (must be before any conditional returns)
   useEffect(() => {
@@ -233,8 +922,18 @@ export default function SessionDetailPage({
     );
   }
 
-  const totalTokens =
-    data.metadata.total_input_tokens + data.metadata.total_output_tokens;
+  // Use last assistant message's usage — this reflects the actual current context window size.
+  // Cumulative total_input_tokens is wrong: each turn re-sends full context so it grows as N².
+  // Must include cache_read + cache_creation — with prompt caching most tokens are there.
+  const lastUsage = [...data.messages]
+    .reverse()
+    .find((m) => m.type === "assistant" && m.usage)?.usage;
+  const totalTokens = lastUsage
+    ? (lastUsage.input_tokens || 0)
+      + (lastUsage.cache_read_input_tokens || 0)
+      + (lastUsage.cache_creation_input_tokens || 0)
+      + (lastUsage.output_tokens || 0)
+    : 0;
 
 
   const killTerminal = async () => {
@@ -244,6 +943,30 @@ export default function SessionDetailPage({
     } catch {
       // ignore
     }
+  };
+
+  const handleShare = async () => {
+    setShareState("loading");
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/share`, { method: "POST" });
+      const json = await res.json();
+      if (json.url) {
+        setShareUrl(json.url);
+        setShareState("done");
+      } else {
+        setShareState("idle");
+        alert(`Share failed: ${json.error ?? "unknown error"}`);
+      }
+    } catch {
+      setShareState("idle");
+    }
+  };
+
+  const copyShareUrl = () => {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const openInTerminal = async () => {
@@ -260,125 +983,822 @@ export default function SessionDetailPage({
     }
   };
 
-  // Combine server messages + extra (optimistic user + streaming assistant)
-  // Extras are cleared after each successful reply, so no duplication
-  const allMessages = [...data.messages, ...extraMessages];
+  const focusTerminal = async () => {
+    setFocusError(null);
+    setFocusOk(false);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/focus`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json();
+        setFocusError(err.error ?? "Failed to focus terminal");
+      } else {
+        setFocusOk(true);
+        setTimeout(() => setFocusOk(false), 2000);
+      }
+    } catch {
+      setFocusError("Failed to focus terminal");
+    }
+  };
 
-  const queueSize = queueRef.current.length;
+  // Combine: earlier (paginated) + server messages + extra (optimistic/streaming)
+  const allMessages = [...earlierMessages, ...data.messages, ...extraMessages];
+  const hasEarlier = (earliestLoaded ?? 0) > 0;
+
+  // Detect if Claude is in a tool-use cycle (sent tool_use, waiting for result → will auto-continue).
+  // This means Claude is WORKING, not waiting for user input, even though last_message_role === "assistant".
+  const lastAssistantMsg = [...data.messages].reverse().find((m) => m.type === "assistant");
+  const isInToolCycle = !!(
+    data.metadata.last_message_role === "assistant" &&
+    lastAssistantMsg &&
+    Array.isArray(lastAssistantMsg.content) &&
+    lastAssistantMsg.content.some((b: { type: string }) => b.type === "tool_use")
+  );
+
+  const enabledSettings = settings
+    ? Object.entries(settings)
+        .filter(([, v]) => v === "true")
+        .map(([k]) => SETTING_LABELS[k] || k)
+    : [];
 
   return (
     <>
-      {/* Session header */}
-      <div className="border-b border-border px-4 py-3 flex items-center gap-3 min-h-[52px] shrink-0">
-        <StatusBadge active={data.is_active} />
-        <div className="flex-1 min-w-0">
-          <h2 className="text-sm font-medium truncate">
-            {data.metadata.custom_name ||
-              data.metadata.first_prompt?.slice(0, 100) ||
-              data.session_id.slice(0, 8)}
-          </h2>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-            <span className="truncate">
-              {data.project_path.split("/").pop()}
-            </span>
-            {data.metadata.git_branch && data.metadata.git_branch !== "HEAD" && (
-              <span className="flex items-center gap-1 shrink-0">
-                <GitBranch className="h-3 w-3" />
-                {data.metadata.git_branch}
-              </span>
-            )}
-            <span className="flex items-center gap-1 shrink-0">
-              <Hash className="h-3 w-3" />
-              {data.metadata.message_count}
-            </span>
-            {totalTokens > 0 && (
-              <span className="flex items-center gap-1 shrink-0">
-                <Zap className="h-3 w-3" />
-                {formatTokens(totalTokens)}
-              </span>
-            )}
-            {data.metadata.model && (
-              <Badge variant="secondary" className="text-[10px] h-4 px-1.5 shrink-0">
-                {data.metadata.model.replace("claude-", "")}
-              </Badge>
-            )}
-          </div>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="shrink-0 gap-1.5 text-xs h-7"
-          onClick={openInTerminal}
-        >
-          <Terminal className="h-3.5 w-3.5" />
-          Open in Terminal
-        </Button>
+      {/* Session header — single line: status + title */}
+      <div className="border-b border-border px-5 py-2 flex items-center gap-3 min-h-[40px] shrink-0">
+        <StatusBadge status={isInToolCycle ? "active" : getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role })} />
+        <h2 className="text-sm font-medium flex-1 min-w-0 line-clamp-2">
+          {data.metadata.custom_name ||
+          data.metadata.first_prompt?.slice(0, 200) ||
+          data.session_id.slice(0, 8)}
+        </h2>
       </div>
 
-      {/* Messages */}
-      <MessageView
-        messages={allMessages}
-        sessionId={data.session_id}
-        streamingText={streamingText}
-        isStreaming={isStreaming}
-        streamError={streamError}
-      />
+      {/* Two-column layout: messages left, reply panel right */}
+      <div className="flex-1 flex min-h-0">
+        {/* ── Left: Messages ──────────────────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          {/* Messages — auto-loads earlier on scroll to top */}
+          <MessageView
+            messages={allMessages}
+            sessionId={data.session_id}
+            streamingText={streamingText}
+            isStreaming={isStreaming}
+            streamError={streamError}
+            highlightId={highlightId}
+            highlightQuery={highlightQuery ?? undefined}
+            folded={folded}
+            projectPath={data.project_path}
+            onLoadEarlier={hasEarlier ? loadEarlierMessages : undefined}
+            loadingEarlier={loadingEarlier}
+          />
 
-      {/* Kill terminal banner — shown when auto-kill is off and user has replied */}
-      {hasReplied && !terminalKilled && data.is_active && (
-        <div className="flex items-center gap-2 px-4 py-2 border-t border-border bg-muted/50 text-xs text-muted-foreground shrink-0">
-          <Terminal className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1">
-            This session is still running in a terminal — replies may diverge.
-          </span>
-          <Button
-            size="sm"
-            variant="outline"
-            className="shrink-0 gap-1.5 text-xs h-7"
-            onClick={killTerminal}
-          >
-            <X className="h-3 w-3" />
-            Close terminal session
-          </Button>
+          {/* Permission requests from Claude CLI */}
+          {pendingPermissions.length > 0 && (
+            <div className="border-t border-amber-500/30 bg-amber-500/5 px-4 py-2.5 space-y-2 shrink-0">
+              {pendingPermissions.map((perm) => (
+                <div key={perm.id} className="flex items-start gap-3">
+                  <ShieldCheck className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium text-foreground">
+                      Claude wants to use <span className="font-mono text-amber-600 dark:text-amber-400">{perm.toolName}</span>
+                    </div>
+                    {perm.toolInput && Object.keys(perm.toolInput).length > 0 && (
+                      <div className="text-[11px] text-muted-foreground mt-0.5 font-mono truncate max-w-full">
+                        {perm.toolName === "Bash" && perm.toolInput.command
+                          ? String(perm.toolInput.command).slice(0, 120)
+                          : perm.toolName === "Edit" || perm.toolName === "Write"
+                            ? String(perm.toolInput.file_path || "")
+                            : JSON.stringify(perm.toolInput).slice(0, 120)}
+                      </div>
+                    )}
+                    <div className="text-[10px] text-muted-foreground/60 mt-0.5">
+                      {perm.cwd?.split(/[\\/]/).pop()}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2.5 text-[11px] border-green-600/40 text-green-600 hover:bg-green-600 hover:text-white"
+                      onClick={() => handlePermissionDecide(perm.id, "allow")}
+                    >
+                      Allow
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2.5 text-[11px] border-red-600/40 text-red-500 hover:bg-red-600 hover:text-white"
+                      onClick={() => handlePermissionDecide(perm.id, "deny")}
+                    >
+                      Deny
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Queued messages waiting to be sent */}
+          {queuedMessages.length > 0 && (
+            <div className="border-t border-border px-4 py-2 space-y-1.5 shrink-0 bg-muted/20">
+              {queuedMessages.map((msg, i) => (
+                <div key={i} className="flex items-start gap-2 group">
+                  <div className="flex-1 min-w-0 text-xs text-muted-foreground bg-muted/40 rounded px-2.5 py-1.5 border border-border/50 line-clamp-2">
+                    {msg}
+                  </div>
+                  <button
+                    onClick={() => removeQueued(i)}
+                    className="shrink-0 mt-1 text-muted-foreground/40 hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                    title="Remove from queue"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              <div className="text-[10px] text-muted-foreground/50">
+                {queuedMessages.length} queued
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Right: Reply panel ──────────────────────────────────────────────── */}
+        {!rightPanelOpen && (
+          <div className="shrink-0 border-l border-border flex flex-col items-center py-2 bg-muted/30 w-10">
+            <button
+              onClick={() => setRightPanelOpen(true)}
+              className="p-1.5 rounded hover:bg-muted text-muted-foreground/60 hover:text-foreground transition-colors"
+              title="Show panel"
+            >
+              <PanelRight className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+        <div className={`shrink-0 border-l border-border flex flex-col bg-muted/30 transition-[width] duration-200 ease-in-out overflow-hidden ${rightPanelOpen ? "w-96" : "w-0 border-l-0"}`}>
+          {/* Panel header with collapse button */}
+          <div className="flex items-center justify-end px-2 pt-1.5 shrink-0">
+            <button
+              onClick={() => setRightPanelOpen(false)}
+              className="p-1 rounded hover:bg-muted text-muted-foreground/40 hover:text-foreground transition-colors"
+              title="Hide panel"
+            >
+              <PanelRightClose className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {/* Scrollable info section */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-0 space-y-2">
+            {/* Session metadata */}
+            <div className="text-xs text-muted-foreground space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate">{data.project_path.split(/[\\/]/).pop()}</span>
+                {data.metadata.git_branch && data.metadata.git_branch !== "HEAD" && (
+                  <span className="flex items-center gap-1 shrink-0">
+                    <GitBranch className="h-3 w-3" />
+                    {data.metadata.git_branch}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="flex items-center gap-1">
+                  <Hash className="h-3 w-3" />
+                  {data.metadata.message_count} messages
+                </span>
+                {data.metadata.model && (
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+                    {data.metadata.model.replace("claude-", "")}
+                  </Badge>
+                )}
+                {totalTokens > 0 && <ContextBar tokens={totalTokens} />}
+              </div>
+            </div>
+
+            {/* Terminal group: Open / Focus / Kill */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 text-xs h-7"
+                onClick={openInTerminal}
+              >
+                <Terminal className="h-3.5 w-3.5" />
+                Open Terminal
+              </Button>
+              {data.is_active && (
+                <>
+                  <Button size="sm" variant="ghost" className="gap-1 text-xs h-7" onClick={focusTerminal} title="Bring terminal into focus">
+                    <Crosshair className="h-3.5 w-3.5" />
+                    {focusOk ? "Focused!" : "Focus"}
+                  </Button>
+                  {!terminalKilled && (
+                    <Button size="sm" variant="ghost" className="gap-1 text-xs h-7 text-destructive/60 hover:text-destructive" onClick={killTerminal} title="Kill terminal session">
+                      <X className="h-3.5 w-3.5" />
+                      Kill
+                    </Button>
+                  )}
+                </>
+              )}
+              {focusError && (
+                <span className="text-[10px] text-amber-600 dark:text-amber-400">{focusError}</span>
+              )}
+            </div>
+
+            {/* Actions: fold / download / share */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Button
+                size="sm"
+                variant={folded ? "secondary" : "ghost"}
+                className="gap-1 text-xs h-7"
+                onClick={() => setFolded((v) => !v)}
+                title={folded ? "Unfold — show all messages" : "Fold — collapse Claude messages"}
+              >
+                {folded ? <ChevronsUpDown className="h-3.5 w-3.5" /> : <ChevronsDownUp className="h-3.5 w-3.5" />}
+                {folded ? "Unfold" : "Fold"}
+              </Button>
+              <a
+                href={`/api/sessions/${data.session_id}/export?format=text`}
+                download={`${data.session_id.slice(0, 8)}-messages.txt`}
+                title="Download messages as readable text"
+                className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Log
+              </a>
+              <Button
+                size="sm"
+                variant={learningsOpen ? "secondary" : "ghost"}
+                className="gap-1 text-xs h-7"
+                onClick={async () => {
+                  if (learningsOpen) {
+                    setLearningsOpen(false);
+                    return;
+                  }
+                  setLearningsOpen(true);
+                  if (learnings) return; // already loaded
+                  setLearningsLoading(true);
+                  setLearningsError(null);
+                  try {
+                    const res = await fetch(`/api/sessions/${data.session_id}/learnings`, { method: "POST" });
+                    const json = await res.json();
+                    if (json.error) {
+                      setLearningsError(json.error);
+                    } else {
+                      setLearnings(json.learnings);
+                    }
+                  } catch (e) {
+                    setLearningsError(e instanceof Error ? e.message : "Failed to extract");
+                  } finally {
+                    setLearningsLoading(false);
+                  }
+                }}
+                title="Extract learnings from this session"
+              >
+                {learningsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="h-3.5 w-3.5" />}
+                Learnings
+              </Button>
+              {shareState === "done" && shareUrl ? (
+                <div className="flex items-center gap-1">
+                  <a
+                    href={shareUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 max-w-[140px] truncate"
+                  >
+                    {shareUrl.replace(/^https?:\/\//, "")}
+                  </a>
+                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={copyShareUrl} title="Copy link">
+                    {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                  </Button>
+                </div>
+              ) : (
+                <Button size="sm" variant="ghost" className="gap-1 text-xs h-7" onClick={handleShare} disabled={shareState === "loading"} title="Share session">
+                  {shareState === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Share2 className="h-3.5 w-3.5" />}
+                  Share
+                </Button>
+              )}
+            </div>
+
+            {/* Status alerts: crashed > streaming > terminal active */}
+            {isInterrupted && !isStreaming ? (
+              <div className="flex items-start gap-2 p-2.5 text-xs rounded-lg border border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-400">
+                <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <span>Crashed mid-execution</span>
+                  {retryCountdown !== null && (
+                    <span className="block mt-0.5 opacity-80">Auto-retry in <strong>{retryCountdown}s</strong></span>
+                  )}
+                  <div className="flex gap-1.5 mt-1.5">
+                    {retryCountdown !== null ? (
+                      <Button size="sm" variant="ghost" className="h-5 text-[11px] px-1.5 gap-0.5 text-orange-700 dark:text-orange-400 hover:bg-orange-500/10" onClick={cancelRetry}>
+                        <X className="h-2.5 w-2.5" /> Cancel
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="ghost" className="h-5 text-[11px] px-1.5 text-orange-700 dark:text-orange-400 hover:bg-orange-500/10" onClick={() => { queueRef.current.push("continue"); setQueuedMessages([...queueRef.current]); processQueue(); }}>
+                        Retry now
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : isStreaming ? (
+              <div className="flex items-center gap-2 p-2.5 text-xs rounded-lg border border-orange-500/30 bg-orange-500/5 text-orange-600 dark:text-orange-400">
+                <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                <span className="flex-1 truncate">{streamStatus || "Thinking…"}</span>
+                <button onClick={cancelStreaming} className="text-muted-foreground/60 hover:text-foreground transition-colors" title="Stop (Esc)">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : data.is_active && !queuedMessages.length ? (
+              <div className="flex items-center gap-2 p-2.5 text-xs rounded-lg border border-border bg-muted/30 text-muted-foreground">
+                {(data.metadata.last_message_role === "user" || hasReplied || isInToolCycle)
+                  ? <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                  : <Terminal className="h-3 w-3 shrink-0 opacity-60" />
+                }
+                <span>
+                  {(data.metadata.last_message_role === "user" || isInToolCycle)
+                    ? "Claude is working…"
+                    : hasReplied
+                      ? "Waiting for Claude…"
+                      : "Waiting for reply"}
+                </span>
+              </div>
+            ) : null}
+
+            {/* Context Guard error */}
+            {contextGuardError && (
+              <div className="flex items-start gap-2 p-2.5 text-xs text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span className="flex-1">{contextGuardError}</span>
+                <button className="text-red-400 hover:text-red-300 shrink-0" onClick={() => setContextGuardError(null)}>
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+
+            {/* Learnings panel */}
+            {learningsOpen && (
+              <div className="border border-border/50 rounded-lg bg-card/50 overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
+                  <span className="text-xs font-medium flex items-center gap-1.5">
+                    <Lightbulb className="h-3 w-3 text-amber-500" />
+                    Session Learnings
+                  </span>
+                  <button onClick={() => setLearningsOpen(false)} className="text-muted-foreground/50 hover:text-muted-foreground">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                <div className="px-3 py-2 max-h-[400px] overflow-y-auto space-y-3">
+                  {learningsLoading && (
+                    <div className="flex items-center gap-2 py-4 justify-center text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Extracting learnings via Haiku…
+                    </div>
+                  )}
+                  {learningsError && (
+                    <div className="text-xs text-red-500 py-2">{learningsError}</div>
+                  )}
+                  {learnings && (() => {
+                    const l = learnings as Record<string, string | string[]>;
+                    const categories = [
+                      { key: "summary", label: "Summary", single: true },
+                      { key: "claude_md_rules", label: "CLAUDE.md Rules", single: false },
+                      { key: "patterns", label: "Patterns", single: false },
+                      { key: "bugs_fixed", label: "Bugs Fixed", single: false },
+                      { key: "tools_learned", label: "Tools Learned", single: false },
+                      { key: "preferences", label: "Preferences", single: false },
+                      { key: "gotchas", label: "Gotchas", single: false },
+                    ];
+                    return categories.map(({ key, label, single }) => {
+                      const val = l[key];
+                      if (!val || (Array.isArray(val) && val.length === 0)) return null;
+                      return (
+                        <div key={key}>
+                          <div className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-1">{label}</div>
+                          {single ? (
+                            <p className="text-xs text-foreground/80 leading-relaxed">{val as string}</p>
+                          ) : (
+                            <ul className="space-y-1">
+                              {(val as string[]).map((item, i) => (
+                                <li key={i} className="text-xs text-foreground/80 leading-relaxed flex gap-1.5">
+                                  <span className="text-muted-foreground/40 shrink-0">•</span>
+                                  <span
+                                    className="cursor-pointer hover:bg-muted/50 rounded px-0.5 -mx-0.5 transition-colors"
+                                    onClick={() => navigator.clipboard.writeText(item)}
+                                    title="Click to copy"
+                                  >{item}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* Settings & shortcuts */}
+            {enabledSettings.length > 0 && (
+              <div className="text-[10px] text-muted-foreground/50">
+                {enabledSettings.join(" · ")}
+              </div>
+            )}
+            <div className="text-[10px] text-muted-foreground/40 flex items-center gap-3">
+              <span><kbd className="font-mono">Esc</kbd> stop</span>
+              <span><kbd className="font-mono">⌘L</kbd> input</span>
+            </div>
+
+            {/* Navigation — 2 columns */}
+            <div className="pt-1 border-t border-border/30 grid grid-cols-2 gap-x-1 gap-y-0.5">
+              <Link href="/claude-sessions/settings" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <Settings className="h-4 w-4 shrink-0" />
+                Settings
+              </Link>
+              <Link href="/claude-sessions/actions" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <ClipboardList className="h-4 w-4 shrink-0" />
+                Actions log
+              </Link>
+              <Link href="/claude-sessions/analytics" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <BarChart2 className="h-4 w-4 shrink-0" />
+                Analytics
+              </Link>
+              <Link href="/claude-sessions/archive" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <Archive className="h-4 w-4 shrink-0" />
+                Archive
+              </Link>
+              <Link href="/claude-sessions/store" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <Package className="h-4 w-4 shrink-0" />
+                Store
+              </Link>
+              <Link href="/claude-sessions/help" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <CircleHelp className="h-4 w-4 shrink-0" />
+                Help
+              </Link>
+              <button
+                onClick={() => {
+                  const next = theme === "dark" ? "light" : "dark";
+                  setTheme(next);
+                  document.documentElement.className = next === "light" ? "" : "dark";
+                  localStorage.setItem("theme", next);
+                }}
+                className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
+              >
+                {theme === "dark" ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
+                Theme
+              </button>
+            </div>
+          </div>
+
+          {/* Sent message confirmation */}
+          {lastSentText && (
+            <div className="shrink-0 px-4 pt-2">
+              <div className="flex items-start gap-2 p-2 text-xs rounded-lg border border-green-500/20 bg-green-500/5 text-green-700 dark:text-green-400">
+                <Check className="h-3 w-3 shrink-0 mt-0.5" />
+                <span className="flex-1 line-clamp-2 break-words">{lastSentText}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Reply input — pinned to bottom */}
+          <div className="shrink-0 px-4 pb-4 pt-2">
+            {/* Mode toggle — only when new_session_from_reply is enabled */}
+            {settings?.new_session_from_reply === "true" && (
+              <div className="flex items-center gap-1 mb-1.5 pl-1">
+                <button
+                  onClick={() => {
+                    if (replyMode === "new" && newSessionMessage.trim()) {
+                      replyInputRef.current?.setText(newSessionMessage);
+                      setNewSessionMessage("");
+                    }
+                    setReplyMode("reply");
+                    setTimeout(() => replyInputRef.current?.focus(), 50);
+                  }}
+                  className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${replyMode === "reply" ? "text-foreground bg-muted font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
+                >
+                  Reply
+                </button>
+                <span className="text-muted-foreground/30 text-[11px]">/</span>
+                <button
+                  onClick={() => {
+                    if (replyMode === "reply") {
+                      const draft = replyInputRef.current?.getText() || "";
+                      if (draft.trim()) {
+                        setNewSessionMessage(draft);
+                        replyInputRef.current?.setText("");
+                      }
+                    }
+                    setReplyMode("new");
+                    setTimeout(() => newSessionInputRef.current?.focus(), 50);
+                  }}
+                  className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 ${replyMode === "new" ? "text-foreground bg-muted font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
+                >
+                  <Plus className="h-3 w-3" />
+                  New session
+                </button>
+              </div>
+            )}
+
+            {/* Reply input — always mounted so draft isn't lost */}
+            <div className={replyMode === "new" && settings?.new_session_from_reply === "true" ? "hidden" : ""}>
+              {settings?.new_session_from_reply !== "true" && (
+                <div className="text-[11px] text-muted-foreground/50 mb-1.5 pl-1">Continue session with a new message</div>
+              )}
+              <ReplyInput
+                ref={replyInputRef}
+                sessionId={data.session_id}
+                onSend={handleSend}
+                queueSize={queuedMessages.length}
+                isStreaming={isStreaming}
+              />
+            </div>
+
+            {/* New session form — same footprint as ReplyInput */}
+            {replyMode === "new" && settings?.new_session_from_reply === "true" && (
+              <div className="space-y-1.5">
+                {/* Autodetect suggestions */}
+                {newAutodetect.suggestions.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {newAutodetect.suggestions.map((s, i) => {
+                      const isSelected = newSessionPath === s.project_path;
+                      return (
+                        <button
+                          key={s.project_dir}
+                          onClick={() => {
+                            setNewSessionPath(s.project_path);
+                            newAutodetect.setAutodetected(true);
+                            setTimeout(() => newSessionInputRef.current?.focus(), 50);
+                          }}
+                          className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition-colors ${
+                            isSelected
+                              ? "border-violet-500/50 bg-violet-500/10 text-violet-400"
+                              : "border-border bg-card text-muted-foreground hover:border-violet-500/30 hover:text-violet-400"
+                          }`}
+                        >
+                          <span className="text-[10px] text-muted-foreground/50">{i + 1}</span>
+                          <FolderOpen className="h-3 w-3 shrink-0" />
+                          <span className="truncate max-w-[120px]">{s.display_name}</span>
+                        </button>
+                      );
+                    })}
+                    <button
+                      onClick={() => setFolderBrowserOpen(true)}
+                      className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-dashed border-border text-muted-foreground/50 hover:border-violet-500/30 hover:text-violet-400 transition-colors"
+                      title="Choose a different folder"
+                    >
+                      <FolderPlus className="h-3 w-3 shrink-0" />
+                      <span>other...</span>
+                    </button>
+                  </div>
+                )}
+
+                <input
+                  ref={newFileInputRef}
+                  type="file"
+                  className="hidden"
+                  multiple
+                  onChange={handleNewSessionFileInput}
+                />
+                <div
+                  className={`relative border rounded-lg transition-colors ${newSessionDragging ? "border-ring border-dashed bg-muted/40" : "border-input bg-muted/20"}`}
+                  onDrop={handleNewSessionDrop}
+                  onDragEnter={handleNewSessionDragEnter}
+                  onDragLeave={handleNewSessionDragLeave}
+                  onDragOver={handleNewSessionDragOver}
+                >
+                  {newSessionDragging && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-muted/60 pointer-events-none">
+                      <span className="text-xs text-muted-foreground font-medium">Drop to attach</span>
+                    </div>
+                  )}
+                  <textarea
+                    ref={newSessionInputRef}
+                    value={newSessionMessage}
+                    onChange={(e) => {
+                      setNewSessionMessage(e.target.value);
+                      if (newAutodetect.suggestions.length > 0) newAutodetect.clearSuggestions();
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        if (newSessionPath) {
+                          handleStartNewSession();
+                        } else {
+                          handleNewSessionAutodetect();
+                        }
+                      } else if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleStartNewSession();
+                      }
+                    }}
+                    placeholder="First message for new session..."
+                    rows={16}
+                    className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-16 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                    disabled={startingNewSession}
+                  />
+                  {/* Bottom bar — two rows */}
+                  <div className="absolute bottom-1 left-1.5 right-1.5 space-y-0.5">
+                    {/* Row 1: attach + folder + auto */}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => newFileInputRef.current?.click()}
+                        className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
+                        title="Attach file or drag & drop"
+                        type="button"
+                      >
+                        <Paperclip className="h-3 w-3" />
+                      </button>
+                      <button
+                        onClick={() => setFolderBrowserOpen(true)}
+                        className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded min-w-0 ${
+                          newAutodetect.autodetected
+                            ? "text-violet-500 hover:text-violet-600 hover:bg-violet-500/10"
+                            : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
+                        }`}
+                        title={newSessionPath || "Select folder"}
+                      >
+                        <FolderOpen className="h-3 w-3 shrink-0" />
+                        <span className="truncate max-w-[140px]">
+                          {newSessionPath ? newSessionPath.split(/[\\/]/).pop() : "folder..."}
+                        </span>
+                      </button>
+                      <button
+                        onClick={handleNewSessionAutodetect}
+                        disabled={!newSessionMessage.trim() || newAutodetect.detecting}
+                        className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-violet-500 disabled:opacity-30 transition-colors px-1.5 py-0.5 rounded hover:bg-violet-500/10"
+                        title="Auto-detect project from your prompt"
+                      >
+                        {newAutodetect.detecting ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3" />
+                        )}
+                        <span>auto</span>
+                      </button>
+                    </div>
+                    {/* Row 2: skip-perms, context, send */}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={skipPerms.toggle}
+                        className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
+                          skipPerms.value
+                            ? "text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
+                            : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
+                        }`}
+                        title={skipPerms.value ? "Skip permissions enabled — click to disable" : "Skip permissions disabled — click to enable"}
+                      >
+                        <ShieldOff className="h-3 w-3" />
+                        <span>skip perms</span>
+                        <span className={`font-medium ${skipPerms.value ? "text-amber-400" : "text-muted-foreground/60"}`}>
+                          {skipPerms.value ? "on" : "off"}
+                        </span>
+                      </button>
+                      <label
+                        className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground cursor-pointer select-none px-1 py-0.5 rounded hover:bg-muted/50"
+                        title={
+                          !includeSummary
+                            ? "Include relevant context from this session"
+                            : settings?.gemini_configured === "true"
+                              ? "Smart context: Gemini extracts only what's relevant to your question"
+                              : "Basic context: truncated transcript (connect Gemini in Settings for smart extraction)"
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={includeSummary}
+                          onChange={(e) => setIncludeSummary(e.target.checked)}
+                          className="h-3 w-3 rounded border-muted-foreground/30"
+                        />
+                        <span>Context</span>
+                        {includeSummary && settings?.gemini_configured !== "true" && (
+                          <AlertTriangle className="h-3 w-3 text-amber-500" />
+                        )}
+                      </label>
+                      <div className="flex-1" />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={handleStartNewSession}
+                        disabled={!newSessionMessage.trim() || !newSessionPath || startingNewSession}
+                      >
+                        {startingNewSession ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Send className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Folder browser dialog for new session */}
+          <FolderBrowserDialog
+            open={folderBrowserOpen}
+            onOpenChange={setFolderBrowserOpen}
+            onSelect={(path) => setNewSessionPath(path)}
+          />
+        </div>
+      </div>
+
+      {/* Skip Permissions warning dialog */}
+      {skipPermsDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 p-6 space-y-4">
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-yellow-500" />
+                Skip Permissions is off
+              </h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Web replies spawn <code className="text-[11px] px-1 py-0.5 bg-muted rounded">claude --resume -p</code> in
+                headless mode. Without <strong>skip permissions</strong>, Claude will hang
+                whenever it needs tool approval — there{"'"}s no terminal to approve it.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSkipPermsDialog(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const msg = skipPermsDialog.message;
+                  setSkipPermsDialog(null);
+                  handleSendDirect(msg);
+                }}
+              >
+                Send anyway
+              </Button>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await fetch("/api/settings", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ dangerously_skip_permissions: "true" }),
+                    });
+                    setSettings((prev) => prev ? { ...prev, dangerously_skip_permissions: "true" } : prev);
+                  } catch { /* best effort */ }
+                  const msg = skipPermsDialog.message;
+                  setSkipPermsDialog(null);
+                  handleSendDirect(msg);
+                }}
+              >
+                Enable &amp; Send
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Reply input — always enabled, queues messages */}
-      <ReplyInput
-        sessionId={data.session_id}
-        onSend={handleSend}
-        queueSize={queueSize}
-      />
-
-      {/* Active settings status bar */}
-      {settings && (() => {
-        const SETTING_LABELS: Record<string, string> = {
-          dangerously_skip_permissions: "Skip Permissions",
-          auto_kill_terminal_on_reply: "Auto-Kill Terminal",
-        };
-        const enabled = Object.entries(settings)
-          .filter(([, v]) => v === "true")
-          .map(([k]) => SETTING_LABELS[k] || k);
-
-        if (enabled.length === 0) return null;
-
-        return (
-          <div className="px-6 pb-4 pt-0 shrink-0 max-w-[900px]">
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground/60">
-              <span>
-                {enabled.join(", ")}
-              </span>
-              <Link
-                href="/claude-sessions/settings"
-                className="flex items-center gap-1 hover:text-muted-foreground transition-colors"
-                title="Settings"
+      {/* Context Guard warning dialog */}
+      {contextGuardDialog?.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 p-6 space-y-4">
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">Off-topic message detected</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                This question seems different from the session topic. Continuing may reduce
+                response quality because Claude{"'"}s context window will mix unrelated topics.
+              </p>
+              <p className="text-[11px] text-muted-foreground/60">
+                Off-topic confidence: {contextGuardDialog.score}%
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setContextGuardDialog(null);
+                  router.push("/claude-sessions");
+                }}
               >
-                <Settings className="h-3 w-3" />
-              </Link>
+                Start new session
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (contextGuardDialog) {
+                    handleSendDirect(contextGuardDialog.message);
+                  }
+                  setContextGuardDialog(null);
+                }}
+              >
+                Send anyway
+              </Button>
             </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
     </>
   );
 }

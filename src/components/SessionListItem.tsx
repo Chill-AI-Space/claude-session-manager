@@ -1,21 +1,24 @@
 "use client";
 
+import { memo } from "react";
 import Link from "next/link";
 import { SessionListItem } from "@/lib/types";
 import { StatusBadge } from "./StatusBadge";
-import { cn } from "@/lib/utils";
-import { GitBranch } from "lucide-react";
+import { cn, formatTokens } from "@/lib/utils";
+import { getActivityStatus } from "@/lib/activity-status";
+import { GitBranch, Archive } from "lucide-react";
 
 interface SessionListItemProps {
   session: SessionListItem;
   selected: boolean;
   snippet?: string;
+  highlightQuery?: string;
+  now?: number;
+  onArchive?: (sessionId: string) => void;
 }
 
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
+function formatRelativeTime(dateStr: string, now: number): string {
+  const diffMs = now - new Date(dateStr).getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
@@ -25,23 +28,22 @@ function formatRelativeTime(dateStr: string): string {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function formatShortTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleTimeString("en-US", {
+  return new Date(dateStr).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   });
 }
 
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string, now: number): string {
   const date = new Date(dateStr);
-  const now = new Date();
-  const isToday = date.toDateString() === now.toDateString();
-  const yesterday = new Date(now);
+  const nowDate = new Date(now);
+  const isToday = date.toDateString() === nowDate.toDateString();
+  const yesterday = new Date(nowDate);
   yesterday.setDate(yesterday.getDate() - 1);
   const isYesterday = date.toDateString() === yesterday.toDateString();
 
@@ -60,13 +62,9 @@ function getSessionTitle(session: SessionListItem): string {
   if (session.generated_title) return session.generated_title;
   if (session.first_prompt) {
     const text = session.first_prompt;
-    if (text.startsWith("[Request interrupted")) {
-      return session.session_id.slice(0, 8) + "...";
-    }
+    if (text.startsWith("[Request interrupted")) return session.session_id.slice(0, 8) + "...";
     const firstLine = text.split("\n")[0].trim();
-    return firstLine.length > 100
-      ? firstLine.slice(0, 100) + "..."
-      : firstLine;
+    return firstLine.length > 100 ? firstLine.slice(0, 100) + "..." : firstLine;
   }
   return session.session_id.slice(0, 8) + "...";
 }
@@ -74,82 +72,106 @@ function getSessionTitle(session: SessionListItem): string {
 function truncatePreview(text: string | null, maxLen: number): string | null {
   if (!text) return null;
   const firstLine = text.split("\n")[0].trim();
-  if (firstLine.length <= maxLen) return firstLine;
-  return firstLine.slice(0, maxLen) + "...";
+  return firstLine.length <= maxLen ? firstLine : firstLine.slice(0, maxLen) + "...";
 }
 
-import { formatTokens } from "@/lib/utils";
+export const SessionListItemComponent = memo(
+  function SessionListItemComponent({
+    session,
+    selected,
+    snippet,
+    highlightQuery,
+    now = Date.now(),
+    onArchive,
+  }: SessionListItemProps) {
+    const title = getSessionTitle(session);
+    const activityStatus = getActivityStatus(session, now);
+    const lastMessagePreview = truncatePreview(session.last_message, 120);
+    const totalTokens = session.total_input_tokens + session.total_output_tokens;
 
-export function SessionListItemComponent({
-  session,
-  selected,
-  snippet,
-}: SessionListItemProps) {
-  const title = getSessionTitle(session);
-  const lastMessagePreview = truncatePreview(session.last_message, 120);
-  const totalTokens =
-    session.total_input_tokens + session.total_output_tokens;
+    const href = highlightQuery
+      ? `/claude-sessions/${session.session_id}?q=${encodeURIComponent(highlightQuery)}`
+      : `/claude-sessions/${session.session_id}`;
 
-  return (
-    <Link
-      href={`/claude-sessions/${session.session_id}`}
-      className={cn(
-        "block px-3 py-2.5 mx-1 rounded cursor-pointer transition-colors",
-        selected
-          ? "bg-accent text-accent-foreground"
-          : "hover:bg-accent/50"
-      )}
-    >
-      {/* Row 1: Status + Title + Time */}
-      <div className="flex items-start gap-2">
-        <StatusBadge active={session.is_active} className="mt-1" />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-1.5 min-w-0">
-            <span className="text-[13px] font-medium min-w-0 flex-1 leading-snug line-clamp-2">
-              {title}
-            </span>
-            <span className="text-[10px] text-muted-foreground/70 shrink-0 tabular-nums">
-              {formatRelativeTime(session.modified_at)}
-            </span>
-          </div>
-
-          {/* Row 2: Last message preview or Gemini snippet */}
-          {snippet ? (
-            <p className="text-[11px] text-amber-500/80 mt-0.5 line-clamp-2 leading-relaxed">
-              {snippet}
-            </p>
-          ) : lastMessagePreview ? (
-            <p className="text-[11px] text-muted-foreground/80 mt-0.5 line-clamp-1 leading-relaxed">
-              {lastMessagePreview}
-            </p>
-          ) : null}
-
-          {/* Row 3: Meta — timestamps, branch, tokens */}
-          <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground/60 flex-wrap">
-            <span className="tabular-nums">
-              {formatDate(session.created_at)}
-            </span>
-            {session.created_at !== session.modified_at && (
-              <>
-                <span>-</span>
-                <span className="tabular-nums">
-                  {formatDate(session.modified_at)}
-                </span>
-              </>
-            )}
-            <span>{session.message_count} msgs</span>
-            {totalTokens > 0 && (
-              <span>{formatTokens(totalTokens)} tok</span>
-            )}
-            {session.git_branch && session.git_branch !== "HEAD" && (
-              <span className="flex items-center gap-0.5">
-                <GitBranch className="h-2.5 w-2.5" />
-                {session.git_branch}
+    return (
+      <Link
+        href={href}
+        className={cn(
+          "group/item block px-3 py-2.5 mx-1 rounded cursor-pointer transition-colors relative",
+          selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+        )}
+      >
+        {onArchive && (
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onArchive(session.session_id); }}
+            className="absolute top-1.5 right-1.5 p-1 rounded opacity-0 group-hover/item:opacity-100 hover:bg-muted text-muted-foreground/50 hover:text-muted-foreground transition-all z-20"
+            title="Archive session"
+          >
+            <Archive className="h-3 w-3" />
+          </button>
+        )}
+        <div className="flex items-start gap-2">
+          <StatusBadge status={activityStatus} className="mt-1" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-1.5 min-w-0">
+              <span className="text-[13px] font-medium min-w-0 flex-1 leading-snug line-clamp-2">
+                {title}
               </span>
-            )}
+              <span className="text-[10px] text-muted-foreground/70 shrink-0 tabular-nums">
+                {formatRelativeTime(session.modified_at, now)}
+              </span>
+            </div>
+
+            {snippet ? (
+              <p className="text-[11px] text-amber-500/80 mt-0.5 line-clamp-2 leading-relaxed">
+                {snippet}
+              </p>
+            ) : lastMessagePreview ? (
+              <p className="text-[11px] text-muted-foreground/80 mt-0.5 line-clamp-1 leading-relaxed">
+                {lastMessagePreview}
+              </p>
+            ) : null}
+
+            <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground/60 flex-wrap">
+              <span className="tabular-nums">{formatDate(session.created_at, now)}</span>
+              {session.created_at !== session.modified_at && (
+                <>
+                  <span>-</span>
+                  <span className="tabular-nums">{formatDate(session.modified_at, now)}</span>
+                </>
+              )}
+              <span>{session.message_count} msgs</span>
+              {totalTokens > 0 && <span>{formatTokens(totalTokens)} tok</span>}
+              {session.git_branch && session.git_branch !== "HEAD" && (
+                <span className="flex items-center gap-0.5">
+                  <GitBranch className="h-2.5 w-2.5" />
+                  {session.git_branch}
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    </Link>
-  );
-}
+      </Link>
+    );
+  },
+  // Custom equality: skip re-render unless something actually changed
+  (prev, next) => {
+    // Bucket `now` into 10-second intervals so minor tick changes don't re-render
+    const nowBucket = (n: number) => Math.floor(n / 10_000);
+    return (
+      prev.session.session_id === next.session.session_id &&
+      prev.session.modified_at === next.session.modified_at &&
+      prev.session.generated_title === next.session.generated_title &&
+      prev.session.custom_name === next.session.custom_name &&
+      prev.session.last_message === next.session.last_message &&
+      prev.session.message_count === next.session.message_count &&
+      prev.session.is_active === next.session.is_active &&
+      prev.session.last_message_role === next.session.last_message_role &&
+      prev.selected === next.selected &&
+      prev.snippet === next.snippet &&
+      prev.highlightQuery === next.highlightQuery &&
+      nowBucket(prev.now ?? 0) === nowBucket(next.now ?? 0) &&
+      prev.onArchive === next.onArchive
+    );
+  }
+);

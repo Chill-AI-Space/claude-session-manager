@@ -1,11 +1,13 @@
 import { getDb } from "./db";
 import { spawn } from "child_process";
+import { pathTail, SPAWN_SHELL } from "./utils";
 
 interface SessionForTitle {
   session_id: string;
   first_prompt: string | null;
   last_message: string | null;
   project_path: string;
+  message_count: number;
 }
 
 function runClaude(prompt: string, env: NodeJS.ProcessEnv): Promise<string> {
@@ -16,6 +18,7 @@ function runClaude(prompt: string, env: NodeJS.ProcessEnv): Promise<string> {
       {
         env,
         stdio: ["pipe", "pipe", "pipe"],
+        shell: SPAWN_SHELL,
       }
     );
 
@@ -63,13 +66,18 @@ export async function generateTitleBatch(
 ): Promise<{ generated: number; total: number }> {
   const db = getDb();
 
+  // Re-title every 6 messages (~3 exchanges) since last title was generated
+  const RETITLE_INTERVAL = 6;
+
   const whereClause = force
     ? "WHERE first_prompt IS NOT NULL"
-    : "WHERE generated_title IS NULL AND first_prompt IS NOT NULL";
+    : `WHERE first_prompt IS NOT NULL
+       AND (generated_title IS NULL
+            OR message_count >= COALESCE(titled_at_count, 0) + ${RETITLE_INTERVAL})`;
 
   const sessions = db
     .prepare(
-      `SELECT session_id, first_prompt, last_message, project_path
+      `SELECT session_id, first_prompt, last_message, project_path, message_count
        FROM sessions ${whereClause}
        ORDER BY modified_at DESC LIMIT ?`
     )
@@ -83,14 +91,16 @@ export async function generateTitleBatch(
 
   const sessionsText = sessions
     .map((s, i) => {
-      const project = s.project_path.split("/").pop() || "unknown";
-      const first = (s.first_prompt || "").slice(0, 200).replace(/\n/g, " ").replace(/"/g, "'");
-      const last = (s.last_message || "").slice(0, 150).replace(/\n/g, " ").replace(/"/g, "'");
-      return `[${i}] project=${project} | first: ${first} | last: ${last}`;
+      const project = pathTail(s.project_path) || "unknown";
+      const last = (s.last_message || "").slice(0, 300).replace(/\n/g, " ").replace(/"/g, "'");
+      const first = (s.first_prompt || "").slice(0, 120).replace(/\n/g, " ").replace(/"/g, "'");
+      return `[${i}] project=${project} | recent: ${last} | started_with: ${first}`;
     })
     .join("\n");
 
-  const prompt = `Generate a short descriptive title (5-10 words, no quotes) for each Claude Code session below. The title should capture what the session was about. Reply with ONLY numbered lines like:
+  const prompt = `Generate a short descriptive title (5-10 words, no quotes) for each Claude Code session.
+Weight RECENT activity most heavily — the title should reflect what was accomplished at the END of the session, not just how it started. Only fall back to "started_with" if "recent" is ambiguous.
+Reply with ONLY numbered lines like:
 [0] Title here
 [1] Another title
 
@@ -99,7 +109,7 @@ ${sessionsText}`;
   const stdout = await runClaude(prompt, env);
 
   const updateStmt = db.prepare(
-    "UPDATE sessions SET generated_title = ? WHERE session_id = ?"
+    "UPDATE sessions SET generated_title = ?, titled_at_count = ? WHERE session_id = ?"
   );
 
   let generated = 0;
@@ -113,7 +123,7 @@ ${sessionsText}`;
     const title = match[2].trim().replace(/^["']|["']$/g, "");
 
     if (idx >= 0 && idx < sessions.length && title.length > 2) {
-      updateStmt.run(title, sessions[idx].session_id);
+      updateStmt.run(title, sessions[idx].message_count, sessions[idx].session_id);
       generated++;
     }
   }

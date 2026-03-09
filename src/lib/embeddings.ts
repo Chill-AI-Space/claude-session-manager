@@ -5,7 +5,7 @@ const EMBEDDING_MODEL = "gemini-embedding-001";
 
 /** Build a short text summary of a session for embedding */
 function sessionToText(s: Pick<SessionRow, "project_path" | "custom_name" | "generated_title" | "first_prompt" | "last_message">): string {
-  const project = s.project_path.split("/").pop() || "";
+  const project = s.project_path.split(/[\\/]/).pop() || "";
   const title = s.custom_name || s.generated_title || "";
   const first = (s.first_prompt || "").slice(0, 500);
   const last = (s.last_message || "").slice(0, 300);

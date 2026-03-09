@@ -17,40 +17,50 @@ export async function GET(request: NextRequest) {
 
   const db = getDb();
 
-  let query = `SELECT * FROM sessions WHERE 1=1`;
-  const params: Record<string, string | number> = {};
+  // Build WHERE clause shared by both data and count queries
+  const conditions: string[] = [];
+  const filterParams: Record<string, string | number> = {};
 
   if (!showArchived) {
-    query += ` AND archived = 0`;
+    conditions.push("archived = 0");
   }
-
   if (project) {
-    query += ` AND project_dir = @project`;
-    params.project = project;
+    conditions.push("project_dir = @project");
+    filterParams.project = project;
   }
-
   if (search) {
-    query += ` AND (first_prompt LIKE @search OR last_message LIKE @search OR generated_title LIKE @search OR custom_name LIKE @search OR session_id LIKE @search)`;
-    params.search = `%${search}%`;
+    conditions.push(
+      "(first_prompt LIKE @search OR last_message LIKE @search OR generated_title LIKE @search OR custom_name LIKE @search OR session_id LIKE @search)"
+    );
+    filterParams.search = `%${search}%`;
   }
-
   if (tag) {
-    query += ` AND tags LIKE @tag`;
-    params.tag = `%"${tag}"%`;
+    conditions.push("tags LIKE @tag");
+    filterParams.tag = `%"${tag}"%`;
   }
 
-  const sortClause =
-    sort === "created"
-      ? "ORDER BY pinned DESC, created_at DESC"
-      : sort === "tokens"
-        ? "ORDER BY pinned DESC, (total_input_tokens + total_output_tokens) DESC"
-        : "ORDER BY pinned DESC, modified_at DESC";
+  const whereClause = conditions.length > 0
+    ? `WHERE ${conditions.join(" AND ")}`
+    : "";
 
-  query += ` ${sortClause} LIMIT @limit OFFSET @offset`;
-  params.limit = limit;
-  params.offset = offset;
+  let sortClause: string;
+  switch (sort) {
+    case "created":
+      sortClause = "ORDER BY pinned DESC, created_at DESC";
+      break;
+    case "tokens":
+      sortClause = "ORDER BY pinned DESC, (total_input_tokens + total_output_tokens) DESC";
+      break;
+    default:
+      sortClause = "ORDER BY pinned DESC, modified_at DESC";
+      break;
+  }
 
-  const rows = db.prepare(query).all(params) as SessionRow[];
+  const rows = db
+    .prepare(
+      `SELECT * FROM sessions ${whereClause} ${sortClause} LIMIT @limit OFFSET @offset`
+    )
+    .all({ ...filterParams, limit, offset }) as SessionRow[];
 
   // Get active session IDs
   let activeIds: Set<string>;
@@ -65,7 +75,7 @@ export async function GET(request: NextRequest) {
     project_dir: row.project_dir,
     project_path: row.project_path,
     display_name:
-      row.project_path.split("/").pop() || row.project_dir,
+      row.project_path.split(/[\\/]/).pop() || row.project_dir,
     first_prompt: row.first_prompt,
     last_message: row.last_message,
     generated_title: row.generated_title,
@@ -81,16 +91,12 @@ export async function GET(request: NextRequest) {
     total_input_tokens: row.total_input_tokens,
     total_output_tokens: row.total_output_tokens,
     is_active: activeIds.has(row.session_id),
+    last_message_role: (row as SessionRow & { last_message_role?: string }).last_message_role ?? null,
   }));
 
   const totalCount = db
-    .prepare(
-      `SELECT COUNT(*) as count FROM sessions WHERE 1=1${!showArchived ? " AND archived = 0" : ""}${project ? " AND project_dir = @projectCount" : ""}${search ? " AND (first_prompt LIKE @searchCount OR custom_name LIKE @searchCount)" : ""}`
-    )
-    .get({
-      ...(project ? { projectCount: project } : {}),
-      ...(search ? { searchCount: `%${search}%` } : {}),
-    }) as { count: number };
+    .prepare(`SELECT COUNT(*) as count FROM sessions ${whereClause}`)
+    .get(filterParams) as { count: number };
 
   return NextResponse.json({
     sessions,

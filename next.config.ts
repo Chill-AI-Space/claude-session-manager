@@ -1,9 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  turbopack: {
-    root: ".",
-  },
+  devIndicators: false,
   serverExternalPackages: ["better-sqlite3"],
 };
 

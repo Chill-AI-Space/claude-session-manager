@@ -123,4 +123,9 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Light mode: slightly heavier weight — Geist Sans looks thin on white */
+  :root:not(.dark) body {
+    font-weight: 430;
+    --muted-foreground: oklch(0.44 0 0);
+  }
 }

@@ -1,8 +1,33 @@
 import { NextRequest } from "next/server";
 import os from "os";
 import path from "path";
-import { readdir } from "fs/promises";
+import { readdir, mkdir } from "fs/promises";
 import { getSetting } from "@/lib/db";
+
+async function searchDirs(
+  root: string,
+  query: string,
+  homedir: string,
+  maxDepth = 4,
+  results: { name: string; path: string }[] = [],
+  depth = 0
+): Promise<{ name: string; path: string }[]> {
+  if (depth > maxDepth || results.length >= 50) return results;
+  try {
+    const items = await readdir(root, { withFileTypes: true });
+    for (const item of items) {
+      if (!item.isDirectory() || item.name.startsWith(".") || item.name === "node_modules") continue;
+      const fullPath = path.join(root, item.name);
+      if (!fullPath.startsWith(homedir)) continue;
+      if (item.name.toLowerCase().includes(query.toLowerCase())) {
+        results.push({ name: item.name, path: fullPath });
+        if (results.length >= 50) return results;
+      }
+      await searchDirs(fullPath, query, homedir, maxDepth, results, depth + 1);
+    }
+  } catch { /* permission denied etc */ }
+  return results;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +48,17 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const requestedPath = searchParams.get("path") || resolveStartPath();
   const showHidden = searchParams.get("showHidden") === "true";
+  const query = searchParams.get("q");
 
   const homedir = os.homedir();
+
+  // Search mode: recursive substring match on folder name
+  if (query && query.trim()) {
+    const startPath = resolveStartPath();
+    const results = await searchDirs(startPath, query.trim(), homedir);
+    return Response.json({ entries: results, search: true, homeDir: homedir });
+  }
+
   const resolved = path.resolve(requestedPath);
 
   // Security: must be within homedir
@@ -60,7 +94,35 @@ export async function GET(request: NextRequest) {
       ? null
       : path.dirname(resolved);
 
-    return Response.json({ entries, currentPath: resolved, parentPath });
+    return Response.json({ entries, currentPath: resolved, parentPath, homeDir: homedir });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return Response.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  const { parentPath, name } = await request.json();
+  if (!parentPath || !name) {
+    return Response.json({ error: "parentPath and name are required" }, { status: 400 });
+  }
+
+  const homedir = os.homedir();
+  const resolved = path.resolve(parentPath);
+  if (!resolved.startsWith(homedir)) {
+    return Response.json({ error: "Path must be within home directory" }, { status: 403 });
+  }
+
+  // Sanitize name: no path separators, no hidden folders
+  const safeName = name.trim().replace(/[/\\]/g, "");
+  if (!safeName || safeName.startsWith(".")) {
+    return Response.json({ error: "Invalid folder name" }, { status: 400 });
+  }
+
+  const newPath = path.join(resolved, safeName);
+  try {
+    await mkdir(newPath, { recursive: false });
+    return Response.json({ ok: true, path: newPath, name: safeName });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     return Response.json({ error: msg }, { status: 500 });

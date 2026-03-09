@@ -19,7 +19,7 @@ export async function GET() {
     display_name:
       row.custom_name ||
       row.display_name ||
-      row.project_path.split("/").pop() ||
+      row.project_path.split(/[\\/]/).pop() ||
       row.project_dir,
     custom_name: row.custom_name,
     session_count: row.session_count,

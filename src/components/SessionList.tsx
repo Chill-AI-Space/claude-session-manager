@@ -5,16 +5,43 @@ import { SessionListItemComponent } from "./SessionListItem";
 import { GeminiResult } from "./SessionSearch";
 import { Loader2 } from "lucide-react";
 import { useParams } from "next/navigation";
+import { useState, useEffect, useMemo } from "react";
 
 interface SessionListProps {
   sessions: SessionListItem[];
   loading: boolean;
   geminiResults?: GeminiResult[];
+  onArchive?: (sessionId: string) => void;
 }
 
-export function SessionList({ sessions, loading, geminiResults }: SessionListProps) {
+export function SessionList({ sessions, loading, geminiResults, onArchive }: SessionListProps) {
   const params = useParams();
   const currentSessionId = params?.sessionId as string | undefined;
+
+  // Tick every 10s — bucket to 10s granularity so React.memo on items actually fires rarely
+  const [nowRaw, setNowRaw] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowRaw(Date.now()), 10_000);
+    return () => clearInterval(id);
+  }, []);
+  const now = Math.floor(nowRaw / 10_000) * 10_000; // 10s bucket
+
+  // Memoize Gemini-derived maps — only recompute when results change
+  const { displaySessions, snippetMap, queryMap } = useMemo(() => {
+    if (!geminiResults?.length) {
+      return { displaySessions: sessions, snippetMap: undefined, queryMap: undefined };
+    }
+    const geminiIds = new Set(geminiResults.map((r) => r.session_id));
+    const geminiOrder = new Map(geminiResults.map((r, i) => [r.session_id, i]));
+    const snippetMap = new Map(geminiResults.map((r) => [r.session_id, r.snippet]));
+    const queryMap = new Map(
+      geminiResults.filter((r) => r.query).map((r) => [r.session_id, r.query!])
+    );
+    const displaySessions = sessions
+      .filter((s) => geminiIds.has(s.session_id))
+      .sort((a, b) => (geminiOrder.get(a.session_id) ?? 0) - (geminiOrder.get(b.session_id) ?? 0));
+    return { displaySessions, snippetMap, queryMap };
+  }, [geminiResults, sessions]);
 
   if (loading) {
     return (
@@ -22,20 +49,6 @@ export function SessionList({ sessions, loading, geminiResults }: SessionListPro
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
       </div>
     );
-  }
-
-  // If Gemini results are active, filter and reorder sessions
-  let displaySessions = sessions;
-  const snippetMap = new Map<string, string>();
-
-  if (geminiResults && geminiResults.length > 0) {
-    const geminiIds = new Set(geminiResults.map((r) => r.session_id));
-    const geminiOrder = new Map(geminiResults.map((r, i) => [r.session_id, i]));
-    geminiResults.forEach((r) => snippetMap.set(r.session_id, r.snippet));
-
-    displaySessions = sessions
-      .filter((s) => geminiIds.has(s.session_id))
-      .sort((a, b) => (geminiOrder.get(a.session_id) ?? 0) - (geminiOrder.get(b.session_id) ?? 0));
   }
 
   if (displaySessions.length === 0) {
@@ -46,35 +59,30 @@ export function SessionList({ sessions, loading, geminiResults }: SessionListPro
     );
   }
 
-  // Group by project
-  const grouped = new Map<string, SessionListItem[]>();
-  for (const session of displaySessions) {
-    const key = session.project_dir;
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(session);
-  }
-
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="py-1">
-        {Array.from(grouped.entries()).map(([projectDir, projectSessions]) => (
-          <div key={projectDir} className="mb-0.5">
-            <div className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider sticky top-0 bg-card/95 backdrop-blur-sm z-10">
-              {projectSessions[0].display_name}
-              <span className="ml-1 opacity-50">
-                {projectSessions.length}
-              </span>
-            </div>
-            {projectSessions.map((session) => (
+        {displaySessions.map((session, i) => {
+          const prevProject = i > 0 ? displaySessions[i - 1].project_dir : null;
+          const showLabel = session.project_dir !== prevProject;
+          return (
+            <div key={session.session_id}>
+              {showLabel && (
+                <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider sticky top-0 bg-card/95 backdrop-blur-sm z-10">
+                  {session.display_name}
+                </div>
+              )}
               <SessionListItemComponent
-                key={session.session_id}
                 session={session}
                 selected={session.session_id === currentSessionId}
-                snippet={snippetMap.get(session.session_id)}
+                snippet={snippetMap?.get(session.session_id)}
+                highlightQuery={queryMap?.get(session.session_id)}
+                now={now}
+                onArchive={onArchive}
               />
-            ))}
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
