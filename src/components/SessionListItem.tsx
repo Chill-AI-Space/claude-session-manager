@@ -97,8 +97,10 @@ export const SessionListItemComponent = memo(
       <Link
         href={href}
         className={cn(
-          "group/item block px-3 py-2.5 mx-1 rounded cursor-pointer transition-colors relative",
-          selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+          "group/item block py-2.5 mx-1 rounded cursor-pointer transition-colors relative",
+          selected
+            ? "bg-accent text-accent-foreground border-l-2 border-primary pl-2.5 pr-3"
+            : "hover:bg-accent/50 px-3"
         )}
       >
         {onArchive && (

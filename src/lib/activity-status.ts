@@ -12,14 +12,17 @@ export function getActivityStatus(
 ): ActivityStatus {
   const ageMs = now - new Date(session.modified_at).getTime();
   if (session.is_active) {
-    // Distinguish: Claude computing (last msg was from user) vs waiting at prompt (last msg was assistant)
+    // Distinguish: Claude computing (last msg was from user/tool_result) vs waiting at prompt (last msg was assistant)
     return session.last_message_role === "assistant" ? "terminal-open" : "active";
   }
+  // Very fresh activity (< 30s) — session just wrote something, treat as recently active
+  // Don't show "interrupted" for tool_result here — scanner may not have caught up yet
   if (ageMs < 30_000) return "recent-30s";
   if (ageMs < 3 * 60_000) return "recent-3m";
   // "interrupted" = Claude died mid-tool-execution (last message is a tool_result, no process)
-  if (!session.is_active && session.last_message_role === "tool_result" && ageMs < 2 * 60 * 60_000) return "interrupted";
+  // Only show for sessions idle > 3min (below that, "recent" takes priority)
+  if (session.last_message_role === "tool_result" && ageMs < 2 * 60 * 60_000) return "interrupted";
   // "waiting" = Claude's last message is unanswered (only shown for recent sessions)
-  if (!session.is_active && session.last_message_role === "assistant" && ageMs < 48 * 60 * 60_000) return "waiting";
+  if (session.last_message_role === "assistant" && ageMs < 48 * 60 * 60_000) return "waiting";
   return "inactive";
 }

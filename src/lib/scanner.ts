@@ -5,6 +5,7 @@ import path from "path";
 import { spawn } from "child_process";
 import { getCleanEnv, claudeProjectsDir, UUID_RE } from "./utils";
 import { getClaudePath } from "./claude-bin";
+import { openInTerminal } from "./terminal-launcher";
 import type { SessionRow } from "./types";
 
 // ── Server-side auto-retry ────────────────────────────────────────────────────
@@ -116,9 +117,14 @@ async function serverAutoContinue(sessionId: string): Promise<void> {
 
   logAction("service", "stall_continue_fired", `stalled >${STALL_THRESHOLD_MS / 60_000}min`, sessionId);
 
+  const context = session.last_message
+    ? `\n\nFor context, the user's last message was: "${session.last_message.slice(0, 200)}"`
+    : "";
+  const stallPrompt = `You appear to have stalled — no output for over 5 minutes. I noticed and auto-resumed you. Please check what you were doing and continue the task.${context}`;
+
   const proc = spawn(
     getClaudePath(),
-    ["--resume", sessionId, "-p", "continue", "--output-format", "stream-json", "--verbose"],
+    ["--resume", sessionId, "-p", stallPrompt, "--output-format", "stream-json", "--verbose"],
     { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"] }
   );
   proc.stdout?.resume();
@@ -174,14 +180,14 @@ function extractLastAssistantText(jsonlPath: string): string {
 }
 
 /**
- * Spawn `claude --resume {id} -p "continue"` in the background.
+ * Spawn `claude --resume {id}` in the background with a helpful crash-recovery prompt.
  * Called automatically 30s after a crash is detected during scanning.
  */
 function serverAutoRetry(sessionId: string): void {
   const db = getDb();
   const session = db
-    .prepare("SELECT project_path, last_message_role FROM sessions WHERE session_id = ?")
-    .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role"> | undefined;
+    .prepare("SELECT project_path, last_message_role, last_message FROM sessions WHERE session_id = ?")
+    .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role"> & { last_message: string | null } | undefined;
 
   // Bail if session recovered on its own or setting was disabled
   if (!session || session.last_message_role !== "tool_result") return;
@@ -189,9 +195,14 @@ function serverAutoRetry(sessionId: string): void {
 
   logAction("service", "auto_retry_fired", "server-side 30s timeout", sessionId);
 
+  const context = session.last_message
+    ? `\n\nFor context, the user's last message was: "${session.last_message.slice(0, 200)}"`
+    : "";
+  const retryPrompt = `You crashed mid-tool-execution. I noticed and auto-resumed you. Please check what you were doing, pick up where you left off, and continue the task.${context}`;
+
   const proc = spawn(
     getClaudePath(),
-    ["--resume", sessionId, "-p", "continue", "--output-format", "stream-json", "--verbose"],
+    ["--resume", sessionId, "-p", retryPrompt, "--output-format", "stream-json", "--verbose"],
     { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"] }
   );
 
@@ -215,6 +226,133 @@ function scheduleServerAutoRetry(sessionId: string, delayMs = 30_000): void {
   setTimeout(() => {
     retryScheduled.delete(sessionId);
     serverAutoRetry(sessionId);
+  }, delayMs);
+}
+
+// ── Permission escalation — push stuck sessions to terminal ──────────────────
+
+/** Session IDs already escalated to terminal — prevents double-escalation. */
+const escalationScheduled = new Set<string>();
+
+/**
+ * Permission-denied patterns in tool_result content or assistant text.
+ * When Claude hits these repeatedly it means the web-spawned process
+ * lacks permissions that a terminal session with --dangerously-skip-permissions would have.
+ */
+const PERMISSION_PATTERNS = [
+  /permission denied/i,
+  /operation not permitted/i,
+  /EACCES/,
+  /access denied/i,
+  /not authorized/i,
+  /sandbox.*restrict/i,
+  /cannot (write|read|access|create|delete|modify)/i,
+  /unable to (write|read|access|create|delete)/i,
+  /read-only file system/i,
+];
+
+/**
+ * Check the tail of a JSONL file for permission-denied patterns.
+ * Looks at the last N tool_result blocks and assistant messages.
+ * Returns true if 2+ distinct permission errors are found (= stuck in a loop).
+ */
+function detectPermissionLoop(jsonlPath: string): boolean {
+  try {
+    const stat = fs.statSync(jsonlPath);
+    const TAIL_BYTES = 128 * 1024; // last 128KB
+    const start = Math.max(0, stat.size - TAIL_BYTES);
+    const fd = fs.openSync(jsonlPath, "r");
+    const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+
+    const lines = buf.toString("utf-8").split("\n").filter(Boolean);
+    if (start > 0) lines.shift(); // skip partial first line
+
+    let permissionHits = 0;
+
+    // Check last 30 lines for permission patterns
+    const recentLines = lines.slice(-30);
+    for (const line of recentLines) {
+      try {
+        const obj = JSON.parse(line);
+
+        // Check tool_result content for permission errors
+        if (obj.type === "user" && Array.isArray(obj.message?.content)) {
+          for (const block of obj.message.content) {
+            if (block.type === "tool_result") {
+              const text = typeof block.content === "string"
+                ? block.content
+                : Array.isArray(block.content)
+                  ? block.content.map((b: { text?: string }) => b.text || "").join(" ")
+                  : "";
+              if (PERMISSION_PATTERNS.some((re) => re.test(text))) {
+                permissionHits++;
+              }
+            }
+          }
+        }
+
+        // Check assistant text asking about permissions
+        if (obj.type === "assistant" && obj.message?.content) {
+          const content = obj.message.content;
+          const text = typeof content === "string"
+            ? content
+            : Array.isArray(content)
+              ? content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join(" ")
+              : "";
+          if (PERMISSION_PATTERNS.some((re) => re.test(text))) {
+            permissionHits++;
+          }
+        }
+      } catch { /* skip malformed */ }
+    }
+
+    return permissionHits >= 2;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Escalate a permission-stuck session to a terminal window.
+ * Opens iTerm2/Terminal with `claude --resume --dangerously-skip-permissions`
+ * and sends "check access again please" as the prompt.
+ */
+async function escalateToTerminal(sessionId: string): Promise<void> {
+  const db = getDb();
+  const session = db
+    .prepare("SELECT project_path FROM sessions WHERE session_id = ?")
+    .get(sessionId) as { project_path: string } | undefined;
+
+  if (!session) return;
+  if (getSetting("auto_retry_on_crash") === "false") return;
+
+  logAction("service", "permission_escalation_fired", "pushing to terminal with --dangerously-skip-permissions", sessionId);
+
+  const claudePath = getClaudePath();
+  const shellCmd = `cd ${JSON.stringify(session.project_path)} && ${claudePath} --resume ${sessionId} --dangerously-skip-permissions -p "check access again please"`;
+
+  try {
+    const { terminal } = await openInTerminal(shellCmd);
+    logAction("service", "permission_escalation_done", `terminal:${terminal}`, sessionId);
+  } catch (err) {
+    logAction("service", "permission_escalation_failed", `${err}`, sessionId);
+  }
+}
+
+function schedulePermissionEscalation(sessionId: string, jsonlPath: string, delayMs = 15_000): void {
+  if (escalationScheduled.has(sessionId)) return;
+  escalationScheduled.add(sessionId);
+  setTimeout(async () => {
+    escalationScheduled.delete(sessionId);
+    // Re-check: still looks like a permission issue?
+    if (detectPermissionLoop(jsonlPath)) {
+      await escalateToTerminal(sessionId);
+    } else {
+      // Not a permission issue after all — fall back to normal retry
+      serverAutoRetry(sessionId);
+    }
   }, delayMs);
 }
 
@@ -537,7 +675,16 @@ export async function scanSessions(
           .get(sessionId) as { last_message_role: string | null } | undefined;
         if (prev?.last_message_role !== "tool_result") {
           logAction("service", "crash_detected", `jsonl:${filePath}`, sessionId);
-          postTxActions.push(() => scheduleServerAutoRetry(sessionId));
+          const capturedPath = filePath;
+          postTxActions.push(() => {
+            // Check if this looks like a permission loop — escalate to terminal instead of normal retry
+            if (detectPermissionLoop(capturedPath)) {
+              logAction("service", "permission_loop_detected", `jsonl:${capturedPath}`, sessionId);
+              schedulePermissionEscalation(sessionId, capturedPath);
+            } else {
+              scheduleServerAutoRetry(sessionId);
+            }
+          });
         }
       }
 

@@ -989,16 +989,6 @@ export default function SessionDetailPage({
   const allMessages = [...earlierMessages, ...data.messages, ...extraMessages];
   const hasEarlier = (earliestLoaded ?? 0) > 0;
 
-  // Detect if Claude is in a tool-use cycle (sent tool_use, waiting for result → will auto-continue).
-  // This means Claude is WORKING, not waiting for user input, even though last_message_role === "assistant".
-  const lastAssistantMsg = [...data.messages].reverse().find((m) => m.type === "assistant");
-  const isInToolCycle = !!(
-    data.metadata.last_message_role === "assistant" &&
-    lastAssistantMsg &&
-    Array.isArray(lastAssistantMsg.content) &&
-    lastAssistantMsg.content.some((b: { type: string }) => b.type === "tool_use")
-  );
-
   const enabledSettings = settings
     ? Object.entries(settings)
         .filter(([, v]) => v === "true")
@@ -1009,7 +999,7 @@ export default function SessionDetailPage({
     <>
       {/* Session header — single line: status + title */}
       {(() => {
-        const activityStatus = isInToolCycle ? "active" : getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role });
+        const activityStatus = getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role });
         const isRunning = activityStatus === "active";
         const isWaiting = activityStatus === "waiting";
         const isInterrupted = activityStatus === "interrupted";
@@ -1322,12 +1312,12 @@ export default function SessionDetailPage({
               </div>
             ) : data.is_active && !queuedMessages.length ? (
               <div className="flex items-center gap-2 p-2.5 text-xs rounded-lg border border-border bg-muted/30 text-muted-foreground">
-                {(data.metadata.last_message_role === "user" || hasReplied || isInToolCycle)
+                {(data.metadata.last_message_role !== "assistant" || hasReplied)
                   ? <Loader2 className="h-3 w-3 animate-spin shrink-0" />
                   : <Terminal className="h-3 w-3 shrink-0 opacity-60" />
                 }
                 <span>
-                  {(data.metadata.last_message_role === "user" || isInToolCycle)
+                  {data.metadata.last_message_role !== "assistant"
                     ? "Claude is working…"
                     : hasReplied
                       ? "Waiting for Claude…"
