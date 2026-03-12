@@ -17,7 +17,7 @@ const { execSync } = require("child_process");
 const DB_PATH = path.join(__dirname, "..", "data", "sessions.db");
 const LOG_PATH = path.resolve(process.env.HOME, "Library/Logs/claude-session-manager.log");
 const ERROR_LOG_PATH = path.resolve(process.env.HOME, "Library/Logs/claude-session-manager-error.log");
-const REPO = "kobzevvv/claude-session-manager";
+const REPO = "Chill-AI-Space/claude-session-manager";
 const STATE_PATH = path.join(__dirname, "..", "data", "analyzer-state.json");
 
 // Parse CLI args

@@ -151,10 +151,16 @@ export function MessageView({
     }
   }, [streamingText, isStreaming, messages.length]);
 
+  // Scroll to highlighted message only once when highlightId changes
+  const didScrollToHighlight = useRef<string | null>(null);
   useEffect(() => {
-    if (!highlightId) return;
+    if (!highlightId) { didScrollToHighlight.current = null; return; }
+    if (didScrollToHighlight.current === highlightId) return;
     const el = containerRef.current?.querySelector(`[data-uuid="${CSS.escape(highlightId)}"]`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      didScrollToHighlight.current = highlightId;
+    }
   }, [highlightId, messages.length]);
 
   if (messages.length === 0 && !isStreaming) {

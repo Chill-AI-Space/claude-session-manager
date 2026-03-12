@@ -1008,14 +1008,43 @@ export default function SessionDetailPage({
   return (
     <>
       {/* Session header — single line: status + title */}
-      <div className="border-b border-border px-5 py-2 flex items-center gap-3 min-h-[40px] shrink-0">
-        <StatusBadge status={isInToolCycle ? "active" : getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role })} />
-        <h2 className="text-sm font-medium flex-1 min-w-0 line-clamp-2">
-          {data.metadata.custom_name ||
-          data.metadata.first_prompt?.slice(0, 200) ||
-          data.session_id.slice(0, 8)}
-        </h2>
-      </div>
+      {(() => {
+        const activityStatus = isInToolCycle ? "active" : getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role });
+        const isRunning = activityStatus === "active";
+        const isWaiting = activityStatus === "waiting";
+        const isInterrupted = activityStatus === "interrupted";
+        return (
+          <div className={`border-b px-5 py-2 flex items-center gap-3 min-h-[40px] shrink-0 transition-colors duration-500 ${
+            isRunning ? "border-green-500/30 bg-green-500/5" :
+            isInterrupted ? "border-orange-500/30 bg-orange-500/5" :
+            isWaiting ? "border-blue-500/30 bg-blue-500/5" :
+            "border-border"
+          }`}>
+            <StatusBadge status={activityStatus} />
+            {isRunning && (
+              <span className="text-[11px] font-medium text-green-600 dark:text-green-400 shrink-0 flex items-center gap-1.5">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Working...
+              </span>
+            )}
+            {isInterrupted && (
+              <span className="text-[11px] font-medium text-orange-600 dark:text-orange-400 shrink-0">
+                Crashed — retrying
+              </span>
+            )}
+            {isWaiting && (
+              <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400 shrink-0">
+                Waiting for reply
+              </span>
+            )}
+            <h2 className="text-sm font-medium flex-1 min-w-0 line-clamp-2">
+              {data.metadata.custom_name ||
+              data.metadata.first_prompt?.slice(0, 200) ||
+              data.session_id.slice(0, 8)}
+            </h2>
+          </div>
+        );
+      })()}
 
       {/* Two-column layout: messages left, reply panel right */}
       <div className="flex-1 flex min-h-0">

@@ -117,9 +117,23 @@ export const SessionListItemComponent = memo(
               <span className="text-[13px] font-medium min-w-0 flex-1 leading-snug line-clamp-2">
                 {title}
               </span>
-              <span className="text-[10px] text-muted-foreground/70 shrink-0 tabular-nums">
-                {formatRelativeTime(session.modified_at, now)}
-              </span>
+              {activityStatus === "active" ? (
+                <span className="text-[10px] text-green-600 dark:text-green-400 shrink-0 font-medium">
+                  Working...
+                </span>
+              ) : activityStatus === "interrupted" ? (
+                <span className="text-[10px] text-orange-600 dark:text-orange-400 shrink-0 font-medium">
+                  Crashed
+                </span>
+              ) : activityStatus === "waiting" ? (
+                <span className="text-[10px] text-blue-600 dark:text-blue-400 shrink-0 font-medium">
+                  Awaiting reply
+                </span>
+              ) : (
+                <span className="text-[10px] text-muted-foreground/70 shrink-0 tabular-nums">
+                  {formatRelativeTime(session.modified_at, now)}
+                </span>
+              )}
             </div>
 
             {snippet ? (
