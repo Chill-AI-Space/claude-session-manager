@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import fs from "fs";
 import { getDb } from "@/lib/db";
 import { readSessionMessages } from "@/lib/session-reader";
@@ -22,7 +22,7 @@ export async function GET(
     .get(sessionId) as SessionRow | undefined;
 
   if (!session) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Session not found" },
       { status: 404 }
     );
@@ -75,7 +75,7 @@ export async function GET(
     // ignore
   }
 
-  return NextResponse.json({
+  return Response.json({
     session_id: session.session_id,
     project_path: session.project_path,
     messages,
@@ -99,7 +99,7 @@ export async function PATCH(
     .get(sessionId) as SessionRow | undefined;
 
   if (!session) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Session not found" },
       { status: 404 }
     );
@@ -140,5 +140,5 @@ export async function PATCH(
     .prepare("SELECT * FROM sessions WHERE session_id = ?")
     .get(sessionId);
 
-  return NextResponse.json(updated);
+  return Response.json(updated);
 }

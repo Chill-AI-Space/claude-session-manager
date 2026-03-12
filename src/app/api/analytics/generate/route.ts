@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
-import { spawn } from "child_process";
-import { getCleanEnv } from "@/lib/utils";
 import { getSetting, logAction } from "@/lib/db";
+import { createSSEStream, sseResponse } from "@/lib/claude-runner";
 import path from "path";
 import fs from "fs";
 
@@ -123,10 +122,7 @@ export async function POST(request: NextRequest) {
   const { question } = body as { question: string };
 
   if (!question?.trim()) {
-    return new Response(JSON.stringify({ error: "question required" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "question required" }, { status: 400 });
   }
 
   // Ensure reports dir exists
@@ -137,158 +133,90 @@ export async function POST(request: NextRequest) {
   const reportId = `report-${Date.now()}`;
   const prompt = buildPrompt(question.trim(), reportId);
 
-  const env = getCleanEnv();
+  logAction("service", "analytics_generate", question.slice(0, 200), undefined);
+
+  const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
+  const args = [
+    "-p", prompt,
+    "--output-format", "stream-json",
+    "--verbose",
+    "--max-turns", "15",
+  ];
+  if (skipPermissions) args.push("--dangerously-skip-permissions");
+
+  let sessionId: string | null = null;
+  let reportPath: string | null = null;
+
   const encoder = new TextEncoder();
 
-  const stream = new ReadableStream({
-    start(controller) {
-      const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
-      const args = [
-        "-p",
-        prompt,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--max-turns",
-        "15",
-      ];
-      if (skipPermissions) args.push("--dangerously-skip-permissions");
+  const stream = createSSEStream({
+    args,
+    cwd: PROJECT_DIR,
+    onLine(obj, send) {
+      if (!sessionId && (obj.session_id || obj.sessionId)) {
+        sessionId = (obj.session_id ?? obj.sessionId) as string;
+        send({ type: "session_id", session_id: sessionId });
+      }
 
-      const proc = spawn("claude", args, {
-        cwd: PROJECT_DIR,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: process.platform === "win32",
-      });
-
-      let sessionId: string | null = null;
-      let buffer = "";
-      let reportPath: string | null = null;
-
-      logAction("service", "analytics_generate", question.slice(0, 200), undefined);
-
-      // Send report ID and prompt immediately
-      controller.enqueue(
-        encoder.encode(
-          `data: ${JSON.stringify({ type: "report_id", reportId })}\n\n`
-        )
-      );
-      controller.enqueue(
-        encoder.encode(
-          `data: ${JSON.stringify({ type: "prompt", prompt })}\n\n`
-        )
-      );
-
-      proc.stdout!.on("data", (data: Buffer) => {
-        buffer += data.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const obj = JSON.parse(line);
-
-            if (!sessionId && (obj.session_id || obj.sessionId)) {
-              sessionId = obj.session_id ?? obj.sessionId;
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({ type: "session_id", session_id: sessionId })}\n\n`
-                )
-              );
-            }
-
-            if (obj.type === "assistant" && obj.message?.content) {
-              for (const block of obj.message.content) {
-                if (block.type === "text" && block.text) {
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ type: "text", text: block.text })}\n\n`
-                    )
-                  );
-                  // Check for REPORT_READY marker in text
-                  if (block.text.includes("REPORT_READY:")) {
-                    const match = block.text.match(/REPORT_READY:(.+?)(\s|$)/);
-                    if (match) reportPath = match[1].trim();
-                  }
-                } else if (block.type === "tool_use") {
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ type: "status", text: `Running: ${block.name}` })}\n\n`
-                    )
-                  );
-                }
+      if (obj.type === "assistant" && obj.message) {
+        const msg = obj.message as { content?: Array<{ type: string; text?: string; name?: string }> };
+        if (msg.content) {
+          for (const block of msg.content) {
+            if (block.type === "text" && block.text) {
+              send({ type: "text", text: block.text });
+              // Check for REPORT_READY marker
+              if (block.text.includes("REPORT_READY:")) {
+                const match = block.text.match(/REPORT_READY:(.+?)(\s|$)/);
+                if (match) reportPath = match[1].trim();
               }
-            } else if (obj.type === "result") {
-              // Check if report file exists
-              const expectedPath = path.join(REPORTS_DIR, `${reportId}.html`);
-              const fileExists = fs.existsSync(reportPath || expectedPath);
-              const finalPath = reportPath || expectedPath;
-
-              let htmlContent = "";
-              if (fileExists) {
-                try {
-                  htmlContent = fs.readFileSync(finalPath, "utf-8");
-                } catch { /* */ }
-              }
-
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: "report_done",
-                    reportId,
-                    reportPath: finalPath,
-                    htmlAvailable: fileExists,
-                    html: htmlContent,
-                    sessionId,
-                  })}\n\n`
-                )
-              );
+            } else if (block.type === "tool_use") {
+              send({ type: "status", text: `Running: ${block.name}` });
             }
-          } catch {
-            // skip non-JSON
           }
         }
-      });
+      } else if (obj.type === "result") {
+        const expectedPath = path.join(REPORTS_DIR, `${reportId}.html`);
+        const finalPath = reportPath || expectedPath;
+        const fileExists = fs.existsSync(finalPath);
 
-      proc.stderr!.on("data", (data: Buffer) => {
-        const text = data.toString();
-        if (!text.includes("Warning:")) {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: "error", text })}\n\n`)
-          );
+        let htmlContent = "";
+        if (fileExists) {
+          try { htmlContent = fs.readFileSync(finalPath, "utf-8"); } catch { /* */ }
         }
-      });
 
-      // Keepalive
-      const keepalive = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(`: keepalive\n\n`));
-        } catch {
-          clearInterval(keepalive);
-        }
-      }, 15_000);
-
-      proc.on("close", () => {
-        clearInterval(keepalive);
-        controller.close();
-      });
-
-      proc.on("error", (err) => {
-        clearInterval(keepalive);
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: "error", text: err.message })}\n\n`)
-        );
-        controller.close();
-      });
+        send({
+          type: "report_done",
+          reportId,
+          reportPath: finalPath,
+          htmlAvailable: fileExists,
+          html: htmlContent,
+          sessionId,
+        });
+      }
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
+  // Prepend report_id and prompt events before the stream
+  const reportIdEvent = `data: ${JSON.stringify({ type: "report_id", reportId })}\n\n`;
+  const promptEvent = `data: ${JSON.stringify({ type: "prompt", prompt })}\n\n`;
+  const preamble = encoder.encode(reportIdEvent + promptEvent);
+
+  // Create a combined stream: preamble + SSE stream
+  const combinedStream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(preamble);
+      const reader = stream.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(value);
+        }
+      } finally {
+        controller.close();
+      }
     },
   });
+
+  return sseResponse(combinedStream);
 }

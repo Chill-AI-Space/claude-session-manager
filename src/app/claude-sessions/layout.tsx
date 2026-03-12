@@ -168,6 +168,25 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     if (!searchQuery) setGeminiResults([]);
   }, [searchQuery]);
 
+  // Wrapper for Gemini results: set results AND fetch any missing sessions by ID
+  const handleGeminiResults = useCallback(async (results: GeminiResult[]) => {
+    setGeminiResults(results);
+    if (results.length === 0) return;
+    const ids = results.map((r) => r.session_id);
+    try {
+      const res = await fetch(`/api/sessions?ids=${ids.join(",")}&limit=${ids.length}`);
+      const data = await res.json();
+      const fetched: SessionListItem[] = data.sessions || [];
+      if (fetched.length > 0) {
+        setSessions((prev) => {
+          const existingIds = new Set(prev.map((s) => s.session_id));
+          const newOnes = fetched.filter((s) => !existingIds.has(s.session_id));
+          return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+        });
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   // Auto content search: when basic search returns 0 results, grep JSONL files
   useEffect(() => {
     if (!searchQuery || searchQuery.length < 3 || sessions.length > 0 || loading || geminiResults.length > 0) {
@@ -185,12 +204,22 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
         const data = await res.json();
         if (abortController.signal.aborted) return;
         if (data.session_ids?.length > 0) {
-          const allRes = await fetch(`/api/sessions?sort=modified&limit=500`, {
-            signal: abortController.signal,
-          });
-          const allData = await allRes.json();
+          // Fetch the matched sessions by ID (they may not be in the current sessions list)
+          const idsParam = data.session_ids.join(",");
+          const matchedRes = await fetch(
+            `/api/sessions?ids=${idsParam}&limit=${data.session_ids.length}`,
+            { signal: abortController.signal }
+          );
+          const matchedData = await matchedRes.json();
           if (abortController.signal.aborted) return;
-          setSessions(allData.sessions || []);
+          // Merge matched sessions into current list
+          setSessions((prev) => {
+            const existingIds = new Set(prev.map((s) => s.session_id));
+            const newOnes = (matchedData.sessions || []).filter(
+              (s: SessionListItem) => !existingIds.has(s.session_id)
+            );
+            return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+          });
           setGeminiResults(
             data.session_ids.map((id: string) => ({
               session_id: id,
@@ -222,13 +251,14 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
       {/* Sidebar */}
       <div
         className={cn(
-          "flex flex-col bg-card transition-[width] duration-200 ease-in-out overflow-hidden shrink-0",
+          "flex flex-col bg-sidebar border-r border-sidebar-border transition-[width] duration-200 ease-in-out overflow-hidden shrink-0",
+          "dark:border-r-0",
           sidebarOpen ? "w-80" : "w-0"
         )}
       >
         <div className="flex flex-col h-full min-h-0 min-w-[320px]">
           {/* Sidebar header */}
-          <div className="p-3 border-b border-border">
+          <div className="p-3 border-b border-sidebar-border">
             {/* Tab switcher */}
             <div className="flex gap-1 mb-2 bg-muted/40 rounded-md p-0.5">
               <button
@@ -302,7 +332,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
               <SessionSearch
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
-                onGeminiResults={setGeminiResults}
+                onGeminiResults={handleGeminiResults}
               />
             )}
           </div>
@@ -335,7 +365,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
 
         {/* Right nav strip — visible on utility pages (not session detail) */}
         {!/^\/claude-sessions\/[a-f0-9-]{8,}/.test(pathname) && (
-          <div className="w-11 shrink-0 border-l border-border flex flex-col items-center py-3 gap-0.5 bg-card">
+          <div className="w-11 shrink-0 border-l border-sidebar-border flex flex-col items-center py-3 gap-0.5 bg-sidebar">
             {([
               { href: "/claude-sessions/settings", icon: Settings, label: "Settings" },
               { href: "/claude-sessions/store", icon: Package, label: "Store" },

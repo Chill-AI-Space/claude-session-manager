@@ -7,6 +7,9 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** UUID v4 pattern for validating session IDs */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /** Cross-platform home directory (works on Windows, macOS, Linux) */
 export function homeDir(): string {
   return os.homedir();
@@ -48,9 +51,6 @@ export function formatTokens(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return n.toString();
 }
-
-/** Whether to pass shell:true to spawn() — needed on Windows for .cmd/.bat resolution */
-export const SPAWN_SHELL = process.platform === "win32";
 
 /** Strip CLAUDE* env vars to avoid interfering with spawned processes */
 export function getCleanEnv(): NodeJS.ProcessEnv {

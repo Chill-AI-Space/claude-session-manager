@@ -118,6 +118,41 @@ function mergeConsecutiveAssistant(
   return result;
 }
 
+/**
+ * Convert parsed messages to plain text with role prefixes.
+ * Useful for context extraction, export, and AI prompts.
+ */
+export function messagesToText(
+  messages: ParsedMessage[],
+  opts?: { roleLabels?: { user: string; assistant: string }; maxMessageLen?: number }
+): string {
+  const labels = opts?.roleLabels ?? { user: "USER", assistant: "CLAUDE" };
+  const maxLen = opts?.maxMessageLen ?? 0;
+  const parts: string[] = [];
+
+  for (const msg of messages) {
+    if (msg.type === "compact_boundary") continue;
+
+    let text = "";
+    if (typeof msg.content === "string") {
+      text = msg.content;
+    } else if (Array.isArray(msg.content)) {
+      text = msg.content
+        .filter((b): b is ContentBlock & { type: "text"; text: string } => b.type === "text" && !!b.text)
+        .map((b) => b.text)
+        .join("\n");
+    }
+
+    if (!text.trim()) continue;
+    if (maxLen > 0 && text.length > maxLen) text = text.slice(0, maxLen) + "...";
+
+    const label = msg.type === "user" ? labels.user : labels.assistant;
+    parts.push(`${label}: ${text.trim()}`);
+  }
+
+  return parts.join("\n\n");
+}
+
 export function getSessionMessageCount(jsonlPath: string): number {
   if (!fs.existsSync(jsonlPath)) return 0;
 

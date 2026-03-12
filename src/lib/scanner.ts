@@ -3,7 +3,8 @@ import { glob } from "glob";
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import { getCleanEnv, claudeProjectsDir, SPAWN_SHELL } from "./utils";
+import { getCleanEnv, claudeProjectsDir, UUID_RE } from "./utils";
+import { getClaudePath } from "./claude-bin";
 import type { SessionRow } from "./types";
 
 // ── Server-side auto-retry ────────────────────────────────────────────────────
@@ -116,9 +117,9 @@ async function serverAutoContinue(sessionId: string): Promise<void> {
   logAction("service", "stall_continue_fired", `stalled >${STALL_THRESHOLD_MS / 60_000}min`, sessionId);
 
   const proc = spawn(
-    "claude",
+    getClaudePath(),
     ["--resume", sessionId, "-p", "continue", "--output-format", "stream-json", "--verbose"],
-    { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"], shell: SPAWN_SHELL }
+    { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"] }
   );
   proc.stdout?.resume();
   proc.stderr?.resume();
@@ -136,10 +137,23 @@ function scheduleStallContinue(sessionId: string, delayMs = 60_000): void {
   }, delayMs);
 }
 
-/** Extract the last assistant text block from a JSONL file for LLM classification. */
+/** Extract the last assistant text block from a JSONL file for LLM classification.
+ *  Reads only the tail of the file (64 KB) to avoid loading multi-MB files. */
 function extractLastAssistantText(jsonlPath: string): string {
   try {
-    const lines = fs.readFileSync(jsonlPath, "utf-8").split("\n").filter(Boolean).reverse();
+    const stat = fs.statSync(jsonlPath);
+    const TAIL_BYTES = 64 * 1024;
+    const start = Math.max(0, stat.size - TAIL_BYTES);
+    const fd = fs.openSync(jsonlPath, "r");
+    const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+
+    const lines = buf.toString("utf-8").split("\n").filter(Boolean);
+    // If we started mid-file, first line is likely truncated — skip it
+    if (start > 0) lines.shift();
+    lines.reverse();
+
     for (const line of lines) {
       try {
         const obj = JSON.parse(line);
@@ -176,9 +190,9 @@ function serverAutoRetry(sessionId: string): void {
   logAction("service", "auto_retry_fired", "server-side 30s timeout", sessionId);
 
   const proc = spawn(
-    "claude",
+    getClaudePath(),
     ["--resume", sessionId, "-p", "continue", "--output-format", "stream-json", "--verbose"],
-    { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"], shell: SPAWN_SHELL }
+    { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"] }
   );
 
   // Drain stdout/stderr so buffers don't block the process
@@ -290,10 +304,14 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
                         .map((b: { text: string }) => b.text)
                         .join("")
                     : "";
+              // Skip task-notification-only messages for lastMessage/firstPrompt
+              const isTaskNotif = text.includes("<task-notification>") &&
+                text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, "").trim().length === 0;
               if (
                 text &&
                 !text.startsWith("{") &&
                 !text.startsWith("[Request interrupted") &&
+                !isTaskNotif &&
                 text.trim().length > 5
               ) {
                 if (!firstPrompt) {
@@ -441,19 +459,35 @@ export async function scanSessions(
   // Collect FTS updates to apply after each batch (FTS operations outside transaction)
   const ftsQueue: { sessionId: string; text: string }[] = [];
 
-  // Process files in batches — yield between batches to keep event loop responsive
-  const insertBatch = db.transaction((batch: typeof jsonlFiles) => {
+  // Deferred actions to run after each batch transaction completes
+  // (these involve execSync/spawn calls that shouldn't hold the DB write lock)
+  const postTxActions: Array<() => void> = [];
+
+  // Pre-process batch: stat files and extract metadata outside the transaction
+  interface PreprocessedFile {
+    filePath: string;
+    sessionId: string;
+    stat: fs.Stats;
+    metadata: JsonlMetadata;
+    dirName: string;
+  }
+
+  function preprocessBatch(batch: string[]): PreprocessedFile[] {
+    const results: PreprocessedFile[] = [];
     for (const filePath of batch) {
       const sessionId = path.basename(filePath, ".jsonl");
       if (
-        !sessionId.match(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-        )
+        !UUID_RE.test(sessionId)
       ) {
         continue;
       }
 
-      const stat = fs.statSync(filePath);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(filePath);
+      } catch {
+        continue;
+      }
       const fileMtime = stat.mtimeMs;
 
       if (mode === "incremental" && existingMtimes.has(sessionId)) {
@@ -468,37 +502,58 @@ export async function scanSessions(
       const metadata = extractMetadataFromJsonl(filePath);
       if (!metadata) continue;
 
-      // Skip internal utility sessions created by this app (title generation, etc.)
-      // Also delete from DB if previously imported (race condition: first scan sees empty JSONL)
+      // Skip internal utility sessions
+      if (metadata.firstPrompt?.startsWith("Generate a short descriptive title")) {
+        results.push({ filePath, sessionId, stat, metadata, dirName: path.basename(path.dirname(filePath)) });
+        continue;
+      }
+
+      results.push({
+        filePath,
+        sessionId,
+        stat,
+        metadata,
+        dirName: path.basename(path.dirname(filePath)),
+      });
+    }
+    return results;
+  }
+
+  // DB-only transaction: no I/O, no execSync, no spawn
+  const insertBatch = db.transaction((items: PreprocessedFile[]) => {
+    for (const { filePath, sessionId, stat, metadata, dirName } of items) {
+      // Handle utility sessions — delete from DB
       if (metadata.firstPrompt?.startsWith("Generate a short descriptive title")) {
         db.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
         continue;
       }
 
-      const dirName = path.basename(path.dirname(filePath));
       projectDirs.add(dirName);
 
-      // Detect newly-crashed sessions: was not tool_result before, now is
+      // Detect newly-crashed sessions
       if (metadata.lastMessageRole === "tool_result") {
         const prev = db
           .prepare("SELECT last_message_role FROM sessions WHERE session_id = ?")
           .get(sessionId) as { last_message_role: string | null } | undefined;
         if (prev?.last_message_role !== "tool_result") {
           logAction("service", "crash_detected", `jsonl:${filePath}`, sessionId);
-          scheduleServerAutoRetry(sessionId);
+          postTxActions.push(() => scheduleServerAutoRetry(sessionId));
         }
       }
 
-      // Detect stalled sessions: active, last role is assistant, silent for > threshold
-      // (file mtime check happens later in serverAutoContinue to avoid blocking the transaction)
+      // Detect stalled sessions — defer isSessionActive check to after transaction
       if (metadata.lastMessageRole === "assistant") {
         const silentMs = Date.now() - stat.mtimeMs;
         if (silentMs > STALL_THRESHOLD_MS) {
-          const { isSessionActive } = require("./process-detector");
-          if (isSessionActive(sessionId)) {
-            logAction("service", "stall_detected", `silent:${Math.round(silentMs / 60_000)}min`, sessionId);
-            scheduleStallContinue(sessionId, 10_000); // short delay, real checks happen inside
-          }
+          const capturedSessionId = sessionId;
+          const capturedSilentMs = silentMs;
+          postTxActions.push(() => {
+            const { isSessionActive } = require("./process-detector");
+            if (isSessionActive(capturedSessionId)) {
+              logAction("service", "stall_detected", `silent:${Math.round(capturedSilentMs / 60_000)}min`, capturedSessionId);
+              scheduleStallContinue(capturedSessionId, 10_000);
+            }
+          });
         }
       }
 
@@ -518,7 +573,7 @@ export async function scanSessions(
         total_output_tokens: metadata.totalOutputTokens,
         created_at: metadata.createdAt,
         modified_at: metadata.modifiedAt,
-        file_mtime: fileMtime,
+        file_mtime: stat.mtimeMs,
         file_size: stat.size,
         last_scanned_at: new Date().toISOString(),
       });
@@ -531,41 +586,61 @@ export async function scanSessions(
   // Process in batches with event loop yields between them
   for (let i = 0; i < jsonlFiles.length; i += BATCH_SIZE) {
     ftsQueue.length = 0;
-    insertBatch(jsonlFiles.slice(i, i + BATCH_SIZE));
-    // Index FTS content outside the main transaction
+    postTxActions.length = 0;
+
+    // Step 1: stat + parse outside transaction
+    const items = preprocessBatch(jsonlFiles.slice(i, i + BATCH_SIZE));
+
+    // Step 2: DB writes in transaction (no I/O)
+    insertBatch(items);
+
+    // Step 3: deferred actions (execSync, spawn) after transaction releases lock
+    for (const action of postTxActions) {
+      action();
+    }
+
+    // Step 4: FTS indexing outside transaction
     for (const { sessionId, text } of ftsQueue) {
       indexSessionContent(sessionId, text);
     }
     await yieldToEventLoop();
   }
 
-  // Update projects
-  const updateProjects = db.transaction(() => {
-    for (const projectDir of projectDirs) {
-      const stats = db
-        .prepare(
-          `SELECT COUNT(*) as count, MAX(modified_at) as last_activity,
-           MAX(project_path) as project_path
-           FROM sessions WHERE project_dir = ?`
-        )
-        .get(projectDir) as {
-        count: number;
-        last_activity: string;
-        project_path: string;
-      };
+  // Update projects — bulk query instead of per-project SELECT
+  const projectDirList = [...projectDirs];
+  if (projectDirList.length > 0) {
+    const placeholders = projectDirList.map(() => "?").join(",");
+    const allStats = db
+      .prepare(
+        `SELECT project_dir, COUNT(*) as count, MAX(modified_at) as last_activity,
+         MAX(project_path) as project_path
+         FROM sessions WHERE project_dir IN (${placeholders})
+         GROUP BY project_dir`
+      )
+      .all(...projectDirList) as Array<{
+      project_dir: string;
+      count: number;
+      last_activity: string;
+      project_path: string;
+    }>;
 
-      const projectPath = stats.project_path || dirToPath(projectDir);
+    const statsMap = new Map(allStats.map((s) => [s.project_dir, s]));
 
-      upsertProject.run({
-        project_dir: projectDir,
-        project_path: projectPath,
-        display_name: projectPath.split(/[\\/]/).pop() || projectDir,
-        session_count: stats.count,
-        last_activity: stats.last_activity,
-      });
-    }
-  });
-  updateProjects();
+    const updateProjects = db.transaction(() => {
+      for (const projectDir of projectDirList) {
+        const stats = statsMap.get(projectDir);
+        const projectPath = stats?.project_path || dirToPath(projectDir);
+        upsertProject.run({
+          project_dir: projectDir,
+          project_path: projectPath,
+          display_name: projectPath.split(/[\\/]/).pop() || projectDir,
+          session_count: stats?.count ?? 0,
+          last_activity: stats?.last_activity ?? null,
+        });
+      }
+    });
+    updateProjects();
+  }
 
   return {
     sessionsScanned,

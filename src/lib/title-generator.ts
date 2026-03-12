@@ -1,6 +1,6 @@
 import { getDb } from "./db";
-import { spawn } from "child_process";
-import { pathTail, SPAWN_SHELL } from "./utils";
+import { pathTail } from "./utils";
+import { runClaudeOneShot } from "./claude-runner";
 
 interface SessionForTitle {
   session_id: string;
@@ -10,59 +10,44 @@ interface SessionForTitle {
   message_count: number;
 }
 
-function runClaude(prompt: string, env: NodeJS.ProcessEnv): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(
-      "claude",
-      ["-p", "--model", "haiku", "--output-format", "text"],
-      {
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: SPAWN_SHELL,
-      }
-    );
+// Titles from the prompt examples that should never be saved
+const EXAMPLE_TITLES = new Set(["title here", "another title"]);
 
-    let stdout = "";
-    let stderr = "";
-
-    proc.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
-    });
-    proc.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    const timeoutHandle = setTimeout(() => {
-      proc.kill("SIGTERM");
-      reject(new Error("Timeout generating titles"));
-    }, 90_000);
-
-    proc.on("close", (code) => {
-      clearTimeout(timeoutHandle);
-      if (code === 0) {
-        resolve(stdout);
-      } else {
-        reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
-      }
-    });
-    proc.on("error", (err) => {
-      clearTimeout(timeoutHandle);
-      reject(err);
-    });
-
-    proc.stdin.write(prompt);
-    proc.stdin.end();
-  });
+/**
+ * Strip <context> preamble so Haiku sees actual content, not the forwarded header.
+ */
+function stripContextPreamble(text: string): string {
+  return text
+    .replace(/^<context>\s*/i, "")
+    .replace(/^Relevant context from previous session:\s*/i, "")
+    .replace(/^USER:\s*<context>\s*/i, "")
+    .replace(/^Relevant context from previous session:\s*/i, "")
+    .trim();
 }
 
-import { getCleanEnv } from "./utils";
+// Concurrency guard — only one title generation call at a time
+let titleGenerationRunning = false;
 
 /**
  * Generate titles for a batch of sessions. Returns number generated.
+ * Skips if another title generation is already in progress.
  */
 export async function generateTitleBatch(
   limit: number = 20,
   force: boolean = false
+): Promise<{ generated: number; total: number }> {
+  if (titleGenerationRunning) return { generated: 0, total: 0 };
+  titleGenerationRunning = true;
+  try {
+    return await _generateTitleBatchInner(limit, force);
+  } finally {
+    titleGenerationRunning = false;
+  }
+}
+
+async function _generateTitleBatchInner(
+  limit: number,
+  force: boolean
 ): Promise<{ generated: number; total: number }> {
   const db = getDb();
 
@@ -87,13 +72,11 @@ export async function generateTitleBatch(
     return { generated: 0, total: 0 };
   }
 
-  const env = getCleanEnv();
-
   const sessionsText = sessions
     .map((s, i) => {
       const project = pathTail(s.project_path) || "unknown";
-      const last = (s.last_message || "").slice(0, 300).replace(/\n/g, " ").replace(/"/g, "'");
-      const first = (s.first_prompt || "").slice(0, 120).replace(/\n/g, " ").replace(/"/g, "'");
+      const last = stripContextPreamble((s.last_message || "")).slice(0, 300).replace(/\n/g, " ").replace(/"/g, "'");
+      const first = stripContextPreamble((s.first_prompt || "")).slice(0, 120).replace(/\n/g, " ").replace(/"/g, "'");
       return `[${i}] project=${project} | recent: ${last} | started_with: ${first}`;
     })
     .join("\n");
@@ -106,7 +89,11 @@ Reply with ONLY numbered lines like:
 
 ${sessionsText}`;
 
-  const stdout = await runClaude(prompt, env);
+  const stdout = await runClaudeOneShot({
+    prompt,
+    args: ["-p", "--model", "haiku", "--output-format", "text"],
+    timeoutMs: 90_000,
+  });
 
   const updateStmt = db.prepare(
     "UPDATE sessions SET generated_title = ?, titled_at_count = ? WHERE session_id = ?"
@@ -122,7 +109,7 @@ ${sessionsText}`;
     const idx = parseInt(match[1]);
     const title = match[2].trim().replace(/^["']|["']$/g, "");
 
-    if (idx >= 0 && idx < sessions.length && title.length > 2) {
+    if (idx >= 0 && idx < sessions.length && title.length > 2 && !EXAMPLE_TITLES.has(title.toLowerCase())) {
       updateStmt.run(title, sessions[idx].message_count, sessions[idx].session_id);
       generated++;
     }
@@ -131,25 +118,16 @@ ${sessionsText}`;
   return { generated, total: sessions.length };
 }
 
-// Concurrency guard — only one chain at a time
-let titleGenerationRunning = false;
-
 /**
- * Generate all missing titles in batches. Skips if already running.
+ * Generate all missing titles in batches. Skips if already running (shares guard with generateTitleBatch).
  */
 export async function generateAllMissingTitles(): Promise<void> {
-  if (titleGenerationRunning) return;
-  titleGenerationRunning = true;
-  try {
-    for (let i = 0; i < 25; i++) {
-      try {
-        const { generated } = await generateTitleBatch(20);
-        if (generated === 0) break;
-      } catch {
-        break;
-      }
+  for (let i = 0; i < 25; i++) {
+    try {
+      const { generated } = await generateTitleBatch(20);
+      if (generated === 0) break;
+    } catch {
+      break;
     }
-  } finally {
-    titleGenerationRunning = false;
   }
 }

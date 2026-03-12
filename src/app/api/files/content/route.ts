@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, statSync } from "fs";
 import path from "path";
+import os from "os";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,13 @@ const MAX_TEXT_BYTES = 500_000; // 500KB
 export async function GET(request: NextRequest) {
   const filePath = request.nextUrl.searchParams.get("path");
   if (!filePath) return NextResponse.json({ error: "path required" }, { status: 400 });
+
+  // Boundary check: only serve files under home directory
+  const resolved = path.resolve(filePath);
+  const home = os.homedir();
+  if (!resolved.startsWith(home + "/") && resolved !== home) {
+    return NextResponse.json({ error: "Access denied: path outside home directory" }, { status: 403 });
+  }
 
   const ext = path.extname(filePath).toLowerCase().slice(1);
 

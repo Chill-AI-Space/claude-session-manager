@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
   const project = searchParams.get("project");
   const search = searchParams.get("search");
   const tag = searchParams.get("tag");
+  const ids = searchParams.get("ids"); // comma-separated session IDs
   const sort = searchParams.get("sort") || "modified";
   const limit = parseInt(searchParams.get("limit") || "100");
   const offset = parseInt(searchParams.get("offset") || "0");
@@ -37,6 +38,14 @@ export async function GET(request: NextRequest) {
   if (tag) {
     conditions.push("tags LIKE @tag");
     filterParams.tag = `%"${tag}"%`;
+  }
+  if (ids) {
+    const idList = ids.split(",").filter(Boolean);
+    if (idList.length > 0) {
+      const placeholders = idList.map((_, i) => `@id${i}`).join(",");
+      conditions.push(`session_id IN (${placeholders})`);
+      idList.forEach((id, i) => { filterParams[`id${i}`] = id; });
+    }
   }
 
   const whereClause = conditions.length > 0

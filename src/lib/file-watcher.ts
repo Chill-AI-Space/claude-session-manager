@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { claudeProjectsDir } from "./utils";
+import { claudeProjectsDir, UUID_RE } from "./utils";
 
 const CLAUDE_DIR = claudeProjectsDir();
 
@@ -12,7 +12,8 @@ type ChangeCallback = (event: {
 
 let watcher: fs.FSWatcher | null = null;
 const listeners = new Set<ChangeCallback>();
-let debounceTimer: NodeJS.Timeout | null = null;
+// Per-session debounce timers — prevents one session's writes from swallowing another's events
+const debounceTimers = new Map<string, NodeJS.Timeout>();
 
 export function startWatching() {
   if (watcher) return;
@@ -24,22 +25,24 @@ export function startWatching() {
       (eventType, filename) => {
         if (!filename || !filename.endsWith(".jsonl")) return;
 
-        // Debounce — Claude writes frequently during a session
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          const parts = filename.split(path.sep);
-          const projectDir = parts[0] || "";
-          const sessionFile = parts[parts.length - 1];
-          const sessionId = sessionFile.replace(".jsonl", "");
+        const parts = filename.split(path.sep);
+        const projectDir = parts[0] || "";
+        const sessionFile = parts[parts.length - 1];
+        const sessionId = sessionFile.replace(".jsonl", "");
 
-          // Validate it's a UUID
-          if (
-            !sessionId.match(
-              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-            )
-          ) {
-            return;
-          }
+        // Validate it's a UUID
+        if (
+          !UUID_RE.test(sessionId)
+        ) {
+          return;
+        }
+
+        // Per-session debounce — Claude writes frequently during a session
+        const existing = debounceTimers.get(sessionId);
+        if (existing) clearTimeout(existing);
+
+        debounceTimers.set(sessionId, setTimeout(() => {
+          debounceTimers.delete(sessionId);
 
           const event = {
             type: eventType === "rename"
@@ -56,7 +59,7 @@ export function startWatching() {
               // ignore listener errors
             }
           }
-        }, 2000);
+        }, 2000));
       }
     );
   } catch {
@@ -75,8 +78,9 @@ export function stopWatching() {
     watcher.close();
     watcher = null;
   }
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
+  for (const timer of debounceTimers.values()) {
+    clearTimeout(timer);
   }
+  debounceTimers.clear();
   listeners.clear();
 }

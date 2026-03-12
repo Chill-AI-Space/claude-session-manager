@@ -68,7 +68,7 @@ export function SessionList({ sessions, loading, geminiResults, onArchive }: Ses
           return (
             <div key={session.session_id}>
               {showLabel && (
-                <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider sticky top-0 bg-card/95 backdrop-blur-sm z-10">
+                <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider sticky top-0 bg-sidebar/95 backdrop-blur-sm z-10">
                   {session.display_name}
                 </div>
               )}

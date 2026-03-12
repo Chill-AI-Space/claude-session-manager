@@ -821,35 +821,20 @@ export default function SessionDetailPage({
 
       if (!res.ok) throw new Error("Failed to start session");
 
-      // Read SSE stream to get session_id, then navigate
+      // Read SSE stream to completion but stay on current page
       if (res.body) {
         const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let navigated = false;
-
         const readStream = async () => {
           try {
             while (true) {
-              const { done, value } = await reader.read();
+              const { done } = await reader.read();
               if (done) break;
-              const text = decoder.decode(value, { stream: true });
-              for (const line of text.split("\n")) {
-                if (!line.startsWith("data: ")) continue;
-                try {
-                  const obj = JSON.parse(line.slice(6));
-                  if (obj.type === "session_id" && obj.session_id && !navigated) {
-                    navigated = true;
-                    router.push(`/claude-sessions/${obj.session_id}`);
-                  }
-                } catch { /* skip non-JSON */ }
-              }
             }
           } catch { /* stream closed */ }
         };
-
-        // Start reading but don't block — navigate happens inside
         readStream();
       }
+      setStartingNewSession(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start new session");
       setStartingNewSession(false);

@@ -1,9 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getDb, getSetting } from "@/lib/db";
 import { readSessionMessages } from "@/lib/session-reader";
 import { SessionRow, ContentBlock } from "@/lib/types";
-import { spawn } from "child_process";
-import { getCleanEnv } from "@/lib/utils";
+import { runClaudeOneShot } from "@/lib/claude-runner";
 
 export const dynamic = "force-dynamic";
 
@@ -81,53 +80,6 @@ Rules:
 Session transcript:
 `;
 
-function runClaudeExtract(sessionText: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const env = getCleanEnv();
-    const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
-    const args = ["-p", "--model", "haiku", "--output-format", "text"];
-    if (skipPermissions) args.push("--dangerously-skip-permissions");
-
-    const proc = spawn("claude", args, {
-      env,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32",
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    proc.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
-    });
-    proc.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    const timeout = setTimeout(() => {
-      proc.kill("SIGTERM");
-      reject(new Error("Timeout extracting learnings"));
-    }, 120_000);
-
-    proc.on("close", (code) => {
-      clearTimeout(timeout);
-      if (code === 0) {
-        resolve(stdout.trim());
-      } else {
-        reject(new Error(`Claude exited with code ${code}: ${stderr.slice(0, 500)}`));
-      }
-    });
-
-    proc.on("error", (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-
-    proc.stdin.write(EXTRACTION_PROMPT + sessionText);
-    proc.stdin.end();
-  });
-}
-
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
@@ -140,18 +92,24 @@ export async function POST(
     .get(sessionId) as SessionRow | undefined;
 
   if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
   try {
     const sessionText = extractSessionText(session.jsonl_path);
     if (!sessionText || sessionText.length < 100) {
-      return NextResponse.json({
-        error: "Session too short to extract learnings",
-      }, { status: 400 });
+      return Response.json({ error: "Session too short to extract learnings" }, { status: 400 });
     }
 
-    const raw = await runClaudeExtract(sessionText);
+    const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
+    const args = ["-p", "--model", "haiku", "--output-format", "text"];
+    if (skipPermissions) args.push("--dangerously-skip-permissions");
+
+    const raw = await runClaudeOneShot({
+      prompt: EXTRACTION_PROMPT + sessionText,
+      args,
+      timeoutMs: 120_000,
+    });
 
     // Parse JSON from response (handle possible markdown fences)
     let cleaned = raw;
@@ -161,13 +119,13 @@ export async function POST(
     // Try to find JSON object
     const objMatch = cleaned.match(/\{[\s\S]*\}/);
     if (!objMatch) {
-      return NextResponse.json({ error: "Failed to parse learnings", raw }, { status: 500 });
+      return Response.json({ error: "Failed to parse learnings", raw }, { status: 500 });
     }
 
     const learnings = JSON.parse(objMatch[0]);
-    return NextResponse.json({ learnings, session_id: sessionId });
+    return Response.json({ learnings, session_id: sessionId });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return Response.json({ error: msg }, { status: 500 });
   }
 }

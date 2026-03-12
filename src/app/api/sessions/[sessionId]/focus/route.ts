@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { execFileSync, execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -15,7 +15,7 @@ function getTTY(pid: number): string | null {
       encoding: "utf-8",
       timeout: 3000,
     }).trim();
-    if (!tty || tty === "??" || tty === "??") return null;
+    if (!tty || tty === "??") return null;
     // Normalize to full path: "ttys001" → "/dev/ttys001"
     if (tty.startsWith("/dev/")) return tty;
     return `/dev/${tty}`;
@@ -28,7 +28,7 @@ function runAppleScript(script: string): string {
   const tmpFile = join(tmpdir(), `focus-${Date.now()}.applescript`);
   try {
     writeFileSync(tmpFile, script, "utf-8");
-    return execSync(`osascript "${tmpFile}"`, {
+    return execFileSync("osascript", [tmpFile], {
       encoding: "utf-8",
       timeout: 6000,
     }).trim();

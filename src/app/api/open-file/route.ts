@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { spawn } from "child_process";
 import path from "path";
+import os from "os";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +16,20 @@ export async function POST(request: NextRequest) {
   }
 
   // Resolve relative paths against project cwd
-  const resolved = filePath.startsWith("/") || filePath.startsWith("~")
-    ? filePath
-    : cwd
-      ? path.resolve(cwd, filePath)
-      : filePath;
+  let resolved = filePath.startsWith("~")
+    ? path.join(os.homedir(), filePath.slice(1))
+    : filePath.startsWith("/")
+      ? filePath
+      : cwd
+        ? path.resolve(cwd, filePath)
+        : filePath;
+
+  // Normalize to resolve ".." traversal and check boundary
+  resolved = path.resolve(resolved);
+  const home = os.homedir();
+  if (!resolved.startsWith(home + "/") && resolved !== home) {
+    return Response.json({ error: "Access denied: path outside home directory" }, { status: 403 });
+  }
 
   const args = action === "reveal" ? ["-R", resolved] : [resolved];
 

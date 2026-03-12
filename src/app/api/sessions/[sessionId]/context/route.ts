@@ -1,43 +1,9 @@
 import { NextRequest } from "next/server";
 import { getDb, getSetting } from "@/lib/db";
 import { SessionRow } from "@/lib/types";
-import { readFileSync } from "fs";
+import { readSessionMessages, messagesToText } from "@/lib/session-reader";
 
 export const dynamic = "force-dynamic";
-
-/** Extract readable text from JSONL — only user/assistant text, no tool noise */
-function extractMessages(jsonlContent: string): string {
-  const lines = jsonlContent.split("\n").filter((l) => l.trim());
-  const parts: string[] = [];
-
-  for (const line of lines) {
-    try {
-      const obj = JSON.parse(line);
-      if (obj.type !== "user" && obj.type !== "assistant") continue;
-
-      const role = obj.type === "user" ? "USER" : "CLAUDE";
-      const msg = obj.message;
-      if (!msg) continue;
-
-      let text = "";
-      if (typeof msg.content === "string") {
-        text = msg.content;
-      } else if (Array.isArray(msg.content)) {
-        text = msg.content
-          .filter((b: { type: string; text?: string }) => b.type === "text" && b.text)
-          .map((b: { text: string }) => b.text)
-          .join("\n");
-      }
-
-      if (!text.trim()) continue;
-      parts.push(`${role}: ${text.trim()}`);
-    } catch {
-      // skip malformed lines
-    }
-  }
-
-  return parts.join("\n\n");
-}
 
 export async function POST(
   req: NextRequest,
@@ -60,13 +26,11 @@ export async function POST(
     return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
-  let transcript: string;
-  try {
-    const content = readFileSync(session.jsonl_path, "utf-8");
-    transcript = extractMessages(content);
-  } catch {
+  const messages = readSessionMessages(session.jsonl_path);
+  if (messages.length === 0) {
     return Response.json({ error: "Could not read session file" }, { status: 500 });
   }
+  const transcript = messagesToText(messages);
 
   // If transcript is tiny, just return it as-is — no need for AI
   if (transcript.length < 2000) {

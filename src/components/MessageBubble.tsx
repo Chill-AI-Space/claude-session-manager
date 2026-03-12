@@ -4,7 +4,8 @@ import { ParsedMessage, ContentBlock } from "@/lib/types";
 import { ToolUseBlock } from "./ToolUseBlock";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { MarkdownContent } from "./MarkdownContent";
-import { Zap } from "lucide-react";
+import { Zap, Bell, Scissors } from "lucide-react";
+import { memo } from "react";
 
 interface MessageBubbleProps {
   message: ParsedMessage;
@@ -21,8 +22,26 @@ function formatTime(ts: string): string {
   });
 }
 
-import { memo } from "react";
-import { Scissors } from "lucide-react";
+/** Extract summary from <task-notification> XML block */
+function extractTaskNotification(text: string): string | null {
+  if (!text.includes("<task-notification>")) return null;
+  const summaryMatch = text.match(/<summary>([\s\S]*?)<\/summary>/);
+  if (summaryMatch) return summaryMatch[1].trim();
+  // Fallback: strip all XML tags and return cleaned text
+  const cleaned = text.replace(/<[^>]+>/g, "").trim();
+  return cleaned || null;
+}
+
+/** Check if text is purely a task-notification (no other user content) */
+function isTaskNotificationOnly(text: string): boolean {
+  const stripped = text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, "").trim();
+  return stripped.length === 0 && text.includes("<task-notification>");
+}
+
+const NO_RESPONSE_PATTERNS = [
+  /^no response requested\.?$/i,
+  /^no response needed\.?$/i,
+];
 
 const CONTEXT_SUMMARY_PREFIX = "This session is being continued from a previous conversation that ran out of context.";
 
@@ -71,6 +90,31 @@ export const MessageBubble = memo(function MessageBubble({ message, projectPath 
     );
   }
 
+  // Detect <task-notification> messages — render as compact status pill
+  if (isUser && isTaskNotificationOnly(fullText)) {
+    const summary = extractTaskNotification(fullText);
+    if (summary) {
+      return (
+        <div className="flex items-center gap-3 py-1">
+          <div className="flex-1 h-px bg-blue-500/20" />
+          <div className="flex items-center gap-1.5 text-[11px] text-blue-600/70 dark:text-blue-400/60 shrink-0 bg-blue-50 dark:bg-blue-950/30 border border-blue-200/40 dark:border-blue-700/30 rounded-full px-2.5 py-0.5 max-w-[80%]">
+            <Bell className="h-2.5 w-2.5 shrink-0" />
+            <span className="truncate">{summary}</span>
+          </div>
+          <div className="flex-1 h-px bg-blue-500/20" />
+        </div>
+      );
+    }
+  }
+
+  // Hide "No response requested" assistant messages
+  if (!isUser && hasText && !hasTools && !hasThinking) {
+    const trimmed = fullText.trim();
+    if (NO_RESPONSE_PATTERNS.some((p) => p.test(trimmed))) {
+      return null;
+    }
+  }
+
   // Skip empty messages and tool-result-only user messages
   if (!hasText && !hasTools && !hasThinking) {
     if (isUser && hasToolResults) {
@@ -107,26 +151,32 @@ export const MessageBubble = memo(function MessageBubble({ message, projectPath 
     return null;
   }
 
-  // ── User message — right-aligned bubble ──────────────────────────────────
+  // ── User message — right-aligned bubble, time inside (Telegram-style) ─────
   if (isUser) {
+    const ts = formatTime(message.timestamp);
+    // Strip any embedded <task-notification> blocks from user text
+    const userText = textBlocks.join("\n").replace(/<task-notification>[\s\S]*?<\/task-notification>/g, "").trim();
+    if (!userText && !hasToolResults) return null;
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] space-y-1">
-          <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground/60">
-            <span>{formatTime(message.timestamp)}</span>
-          </div>
-          <div className="bg-primary/10 dark:bg-primary/15 border border-primary/20 rounded-2xl rounded-tr-sm px-4 py-3 text-[13px] leading-relaxed">
-            <MarkdownContent content={textBlocks.join("\n")} projectPath={projectPath} />
-            {hasToolResults && toolResultBlocks.map((block, i) => {
-              if (block.type !== "tool_result") return null;
-              const rc = typeof block.content === "string" ? block.content
-                : Array.isArray(block.content) ? block.content.filter((b): b is { type: "text"; text: string } => b.type === "text").map(b => b.text).join("") : "";
-              return rc.trim() ? (
-                <div key={i} className="mt-2 text-xs font-mono text-muted-foreground bg-background/50 rounded px-2 py-1 max-h-[120px] overflow-y-auto whitespace-pre-wrap break-all">
-                  {rc.slice(0, 2000)}{rc.length > 2000 && "..."}
-                </div>
-              ) : null;
-            })}
+        <div className="max-w-[85%]">
+          <div className="bg-primary/8 dark:bg-primary/15 border border-primary/15 dark:border-primary/20 rounded-2xl rounded-tr-sm px-3.5 py-2 text-[13px] leading-relaxed">
+            <div className="flex items-end gap-3">
+              <div className="min-w-0 flex-1">
+                {userText && <MarkdownContent content={userText} projectPath={projectPath} />}
+                {hasToolResults && toolResultBlocks.map((block, i) => {
+                  if (block.type !== "tool_result") return null;
+                  const rc = typeof block.content === "string" ? block.content
+                    : Array.isArray(block.content) ? block.content.filter((b): b is { type: "text"; text: string } => b.type === "text").map(b => b.text).join("") : "";
+                  return rc.trim() ? (
+                    <div key={i} className="mt-1.5 text-xs font-mono text-muted-foreground bg-background/50 rounded px-2 py-1 max-h-[120px] overflow-y-auto whitespace-pre-wrap break-all">
+                      {rc.slice(0, 2000)}{rc.length > 2000 && "..."}
+                    </div>
+                  ) : null;
+                })}
+              </div>
+              {ts && <span className="shrink-0 text-[10px] text-muted-foreground/50 leading-none pb-0.5">{ts}</span>}
+            </div>
           </div>
         </div>
       </div>

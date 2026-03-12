@@ -59,6 +59,7 @@ function initTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_dir);
     CREATE INDEX IF NOT EXISTS idx_sessions_modified ON sessions(modified_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sessions_pinned ON sessions(pinned DESC, modified_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(archived, pinned DESC, modified_at DESC);
 
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -95,6 +96,25 @@ function initTables(db: Database.Database) {
       content,
       tokenize='unicode61 remove_diacritics 1'
     );
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS autodetect_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      prompt TEXT,
+      chosen_path TEXT,
+      chosen_name TEXT,
+      keyword_rank INTEGER,
+      gemini_rank INTEGER,
+      keyword_top5 TEXT,
+      gemini_top5 TEXT,
+      keyword_all_scores TEXT,
+      gemini_raw TEXT,
+      gemini_method TEXT,
+      total_projects INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_autodetect_log_created ON autodetect_log(created_at DESC);
   `);
 
   db.exec(`
@@ -242,12 +262,8 @@ export function getActionsLog(opts: {
   const params: (string | number)[] = [];
 
   if (action) {
-    // Support comma-separated actions: "crash_detected,auto_retry_failed"
     const actions = action.split(",").map(a => a.trim()).filter(Boolean);
-    if (actions.length === 1) {
-      conditions.push("action = ?");
-      params.push(actions[0]);
-    } else if (actions.length > 1) {
+    if (actions.length > 0) {
       conditions.push(`action IN (${actions.map(() => "?").join(",")})`);
       params.push(...actions);
     }
@@ -287,38 +303,34 @@ export function getActionStats(): ActionStats {
   const db = getDb();
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
 
-  const counts = db.prepare(`
+  const row = db.prepare(`
     SELECT
       COUNT(*) as total,
       SUM(CASE WHEN action = 'crash_detected' THEN 1 ELSE 0 END) as crashes,
       SUM(CASE WHEN action IN ('auto_retry_fired','stall_continue_fired') THEN 1 ELSE 0 END) as retries,
       SUM(CASE WHEN action IN ('auto_retry_failed','stall_continue_failed') THEN 1 ELSE 0 END) as retries_failed,
       SUM(CASE WHEN action = 'stall_detected' THEN 1 ELSE 0 END) as stalls,
-      SUM(CASE WHEN action = 'reply' THEN 1 ELSE 0 END) as replies
+      SUM(CASE WHEN action = 'reply' THEN 1 ELSE 0 END) as replies,
+      MAX(CASE WHEN action = 'crash_detected' THEN created_at END) as last_crash,
+      MAX(created_at) as last_action
     FROM actions_log WHERE created_at >= ?
-  `).get(since) as Record<string, number>;
-
-  const lastCrash = db.prepare(
-    "SELECT created_at FROM actions_log WHERE action = 'crash_detected' ORDER BY created_at DESC LIMIT 1"
-  ).get() as { created_at: string } | undefined;
-
-  const lastAction = db.prepare(
-    "SELECT created_at FROM actions_log ORDER BY created_at DESC LIMIT 1"
-  ).get() as { created_at: string } | undefined;
+  `).get(since) as Record<string, number | string | null>;
 
   return {
-    total_24h: counts.total ?? 0,
-    crashes_24h: counts.crashes ?? 0,
-    retries_24h: counts.retries ?? 0,
-    retries_failed_24h: counts.retries_failed ?? 0,
-    stalls_24h: counts.stalls ?? 0,
-    replies_24h: counts.replies ?? 0,
-    last_crash: lastCrash?.created_at ?? null,
-    last_action: lastAction?.created_at ?? null,
+    total_24h: (row.total as number) ?? 0,
+    crashes_24h: (row.crashes as number) ?? 0,
+    retries_24h: (row.retries as number) ?? 0,
+    retries_failed_24h: (row.retries_failed as number) ?? 0,
+    stalls_24h: (row.stalls as number) ?? 0,
+    replies_24h: (row.replies as number) ?? 0,
+    last_crash: (row.last_crash as string) ?? null,
+    last_action: (row.last_action as string) ?? null,
   };
 }
 
 const SETTING_DEFAULTS: Record<string, string> = {
+  auto_retry_on_crash: "true",
+  auto_continue_on_stall: "false",
   auto_kill_terminal_on_reply: "false",
   dangerously_skip_permissions: "false",
   vector_search_top_k: "20",
@@ -330,18 +342,37 @@ const SETTING_DEFAULTS: Record<string, string> = {
   new_session_from_reply: "true",
 };
 
+// Settings cache — avoids reading JSON file on every getSetting() call
+let _settingsCache: Record<string, string> | null = null;
+let _settingsCacheTime = 0;
+const SETTINGS_CACHE_TTL = 2000; // 2 seconds
+
 function readSettingsFile(): Record<string, string> {
+  const now = Date.now();
+  if (_settingsCache && now - _settingsCacheTime < SETTINGS_CACHE_TTL) {
+    return _settingsCache;
+  }
   try {
     const data = fs.readFileSync(SETTINGS_PATH, "utf-8");
-    return JSON.parse(data);
+    _settingsCache = JSON.parse(data);
+    _settingsCacheTime = now;
+    return _settingsCache!;
   } catch {
+    _settingsCache = {};
+    _settingsCacheTime = now;
     return {};
   }
 }
 
 function writeSettingsFile(settings: Record<string, string>): void {
   fs.mkdirSync(SETTINGS_DIR, { recursive: true });
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+  // Write atomically: write to temp file, then rename
+  const tmpPath = SETTINGS_PATH + ".tmp";
+  fs.writeFileSync(tmpPath, JSON.stringify(settings, null, 2));
+  fs.renameSync(tmpPath, SETTINGS_PATH);
+  // Bust cache
+  _settingsCache = settings;
+  _settingsCacheTime = Date.now();
 }
 
 export function getSetting(key: string): string {
@@ -350,6 +381,8 @@ export function getSetting(key: string): string {
 }
 
 export function setSetting(key: string, value: string): void {
+  // Invalidate cache before re-read to get fresh data for read-modify-write
+  _settingsCache = null;
   const saved = readSettingsFile();
   saved[key] = value;
   writeSettingsFile(saved);
@@ -388,26 +421,35 @@ export interface ContextSourceGroupFull {
 export function getContextSourceGroups(): ContextSourceGroupFull[] {
   const db = getDb();
   const groups = db.prepare("SELECT * FROM context_source_groups ORDER BY created_at ASC").all() as ContextSourceGroupRow[];
-  return groups.map((g) => {
-    const sources = db
-      .prepare("SELECT * FROM context_sources WHERE group_id = ? ORDER BY created_at ASC")
-      .all(g.id) as ContextSourceRow[];
-    const patterns = (
-      db.prepare("SELECT pattern FROM context_group_projects WHERE group_id = ?").all(g.id) as { pattern: string }[]
-    ).map((r) => r.pattern);
-    return {
-      id: g.id,
-      name: g.name,
-      enabled: g.enabled === 1,
-      sources: sources.map((s) => ({
-        id: s.id,
-        type: s.type,
-        label: s.label,
-        config: (() => { try { return JSON.parse(s.config); } catch { return {}; } })(),
-      })),
-      patterns,
-    };
-  });
+  const allSources = db.prepare("SELECT * FROM context_sources ORDER BY created_at ASC").all() as ContextSourceRow[];
+  const allPatterns = db.prepare("SELECT * FROM context_group_projects").all() as { group_id: string; pattern: string }[];
+
+  // Index by group_id for O(1) lookup
+  const sourcesByGroup = new Map<string, ContextSourceRow[]>();
+  for (const s of allSources) {
+    const arr = sourcesByGroup.get(s.group_id) || [];
+    arr.push(s);
+    sourcesByGroup.set(s.group_id, arr);
+  }
+  const patternsByGroup = new Map<string, string[]>();
+  for (const p of allPatterns) {
+    const arr = patternsByGroup.get(p.group_id) || [];
+    arr.push(p.pattern);
+    patternsByGroup.set(p.group_id, arr);
+  }
+
+  return groups.map((g) => ({
+    id: g.id,
+    name: g.name,
+    enabled: g.enabled === 1,
+    sources: (sourcesByGroup.get(g.id) || []).map((s) => ({
+      id: s.id,
+      type: s.type,
+      label: s.label,
+      config: (() => { try { return JSON.parse(s.config); } catch { return {}; } })(),
+    })),
+    patterns: patternsByGroup.get(g.id) || [],
+  }));
 }
 
 export function upsertContextSourceGroup(

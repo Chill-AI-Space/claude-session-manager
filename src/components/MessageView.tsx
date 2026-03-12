@@ -167,7 +167,7 @@ export function MessageView({
 
   return (
     <ScrollArea ref={scrollAreaRef} className="flex-1 min-h-0">
-      <div ref={containerRef} className={`px-8 py-6 w-full max-w-[640px] mx-auto overflow-x-hidden ${folded ? "space-y-2" : "space-y-6"}`}>
+      <div ref={containerRef} className={`px-8 py-6 w-full max-w-[640px] mx-auto overflow-x-hidden ${folded ? "space-y-2" : "space-y-4"}`}>
         {/* Invisible sentinel — triggers auto-load when scrolled into view */}
         {onLoadEarlier && (
           <div ref={sentinelRef} className="h-px" />
