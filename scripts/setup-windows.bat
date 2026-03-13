@@ -2,7 +2,7 @@
 REM ============================================================
 REM Claude Session Manager — Windows Setup (one-click)
 REM ============================================================
-REM Prerequisites: Node.js 18+ (https://nodejs.org)
+REM No prerequisites needed — this script installs everything.
 REM Usage: Double-click this file, or run: scripts\setup-windows.bat
 REM ============================================================
 
@@ -17,15 +17,7 @@ echo.
 
 REM --- Check Node.js ---
 where node >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Node.js is not installed or not in PATH.
-    echo.
-    echo Please install Node.js 18+ from: https://nodejs.org
-    echo After installing, close and reopen this terminal, then run this script again.
-    echo.
-    pause
-    exit /b 1
-)
+if errorlevel 1 goto :install_node
 
 for /f "tokens=*" %%v in ('node --version') do set NODE_VER=%%v
 echo [OK] Node.js %NODE_VER% found
@@ -33,16 +25,77 @@ echo [OK] Node.js %NODE_VER% found
 REM --- Check minimum Node version (need 18+) ---
 for /f "tokens=1 delims=v." %%a in ("%NODE_VER%") do set NODE_MAJOR=%%a
 if %NODE_MAJOR% LSS 18 (
-    echo [ERROR] Node.js 18+ required, you have %NODE_VER%
-    echo Please update from: https://nodejs.org
-    pause
-    exit /b 1
+    echo [!] Node.js 18+ required, you have %NODE_VER%. Upgrading...
+    goto :install_node
 )
+goto :node_ready
+
+:install_node
+echo [!] Node.js is not installed or too old.
+echo.
+
+REM Try winget first (available on Windows 10 1709+ and Windows 11)
+where winget >nul 2>&1
+if errorlevel 1 goto :no_winget
+
+echo     Node.js can be installed automatically via winget.
+echo.
+choice /C YN /M "    Install Node.js now? (Y/N)"
+if errorlevel 2 goto :manual_install
+echo.
+echo     Installing Node.js LTS via winget...
+echo.
+winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements
+if errorlevel 1 (
+    echo.
+    echo [ERROR] winget install failed. Trying manual install...
+    goto :manual_install
+)
+
+REM winget installs to Program Files — add to PATH for this session
+set "PATH=%PATH%;C:\Program Files\nodejs"
+
+REM Verify it worked
+where node >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo [!] Node.js was installed but not yet in PATH.
+    echo     Please close this window and run setup-windows.bat again.
+    echo.
+    pause
+    exit /b 0
+)
+
+for /f "tokens=*" %%v in ('node --version') do set NODE_VER=%%v
+echo.
+echo [OK] Node.js %NODE_VER% installed successfully!
+goto :node_ready
+
+:no_winget
+echo     winget is not available on this system.
+echo.
+
+:manual_install
+echo     Please install Node.js manually:
+echo.
+echo     Option 1: Download from https://nodejs.org (LTS version)
+echo              Make sure to check "Add to PATH" during install!
+echo.
+echo     Option 2: If you have chocolatey:
+echo              choco install nodejs-lts
+echo.
+echo     After installing, close this window and run setup-windows.bat again.
+echo.
+pause
+exit /b 1
+
+:node_ready
 
 REM --- Check npm ---
 where npm >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] npm not found. It should come with Node.js.
+    echo Try reinstalling Node.js from https://nodejs.org
     pause
     exit /b 1
 )
@@ -53,7 +106,7 @@ where claude >nul 2>&1
 if errorlevel 1 (
     echo [WARN] Claude CLI not found in PATH.
     echo        Session replay/reply features won't work until Claude is installed.
-    echo        Install: npm install -g @anthropic-ai/claude-code
+    echo        Install later: npm install -g @anthropic-ai/claude-code
     echo.
 ) else (
     echo [OK] Claude CLI found
@@ -67,12 +120,13 @@ if errorlevel 1 (
     echo.
     echo [ERROR] npm install failed.
     echo.
-    echo Common fix: Install Visual Studio Build Tools for native modules:
-    echo   npm install --global windows-build-tools
-    echo   -OR-
-    echo   Download from: https://visualstudio.microsoft.com/visual-cpp-build-tools/
-    echo   Select "Desktop development with C++" workload
+    echo If better-sqlite3 compilation failed, you need C++ build tools:
+    echo   Option 1: npm install --global windows-build-tools
+    echo   Option 2: Download Visual Studio Build Tools:
+    echo             https://visualstudio.microsoft.com/visual-cpp-build-tools/
+    echo             Select "Desktop development with C++" workload
     echo.
+    echo After installing build tools, run this script again.
     pause
     exit /b 1
 )
