@@ -2,6 +2,8 @@
 
 Next.js app (App Router) + better-sqlite3. Web UI for browsing and managing Claude Code sessions.
 
+**Cross-platform:** works on macOS, Windows, and Linux.
+
 ## Stack
 
 - Next.js 16 (Turbopack in dev), React 19, Tailwind CSS 4, shadcn/ui
@@ -15,6 +17,28 @@ npm run dev          # dev server with Turbopack (http://localhost:3000)
 npm run build        # production build
 npm run start        # production server (http://localhost:3000)
 ```
+
+## Windows setup (one-click)
+
+Prerequisites: **Node.js 18+** (https://nodejs.org). Git optional (can download zip).
+
+```
+git clone <repo-url>
+cd claude-session-manager
+scripts\setup-windows.bat
+```
+
+The script will: check Node.js → `npm install` → `npm run build` → start server → open browser.
+
+To update later: `scripts\update.bat`
+
+### Windows limitations
+
+- **Process detection** — `ps`/`lsof` not available; active session detection is disabled (`process-detector.ts` returns `[]` on Windows). Sessions still show but without live "active" status.
+- **Kill session** — SIGTERM-based terminal kill is not supported. The UI shows a warning on the Help page.
+- **Tray icon** — systray2 works on Windows but the icon is optimized for macOS dark menu bar (white on transparent). It will appear but may look odd on Windows taskbar.
+- **Permission bridge hook** — uses `permission-bridge.cmd` on Windows (not `.sh`). The `.cmd` script must exist in `scripts/` for the install feature to work.
+- **Claude CLI path** — resolved via `where claude` on Windows. If Claude is installed via npm global, WinGet, or to a custom path, it should be in PATH.
 
 ## Deploy workflow
 
@@ -91,7 +115,7 @@ curl -s -X POST http://localhost:3000/api/sessions/$(curl -s http://localhost:30
 3. If port busy — `lsof -ti:3000 | xargs kill -9`, then `launchctl load ...`
 4. Fix the root cause and redeploy from step 2
 
-### Common issues
+### Common issues (macOS)
 
 - **Turbopack cache corruption** — `rm -rf .next` and rebuild
 - **Port 3000 busy** — `lsof -ti:3000 | xargs kill -9`
@@ -101,6 +125,14 @@ curl -s -X POST http://localhost:3000/api/sessions/$(curl -s http://localhost:30
 - **`spawn claude ENOENT`** — launchd PATH doesn't include `/Users/vova/.local/bin`. Fix: edit `~/Library/LaunchAgents/com.vova.claude-sessions.plist`, add `/Users/vova/.local/bin` to PATH, reload launchd.
 - **Tray icon not appearing** — run `node scripts/tray.js` manually to debug. If `tray_darwin_release` gets EACCES: `find ~/.cache/node-systray -name 'tray_darwin_*' -exec chmod +x {} \;`
 - **launchd keeps restarting/dying** — check `launchctl list com.vova.claude-sessions` for LastExitStatus; check both log files.
+
+### Common issues (Windows)
+
+- **`npm install` fails on better-sqlite3** — needs C++ build tools. Fix: `npm install --global windows-build-tools` or install "Desktop development with C++" from Visual Studio Build Tools (https://visualstudio.microsoft.com/visual-cpp-build-tools/). Node 18+ with recent npm usually has prebuilt binaries and skips compilation.
+- **Port 3000 busy** — `netstat -aon | findstr ":3000" | findstr "LISTENING"` to find PID, then `taskkill /f /pid <PID>`
+- **`spawn claude ENOENT`** — Claude CLI not in PATH. Run `where claude` to check. Install: `npm install -g @anthropic-ai/claude-code`
+- **CMD window flashes** — all spawns use `windowsHide: true`, but if a CMD still flashes, check that the spawn has this option set
+- **Turbopack cache corruption** — `rmdir /s /q .next` and rebuild
 
 ### Dev debugging
 
@@ -137,3 +169,17 @@ curl -X PUT http://localhost:3000/api/settings \
 ```
 
 Settings are immediately available — no restart needed. The UI reads them on page load.
+
+## Cross-platform development rules
+
+When writing new code, follow these rules to keep Windows compatibility:
+
+- **Home directory**: use `os.homedir()`, never `process.env.HOME` (undefined on Windows)
+- **Paths**: use `path.join()`, never hardcode `/`. When splitting paths: `p.split(/[\\/]/)` to handle both separators
+- **Binary lookup**: `which` → `where` on Windows. Use `getClaudePath()` from `src/lib/claude-bin.ts`
+- **File permissions**: `chmodSync` is a no-op on Windows. Guard with `if (process.platform !== "win32")`
+- **Shell commands**: `ps`, `lsof`, `kill`, `grep`, `open` don't exist on Windows. Guard with `process.platform` check or provide Windows alternatives (`tasklist`, `netstat`, `taskkill`, `findstr`, `start`)
+- **spawn()**: always pass `windowsHide: true` to prevent CMD popups. Use `shell: true` when spawning `.cmd` files. `detached: true` creates a new process group on Windows (different from Unix) — usually skip it on Windows
+- **Signals**: `SIGTERM`/`SIGKILL` work differently. Use `proc.kill()` without arguments for cross-platform compatibility
+- **Line endings**: JSONL parsing should handle `\r\n` (use `split(/\r?\n/)`)
+- **Path in Claude projects dir**: `pathToProjectDir()` replaces both `/` and `\` with `-`
