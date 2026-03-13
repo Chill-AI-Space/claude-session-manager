@@ -1,16 +1,14 @@
 import { readFileSync, writeFileSync, copyFileSync, chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import os from "node:os";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-const SETTINGS_PATH = join(
-  process.env.HOME || "~",
-  ".claude",
-  "settings.json"
-);
-const HOOKS_DIR = join(process.env.HOME || "~", ".claude", "hooks");
-const HOOK_FILENAME = "permission-bridge.sh";
+const HOME = os.homedir();
+const SETTINGS_PATH = join(HOME, ".claude", "settings.json");
+const HOOKS_DIR = join(HOME, ".claude", "hooks");
+const HOOK_FILENAME = process.platform === "win32" ? "permission-bridge.cmd" : "permission-bridge.sh";
 const SCRIPT_SOURCE = join(process.cwd(), "scripts", HOOK_FILENAME);
 
 function readSettings(): Record<string, unknown> {
@@ -47,7 +45,7 @@ export async function POST() {
     mkdirSync(HOOKS_DIR, { recursive: true });
     const dest = join(HOOKS_DIR, HOOK_FILENAME);
     copyFileSync(SCRIPT_SOURCE, dest);
-    chmodSync(dest, 0o755);
+    if (process.platform !== "win32") chmodSync(dest, 0o755);
     log.push(`Copied ${HOOK_FILENAME} → ${dest}`);
 
     // Step 2: Register hook in settings.json

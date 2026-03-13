@@ -44,9 +44,12 @@ log(`Starting Next.js production server on port ${PORT}`);
 log(`ROOT=${ROOT}, NODE=${process.execPath}, NODE_VERSION=${process.version}`);
 
 // --- Ensure systray binary is executable (npm install may leave it without +x) ---
-try {
-  execSync(`find "${join(os.homedir(), '.cache', 'node-systray')}" -name 'tray_darwin_*' -exec chmod +x {} \\; 2>/dev/null`);
-} catch {}
+const isWin = process.platform === 'win32';
+if (!isWin) {
+  try {
+    execSync(`find "${join(os.homedir(), '.cache', 'node-systray')}" -name 'tray_darwin_*' -exec chmod +x {} \\; 2>/dev/null`);
+  } catch {}
+}
 
 // --- Icon: white version for macOS menu bar (white on transparent, pre-built) ---
 let icon = '';
@@ -57,13 +60,18 @@ try {
 }
 
 // --- Start Next.js server ---
+const nextBin = isWin
+  ? join(ROOT, 'node_modules', '.bin', 'next.cmd')
+  : join(ROOT, 'node_modules', '.bin', 'next');
 const server = spawn(
-  process.execPath,
-  ['node_modules/.bin/next', 'start'],
+  isWin ? nextBin : process.execPath,
+  isWin ? ['start'] : [nextBin, 'start'],
   {
     cwd: ROOT,
     env: { ...process.env, NODE_ENV: 'production' },
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+    shell: isWin, // .cmd files need shell on Windows
   }
 );
 
@@ -146,7 +154,10 @@ try {
 
   tray.onClick(async (action) => {
     if (action.seq_id === MENU_OPEN) {
-      try { execSync(`open "${OPEN_URL}"`); } catch {}
+      try {
+        const openCmd = isWin ? `start "" "${OPEN_URL}"` : `open "${OPEN_URL}"`;
+        execSync(openCmd);
+      } catch {}
     } else if (action.seq_id === MENU_BABYSITTER) {
       try {
         const newState = await toggleBabysitter();
@@ -188,9 +199,13 @@ log('Initial scan triggered, background scanner started');
 function quit() {
   log('Shutting down...');
   try { if (tray) tray.kill(); } catch {}
-  try { server.kill('SIGTERM'); } catch {}
+  try { server.kill(); } catch {}
   process.exit(0);
 }
 
 process.on('SIGTERM', quit);
 process.on('SIGINT', quit);
+if (isWin) {
+  // Windows doesn't have SIGTERM; handle Ctrl+C via SIGINT (above) and console close:
+  process.on('SIGHUP', quit);
+}
