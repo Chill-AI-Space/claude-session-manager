@@ -113,6 +113,29 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
     e.dataTransfer.dropEffect = "copy";
   };
 
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const imageItems = items.filter((item) => item.type.startsWith("image/"));
+    if (imageItems.length === 0) return; // let default text paste happen
+
+    e.preventDefault();
+    for (const item of imageItems) {
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      const ext = blob.type.split("/")[1] || "png";
+      const file = new File([blob], `clipboard-${Date.now()}.${ext}`, { type: blob.type });
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        const data = await res.json();
+        insertAtCursor(data.path || file.name);
+      } catch {
+        insertAtCursor(file.name);
+      }
+    }
+  };
+
   const handleSend = () => {
     if (!message.trim()) return;
     onSend(message.trim());
@@ -177,6 +200,7 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={
             queueSize > 0
               ? `${queueSize} queued — type next...`

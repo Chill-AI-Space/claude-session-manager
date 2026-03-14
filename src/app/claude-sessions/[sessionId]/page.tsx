@@ -789,6 +789,20 @@ export default function SessionDetailPage({
     if (newFileInputRef.current) newFileInputRef.current.value = "";
   };
 
+  const handleNewSessionPaste = async (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const imageItems = items.filter((item) => item.type.startsWith("image/"));
+    if (imageItems.length === 0) return;
+    e.preventDefault();
+    for (const item of imageItems) {
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      const ext = blob.type.split("/")[1] || "png";
+      const file = new File([blob], `clipboard-${Date.now()}.${ext}`, { type: blob.type });
+      await uploadNewSessionFiles([file]);
+    }
+  };
+
   const handleNewSessionAutodetect = async () => {
     const firstPath = await newAutodetect.detect(newSessionMessage);
     if (firstPath) setNewSessionPath(firstPath);
@@ -1628,6 +1642,7 @@ export default function SessionDetailPage({
                       setNewSessionMessage(e.target.value);
                       if (newAutodetect.suggestions.length > 0) newAutodetect.clearSuggestions();
                     }}
+                    onPaste={handleNewSessionPaste}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                         e.preventDefault();
