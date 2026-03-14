@@ -16,16 +16,42 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { title, description, sessionId, labels } = body as {
+  const {
+    title,
+    description,
+    sessionId,
+    session_id,
+    labels,
+    category,
+    project_path,
+  } = body as {
     title?: string;
     description?: string;
     sessionId?: string;
+    session_id?: string;
     labels?: string[];
+    category?: string;
+    project_path?: string;
   };
 
-  if (!title?.trim()) {
-    return Response.json({ error: "Title is required" }, { status: 400 });
+  // Category labels for UI-submitted issues
+  const categoryLabels: Record<string, string> = {
+    critical_problem: "Critical problem",
+    repeated_bug: "Repeated bug",
+    one_time_bug: "One-time bug",
+    idea: "Idea / Proposal",
+    must_have_feature: "Must-have feature",
+  };
+
+  // Build title: explicit title wins, otherwise derive from category
+  const issueTitle = title?.trim()
+    || (category ? `[${categoryLabels[category] || category}] ${(description || "").trim().split("\n")[0].slice(0, 80)}` : "");
+
+  if (!issueTitle) {
+    return Response.json({ error: "Title or category is required" }, { status: 400 });
   }
+
+  const effectiveSessionId = sessionId || session_id;
 
   // Build issue body with auto-context
   const platform = process.platform;
@@ -36,11 +62,26 @@ export async function POST(request: NextRequest) {
     "",
     "---",
     "**Auto-attached context:**",
+    category ? `- Category: ${categoryLabels[category] || category}` : "",
     `- Platform: ${platform} (${os.release()})`,
     `- Node.js: ${nodeVersion}`,
     `- Host: ${hostname}`,
-    sessionId ? `- Session: \`${sessionId}\`` : "",
+    effectiveSessionId ? `- Session: \`${effectiveSessionId}\`` : "",
+    project_path ? `- Project: \`${project_path}\`` : "",
   ].filter(Boolean).join("\n");
+
+  // Map category to GitHub label
+  const categoryToLabel: Record<string, string> = {
+    critical_problem: "critical",
+    repeated_bug: "bug",
+    one_time_bug: "bug",
+    idea: "enhancement",
+    must_have_feature: "enhancement",
+  };
+  const issueLabels = labels || [
+    category ? (categoryToLabel[category] || "bug") : "bug",
+    "from-ui",
+  ];
 
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}/issues`, {
@@ -51,15 +92,15 @@ export async function POST(request: NextRequest) {
         "User-Agent": "claude-session-manager",
       },
       body: JSON.stringify({
-        title: title.trim(),
+        title: issueTitle,
         body: contextLines,
-        labels: labels || ["bug", "from-ui"],
+        labels: issueLabels,
       }),
     });
 
     if (!res.ok) {
       const err = await res.text();
-      logAction("service", "create_failed", err, sessionId);
+      logAction("service", "create_failed", err, effectiveSessionId);
       return Response.json(
         { error: `GitHub API error: ${res.status} ${err.slice(0, 200)}` },
         { status: res.status }
@@ -67,7 +108,7 @@ export async function POST(request: NextRequest) {
     }
 
     const issue = await res.json();
-    logAction("service", "created", `#${issue.number}: ${title}`, sessionId);
+    logAction("service", "created", `#${issue.number}: ${issueTitle}`, effectiveSessionId);
     return Response.json({
       ok: true,
       number: issue.number,
@@ -76,7 +117,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    logAction("service", "create_error", msg, sessionId);
+    logAction("service", "create_error", msg, effectiveSessionId);
     return Response.json({ error: msg }, { status: 500 });
   }
 }
