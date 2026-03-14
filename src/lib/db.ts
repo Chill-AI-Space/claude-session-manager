@@ -360,6 +360,17 @@ const SETTING_DEFAULTS: Record<string, string> = {
   new_session_from_reply: "true",
   debug_mode: "false",
   debug_log_endpoint: "",
+  // Orchestrator settings
+  orchestrator_max_concurrent: "3",
+  orchestrator_crash_retry_delay_ms: "30000",
+  orchestrator_stall_continue_delay_ms: "10000",
+  orchestrator_max_retries: "3",
+  // Remote relay settings
+  relay_enabled: "false",
+  relay_node_id: "",
+  relay_server_url: "wss://csm-relay.chillai.workers.dev",
+  // Remote nodes registry (JSON array)
+  remote_nodes: "[]",
 };
 
 // Settings cache — avoids reading JSON file on every getSetting() call

@@ -354,6 +354,410 @@ function HealthCheckFix({ fix }: { fix: string }) {
   );
 }
 
+// ── RemoteRelaySection ───────────────────────────────────────────────────────
+
+function RemoteRelaySection() {
+  const [relay, setRelay] = useState<{
+    enabled: boolean;
+    connected: boolean;
+    nodeId: string | null;
+    serverUrl: string;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [acting, setActing] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  function load() {
+    fetch("/api/relay")
+      .then((r) => r.json())
+      .then(setRelay)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function toggle() {
+    if (!relay) return;
+    setActing(true);
+    try {
+      const res = await fetch("/api/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: relay.enabled ? "disable" : "enable" }),
+      });
+      const data = await res.json();
+      setRelay((prev) => prev ? { ...prev, enabled: data.enabled ?? !prev.enabled, nodeId: data.nodeId ?? prev.nodeId } : prev);
+      // Poll connection status after a bit
+      setTimeout(load, 2000);
+    } catch { /* ignore */ }
+    setActing(false);
+  }
+
+  async function regenerate() {
+    setActing(true);
+    try {
+      const res = await fetch("/api/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "regenerate" }),
+      });
+      const data = await res.json();
+      setRelay((prev) => prev ? { ...prev, nodeId: data.nodeId } : prev);
+    } catch { /* ignore */ }
+    setActing(false);
+  }
+
+  function copyNodeId() {
+    if (!relay?.nodeId) return;
+    navigator.clipboard.writeText(relay.nodeId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  if (loading) return <div className="text-xs text-muted-foreground">Loading relay status...</div>;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+        Remote Relay
+      </h2>
+
+      <div className="space-y-4">
+        <div className="text-xs text-muted-foreground leading-relaxed">
+          Connect this Session Manager to a relay server so you can start, resume, and stop
+          sessions from anywhere — another machine, a GCP VM, or any HTTP client.
+          Your Node ID is the access key.
+        </div>
+
+        <label className="flex items-start gap-3 cursor-pointer group">
+          <input
+            type="checkbox"
+            checked={relay?.enabled ?? false}
+            onChange={toggle}
+            disabled={acting}
+            className="mt-1 h-4 w-4 rounded border-input accent-primary"
+          />
+          <div className="space-y-1">
+            <div className="text-sm font-medium">Enable Remote Access</div>
+            <div className="text-xs text-muted-foreground leading-relaxed">
+              Opens a WebSocket connection to the relay server. Remote callers
+              can send commands using your Node ID.
+            </div>
+          </div>
+        </label>
+
+        {relay?.enabled && (
+          <div className="space-y-3 pl-7">
+            <div className="flex items-center gap-2">
+              <div className={`h-2 w-2 rounded-full ${relay.connected ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`} />
+              <span className="text-xs text-muted-foreground">
+                {relay.connected ? "Connected to relay" : "Connecting..."}
+              </span>
+            </div>
+
+            {relay.nodeId && (
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-muted-foreground">Node ID</div>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-1.5 text-xs bg-muted rounded-md font-mono select-all break-all">
+                    {relay.nodeId}
+                  </code>
+                  <button
+                    onClick={copyNodeId}
+                    className="p-1.5 rounded-md hover:bg-muted transition-colors"
+                    title="Copy Node ID"
+                  >
+                    {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
+                  </button>
+                </div>
+                <div className="text-[11px] text-muted-foreground/70 leading-relaxed">
+                  Share this ID with whoever needs remote access. They can send commands to:
+                </div>
+                <code className="block px-3 py-1.5 text-[11px] bg-muted rounded-md font-mono break-all">
+                  POST {relay.serverUrl.replace("wss://", "https://").replace("/ws", "")}/node/{relay.nodeId}/resume
+                </code>
+              </div>
+            )}
+
+            <button
+              onClick={regenerate}
+              disabled={acting}
+              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+            >
+              Regenerate Node ID
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── RemoteNodesSection ──────────────────────────────────────────────────────
+
+interface RemoteNodeData {
+  id: string;
+  name: string;
+  tailscale?: string;
+  relayNodeId?: string;
+  preferred: "tailscale" | "relay";
+  lastSeen?: number;
+  online?: boolean;
+}
+
+function RemoteNodesSection() {
+  const [nodes, setNodes] = useState<RemoteNodeData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pinging, setPinging] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ name: "", tailscale: "", relayNodeId: "", preferred: "tailscale" as "tailscale" | "relay" });
+  const [editId, setEditId] = useState<string | null>(null);
+
+  function load(ping = false) {
+    setLoading(true);
+    fetch(`/api/remote-nodes${ping ? "?ping=true" : ""}`)
+      .then((r) => r.json())
+      .then(setNodes)
+      .catch(() => {})
+      .finally(() => { setLoading(false); setPinging(false); });
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function handleAdd() {
+    if (!form.name || (!form.tailscale && !form.relayNodeId)) return;
+    setAdding(true);
+    try {
+      await fetch("/api/remote-nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      setForm({ name: "", tailscale: "", relayNodeId: "", preferred: "tailscale" });
+      load();
+    } catch { /* ignore */ }
+    setAdding(false);
+  }
+
+  async function handleDelete(id: string) {
+    await fetch(`/api/remote-nodes?id=${id}`, { method: "DELETE" });
+    load();
+  }
+
+  async function handleUpdate(id: string, updates: Partial<RemoteNodeData>) {
+    await fetch("/api/remote-nodes", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...updates }),
+    });
+    setEditId(null);
+    load();
+  }
+
+  async function handlePing(nodeId: string) {
+    try {
+      const res = await fetch(`/api/remote-nodes/${nodeId}/proxy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "status" }),
+      });
+      const data = await res.json();
+      // Refresh to get updated status
+      load();
+      return data.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  function formatLastSeen(ts?: number) {
+    if (!ts) return "never";
+    const diff = Date.now() - ts;
+    if (diff < 60_000) return "just now";
+    if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`;
+    return `${Math.floor(diff / 86400_000)}d ago`;
+  }
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+        Remote Nodes
+      </h2>
+
+      <div className="text-xs text-muted-foreground leading-relaxed">
+        Register other machines running Session Manager. Commands are sent via
+        Tailscale (direct P2P) or Cloudflare Relay (via internet), with automatic fallback.
+      </div>
+
+      {/* Node list */}
+      {nodes.length > 0 && (
+        <div className="space-y-2">
+          {nodes.map((node) => (
+            <div key={node.id} className="border border-border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className={`h-2 w-2 rounded-full ${node.online ? "bg-green-500" : "bg-zinc-400"}`} />
+                  <span className="text-sm font-medium">{node.name}</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    ({node.preferred === "tailscale" ? "Tailscale primary" : "Relay primary"})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-muted-foreground">
+                    {formatLastSeen(node.lastSeen)}
+                  </span>
+                  <button
+                    onClick={() => handlePing(node.id)}
+                    className="text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+                  >
+                    ping
+                  </button>
+                  <button
+                    onClick={() => setEditId(editId === node.id ? null : node.id)}
+                    className="text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+                  >
+                    edit
+                  </button>
+                  <button
+                    onClick={() => handleDelete(node.id)}
+                    className="text-[11px] text-red-400 hover:text-red-300 underline underline-offset-2"
+                  >
+                    remove
+                  </button>
+                </div>
+              </div>
+
+              {/* Connection details */}
+              <div className="flex gap-4 text-[11px] text-muted-foreground">
+                {node.tailscale && <span>Tailscale: <code className="bg-muted px-1 rounded">{node.tailscale}</code></span>}
+                {node.relayNodeId && <span>Relay: <code className="bg-muted px-1 rounded">{node.relayNodeId.slice(0, 8)}...</code></span>}
+              </div>
+
+              {/* Edit form */}
+              {editId === node.id && (
+                <div className="border-t border-border pt-2 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      className="px-2 py-1 text-xs bg-muted rounded border border-border"
+                      placeholder="Tailscale address"
+                      defaultValue={node.tailscale || ""}
+                      onBlur={(e) => handleUpdate(node.id, { tailscale: e.target.value || undefined })}
+                    />
+                    <input
+                      className="px-2 py-1 text-xs bg-muted rounded border border-border"
+                      placeholder="Relay Node ID"
+                      defaultValue={node.relayNodeId || ""}
+                      onBlur={(e) => handleUpdate(node.id, { relayNodeId: e.target.value || undefined })}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                      <input
+                        type="radio"
+                        name={`preferred-${node.id}`}
+                        checked={node.preferred === "tailscale"}
+                        onChange={() => handleUpdate(node.id, { preferred: "tailscale" })}
+                        className="accent-primary"
+                      />
+                      Tailscale first
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                      <input
+                        type="radio"
+                        name={`preferred-${node.id}`}
+                        checked={node.preferred === "relay"}
+                        onChange={() => handleUpdate(node.id, { preferred: "relay" })}
+                        className="accent-primary"
+                      />
+                      Relay first
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+
+          <button
+            onClick={() => { setPinging(true); load(true); }}
+            disabled={pinging}
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+          >
+            {pinging ? "Pinging all..." : "Ping all nodes"}
+          </button>
+        </div>
+      )}
+
+      {/* Add node form */}
+      <div className="border border-dashed border-border rounded-lg p-3 space-y-3">
+        <div className="text-xs font-medium">Add Remote Node</div>
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            className="px-2 py-1.5 text-xs bg-muted rounded border border-border col-span-2"
+            placeholder="Name (e.g. home-server)"
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          />
+          <input
+            className="px-2 py-1.5 text-xs bg-muted rounded border border-border"
+            placeholder="Tailscale: server.tailnet.ts.net:3000"
+            value={form.tailscale}
+            onChange={(e) => setForm((f) => ({ ...f, tailscale: e.target.value }))}
+          />
+          <input
+            className="px-2 py-1.5 text-xs bg-muted rounded border border-border"
+            placeholder="Relay Node ID (UUID)"
+            value={form.relayNodeId}
+            onChange={(e) => setForm((f) => ({ ...f, relayNodeId: e.target.value }))}
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="flex gap-3">
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+              <input
+                type="radio"
+                name="new-preferred"
+                checked={form.preferred === "tailscale"}
+                onChange={() => setForm((f) => ({ ...f, preferred: "tailscale" }))}
+                className="accent-primary"
+              />
+              Tailscale first
+            </label>
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+              <input
+                type="radio"
+                name="new-preferred"
+                checked={form.preferred === "relay"}
+                onChange={() => setForm((f) => ({ ...f, preferred: "relay" }))}
+                className="accent-primary"
+              />
+              Relay first
+            </label>
+          </div>
+          <button
+            onClick={handleAdd}
+            disabled={adding || !form.name || (!form.tailscale && !form.relayNodeId)}
+            className="px-3 py-1 text-xs bg-primary text-primary-foreground rounded-md hover:opacity-90 disabled:opacity-40"
+          >
+            {adding ? "Adding..." : "Add Node"}
+          </button>
+        </div>
+      </div>
+
+      {/* Usage hint */}
+      {nodes.length > 0 && (
+        <div className="text-[11px] text-muted-foreground/70 leading-relaxed space-y-1">
+          <div>Send commands to remote nodes via API:</div>
+          <code className="block px-2 py-1 bg-muted rounded text-[11px] font-mono">
+            POST /api/remote-nodes/{'<nodeId>'}/proxy {'{"action":"start","projectPath":"/path","message":"fix bug"}'}
+          </code>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── SettingsPage ──────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -442,6 +846,8 @@ export default function SettingsPage() {
     "deep-search": "deep search vector pre-filter gemini",
     "folder-browser": "folder browser start path browse",
     "context-trash": "compress on input compression hook ocr screenshot json context trash",
+    "remote-relay": "remote relay access websocket node uuid connect external",
+    "remote-nodes": "remote nodes machines tailscale vpn server proxy fallback",
     "appearance": "appearance font size scale theme",
     "maintenance": "maintenance title generate regenerate ai titles",
   };
@@ -959,6 +1365,12 @@ export default function SettingsPage() {
 
         {/* ── Context Trash ────────────────────────────────── */}
         {sectionVisible("context-trash") && <ContextTrashSection />}
+
+        {/* ── Remote Relay ──────────────────────────────────── */}
+        {sectionVisible("remote-relay") && <RemoteRelaySection />}
+
+        {/* ── Remote Nodes ────────────────────────────────── */}
+        {sectionVisible("remote-nodes") && <RemoteNodesSection />}
 
         {/* ── Appearance ───────────────────────────────────── */}
         {sectionVisible("appearance") && <div className="space-y-6">
