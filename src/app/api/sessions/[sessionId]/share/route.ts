@@ -47,7 +47,8 @@ export async function POST(_req: NextRequest, { params }: Params) {
       args.push("--password", existing.password);
     }
 
-    const { stdout } = await execFileAsync("npx", args, {
+    const npxBin = process.platform === "win32" ? "npx.cmd" : "npx";
+    const { stdout } = await execFileAsync(npxBin, args, {
       timeout: 30_000,
       env: { ...process.env, PATH: process.env.PATH },
     });
