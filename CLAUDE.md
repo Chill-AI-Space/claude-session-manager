@@ -107,6 +107,9 @@ tail -20 ~/Library/Logs/claude-session-manager-error.log
 # 6. Reply (spawn claude) works — critical check
 curl -s -X POST http://localhost:3000/api/sessions/$(curl -s http://localhost:3000/api/sessions | python3 -c "import json,sys; s=json.load(sys.stdin); print(s[0]['session_id'])" 2>/dev/null)/reply \
   -H "Content-Type: application/json" -d '{"message":"ping"}' --max-time 30 | head -c 200
+
+# 7. Debug log pipeline ping (non-blocking — skip if debug_log_endpoint not set)
+curl -s -X POST http://localhost:3000/api/debug/ping | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'Debug ping: {d[\"status\"]} ({d.get(\"totalMs\",\"?\")}{\"ms\" if \"totalMs\" in d else \"\"})')"
 ```
 
 **If any check fails:**
