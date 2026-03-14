@@ -96,18 +96,16 @@ export async function GET() {
       {
         id: "platform_terminal",
         label: "Terminal control",
-        ok: isMac,
+        ok: isMac || isWindows,
         required: false,
-        fix: isMac ? null : "Focus Terminal and Open in Terminal features require macOS",
+        fix: isMac || isWindows ? null : "Focus Terminal and Open in Terminal features require macOS or Windows",
       },
       {
         id: "platform_process_detection",
         label: "Process detection",
-        ok: !isWindows,
+        ok: true,
         required: false,
-        fix: isWindows
-          ? "Active session detection requires macOS or Linux (ps/lsof). Sessions will show as inactive on Windows."
-          : null,
+        fix: null,
       },
     ],
   });
