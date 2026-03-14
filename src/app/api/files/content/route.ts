@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   // Boundary check: only serve files under home directory
   const resolved = path.resolve(filePath);
   const home = os.homedir();
-  if (!resolved.startsWith(home + "/") && resolved !== home) {
+  if (!resolved.startsWith(home + path.sep) && resolved !== home) {
     return NextResponse.json({ error: "Access denied: path outside home directory" }, { status: 403 });
   }
 

@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
   // Normalize to resolve ".." traversal and check boundary
   resolved = path.resolve(resolved);
   const home = os.homedir();
-  if (!resolved.startsWith(home + "/") && resolved !== home) {
+  if (!resolved.startsWith(home + path.sep) && resolved !== home) {
     return Response.json({ error: "Access denied: path outside home directory" }, { status: 403 });
   }
 
