@@ -31,7 +31,8 @@ export async function POST(request: NextRequest) {
     let proc;
     if (process.platform === "win32") {
       // Windows: use explorer to reveal file
-      proc = spawn("explorer", action === "reveal" ? ["/select,", resolved] : [resolved]);
+      // explorer expects "/select,path" as a single argument
+      proc = spawn("explorer", action === "reveal" ? [`/select,${resolved}`] : [resolved], { windowsHide: true });
     } else if (process.platform === "darwin") {
       // macOS: use open command
       const args = action === "reveal" ? ["-R", resolved] : [resolved];
