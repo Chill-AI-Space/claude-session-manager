@@ -808,6 +808,36 @@ export default function SessionDetailPage({
     if (firstPath) setNewSessionPath(firstPath);
   };
 
+  const handleIssuePaste = async (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const imageItems = items.filter((item) => item.type.startsWith("image/"));
+    if (imageItems.length === 0) return;
+    e.preventDefault();
+    for (const item of imageItems) {
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      const ext = blob.type.split("/")[1] || "png";
+      const file = new File([blob], `clipboard-${Date.now()}.${ext}`, { type: blob.type });
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        const d = await res.json();
+        const textarea = issueInputRef.current;
+        const path = d.path || file.name;
+        if (textarea) {
+          const start = textarea.selectionStart;
+          const before = issueDescription.slice(0, start);
+          const after = issueDescription.slice(textarea.selectionEnd);
+          const sep = before && !before.endsWith("\n") ? "\n" : "";
+          setIssueDescription(before + sep + path + after);
+        } else {
+          setIssueDescription((prev) => prev + (prev ? "\n" : "") + path);
+        }
+      } catch { /* ignore */ }
+    }
+  };
+
   const handleSubmitIssue = async () => {
     if (!issueCategory || !issueDescription.trim() || isSubmittingIssue) return;
     setIsSubmittingIssue(true);
@@ -1806,13 +1836,14 @@ export default function SessionDetailPage({
                       ref={issueInputRef}
                       value={issueDescription}
                       onChange={(e) => setIssueDescription(e.target.value)}
+                      onPaste={handleIssuePaste}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                           e.preventDefault();
                           handleSubmitIssue();
                         }
                       }}
-                      placeholder="Describe the issue..."
+                      placeholder="Describe the issue... (paste screenshots with Ctrl+V)"
                       rows={6}
                       className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-10 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
                       disabled={isSubmittingIssue}
