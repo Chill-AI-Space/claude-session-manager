@@ -25,6 +25,7 @@
     "recharts": "^3.7.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
+    "sonner": "^2.0.7",
     "systray2": "^2.1.4",
     "tailwind-merge": "^3.5.0"
   },
