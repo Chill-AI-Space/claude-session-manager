@@ -6,6 +6,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import { getClaudePath } from "./claude-bin";
 import { getCleanEnv } from "./utils";
+import * as dlog from "./debug-logger";
 
 // ── One-shot runner (title generation, learnings extraction, etc.) ───────────
 
@@ -18,6 +19,7 @@ export function runClaudeOneShot(opts: {
   const env = getCleanEnv();
 
   return new Promise((resolve, reject) => {
+    dlog.debug("claude-runner", `oneshot spawn: ${args.join(" ")}`, { timeoutMs });
     const proc = spawn(getClaudePath(), args, {
       env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -36,20 +38,24 @@ export function runClaudeOneShot(opts: {
 
     const timeout = setTimeout(() => {
       proc.kill(); // SIGTERM on Unix, TerminateProcess on Windows
+      dlog.warn("claude-runner", `oneshot timed out after ${timeoutMs}ms`);
       reject(new Error(`Claude process timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
     proc.on("close", (code) => {
       clearTimeout(timeout);
       if (code === 0) {
+        dlog.debug("claude-runner", `oneshot completed ok (${stdout.length} chars)`);
         resolve(stdout.trim());
       } else {
+        dlog.error("claude-runner", `oneshot exited ${code}`, { stderr: stderr.slice(0, 300) });
         reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
       }
     });
 
     proc.on("error", (err) => {
       clearTimeout(timeout);
+      dlog.error("claude-runner", `oneshot spawn error: ${err.message}`);
       reject(err);
     });
 
@@ -120,6 +126,7 @@ export function createSSEStream(opts: SSEStreamOptions): ReadableStream {
         } catch { /* already closed */ }
       }
 
+      dlog.info("claude-runner", `SSE stream spawn: ${args.join(" ")}`, { cwd });
       const isWin = process.platform === "win32";
       const proc = spawn(getClaudePath(), args, {
         cwd,
@@ -187,13 +194,17 @@ export function createSSEStream(opts: SSEStreamOptions): ReadableStream {
         onClose?.(send);
 
         if (code !== 0 && code !== null) {
+          dlog.warn("claude-runner", `SSE process exited ${code}`, { cwd });
           send({ type: "error", text: `Process exited with code ${code}` });
+        } else {
+          dlog.debug("claude-runner", "SSE process completed ok");
         }
         close();
       });
 
       proc.on("error", (err) => {
         if (keepaliveTimer) clearInterval(keepaliveTimer);
+        dlog.error("claude-runner", `SSE spawn error: ${err.message}`);
         send({ type: "error", text: err.message });
         close();
       });

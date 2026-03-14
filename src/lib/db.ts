@@ -80,6 +80,20 @@ function initTables(db: Database.Database) {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS issues (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL,
+      description TEXT NOT NULL,
+      session_id TEXT,
+      project_path TEXT,
+      status TEXT NOT NULL DEFAULT 'new',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_issues_created ON issues(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status, created_at DESC);
+  `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS share_links (
       slug TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
@@ -185,6 +199,15 @@ export function logAction(
   sessionId?: string,
   payload?: string
 ): void {
+  // Also emit to debug stream for real-time monitoring
+  try {
+    const { info, warn } = require("./debug-logger");
+    const level = action.includes("fail") || action.includes("crash") || action.includes("error") ? warn : info;
+    level("action", `${action}${details ? `: ${details}` : ""}`, {
+      type, action, details, sessionId,
+    });
+  } catch { /* debug-logger not available */ }
+
   try {
     getDb()
       .prepare(
@@ -340,6 +363,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   context_guard_block_threshold: "90",
   context_guard_warn_threshold: "80",
   new_session_from_reply: "true",
+  debug_mode: "false",
 };
 
 // Settings cache — avoids reading JSON file on every getSetting() call
@@ -487,4 +511,64 @@ export function upsertContextSourceGroup(
 
 export function deleteContextSourceGroup(id: string): void {
   getDb().prepare("DELETE FROM context_source_groups WHERE id = ?").run(id);
+}
+
+// ── Issues ──────────────────────────────────────────────────────────────────────
+
+export type IssueCategory =
+  | "critical_problem"
+  | "repeated_bug"
+  | "one_time_bug"
+  | "idea"
+  | "must_have_feature";
+
+export interface IssueRow {
+  id: number;
+  category: IssueCategory;
+  description: string;
+  session_id: string | null;
+  project_path: string | null;
+  status: "new" | "seen" | "resolved";
+  created_at: string;
+}
+
+const ISSUES_JSONL = path.join(process.cwd(), "data", "issues.jsonl");
+
+export function createIssue(issue: {
+  category: IssueCategory;
+  description: string;
+  session_id?: string;
+  project_path?: string;
+}): IssueRow {
+  const db = getDb();
+  const result = db
+    .prepare(
+      "INSERT INTO issues (category, description, session_id, project_path) VALUES (?, ?, ?, ?)"
+    )
+    .run(issue.category, issue.description, issue.session_id ?? null, issue.project_path ?? null);
+
+  const row = db.prepare("SELECT * FROM issues WHERE id = ?").get(result.lastInsertRowid) as IssueRow;
+
+  // Also append to JSONL for cron consumption
+  try {
+    fs.appendFileSync(ISSUES_JSONL, JSON.stringify(row) + "\n");
+  } catch { /* non-critical */ }
+
+  return row;
+}
+
+export function getIssues(opts: { status?: string; limit?: number } = {}): IssueRow[] {
+  const { status, limit = 100 } = opts;
+  if (status) {
+    return getDb()
+      .prepare("SELECT * FROM issues WHERE status = ? ORDER BY created_at DESC LIMIT ?")
+      .all(status, limit) as IssueRow[];
+  }
+  return getDb()
+    .prepare("SELECT * FROM issues ORDER BY created_at DESC LIMIT ?")
+    .all(limit) as IssueRow[];
+}
+
+export function updateIssueStatus(id: number, status: "new" | "seen" | "resolved"): void {
+  getDb().prepare("UPDATE issues SET status = ? WHERE id = ?").run(status, id);
 }

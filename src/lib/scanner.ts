@@ -529,6 +529,8 @@ export async function scanSessions(
   mode: "full" | "incremental" = "incremental"
 ): Promise<ScanResult> {
   const start = Date.now();
+  const dlog = require("./debug-logger");
+  dlog.info("scanner", `scan started (${mode})`);
   const db = getDb();
 
   // Use async glob to avoid blocking during file discovery
@@ -789,12 +791,14 @@ export async function scanSessions(
     updateProjects();
   }
 
-  return {
+  const result = {
     sessionsScanned,
     sessionsSkipped,
     projectsFound: projectDirs.size,
     duration: Date.now() - start,
   };
+  dlog.info("scanner", `scan complete: ${sessionsScanned} scanned, ${sessionsSkipped} skipped, ${result.duration}ms`, result);
+  return result;
 }
 
 // Claude stores project dirs as cwd with path separators replaced by "-".
