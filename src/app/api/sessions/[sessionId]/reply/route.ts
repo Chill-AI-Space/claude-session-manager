@@ -118,12 +118,8 @@ export async function POST(
         });
       }
     },
-    onProc(proc) {
-      // Kill child process if client disconnects
-      request.signal.addEventListener("abort", () => {
-        try { proc.kill("SIGTERM"); } catch { /* already dead */ }
-      });
-    },
+    // No onProc abort handler — Claude runs detached so it survives
+    // browser tab close / SSE disconnect. Results go to JSONL regardless.
   });
 
   return sseResponse(stream);

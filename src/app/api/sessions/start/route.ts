@@ -61,11 +61,8 @@ export async function POST(request: NextRequest) {
         generateTitleBatch(1).catch(() => {});
       } catch { /* non-critical */ }
     },
-    onProc(proc) {
-      request.signal.addEventListener("abort", () => {
-        proc.kill("SIGTERM");
-      });
-    },
+    // No onProc abort handler — Claude runs detached so it survives
+    // browser tab close / SSE disconnect. Results go to JSONL regardless.
   });
 
   return sseResponse(stream);
