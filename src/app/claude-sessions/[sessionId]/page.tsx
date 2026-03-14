@@ -6,7 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, Send, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, Send, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket } from "lucide-react";
+import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
 import { getCachedSession, setCachedSession } from "@/lib/session-cache";
@@ -146,7 +147,6 @@ export default function SessionDetailPage({
   const [terminalKilled, setTerminalKilled] = useState(false);
   const [hasReplied, setHasReplied] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
-  const [bugReport, setBugReport] = useState<{ open: boolean; title: string; desc: string; sending: boolean; result: string | null }>({ open: false, title: "", desc: "", sending: false, result: null });
   const [focusError, setFocusError] = useState<string | null>(null);
   const [focusOk, setFocusOk] = useState(false);
 
@@ -180,7 +180,7 @@ export default function SessionDetailPage({
   const [learningsOpen, setLearningsOpen] = useState(false);
 
   // New session mode
-  const [replyMode, setReplyMode] = useState<"reply" | "new">("reply");
+  const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [startingNewSession, setStartingNewSession] = useState(false);
@@ -192,6 +192,12 @@ export default function SessionDetailPage({
   const newDragCounterRef = useRef(0);
   const newAutodetect = useAutodetect();
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
+
+  // Issue submission
+  const [issueCategory, setIssueCategory] = useState<string | null>(null);
+  const [issueDescription, setIssueDescription] = useState("");
+  const [isSubmittingIssue, setIsSubmittingIssue] = useState(false);
+  const issueInputRef = useRef<HTMLTextAreaElement>(null);
 
   // Permission bridge
   interface PendingPermission {
@@ -788,6 +794,35 @@ export default function SessionDetailPage({
     if (firstPath) setNewSessionPath(firstPath);
   };
 
+  const handleSubmitIssue = async () => {
+    if (!issueCategory || !issueDescription.trim() || isSubmittingIssue) return;
+    setIsSubmittingIssue(true);
+    try {
+      const res = await fetch("/api/issues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: issueCategory,
+          description: issueDescription.trim(),
+          session_id: data?.session_id,
+          project_path: data?.project_path,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(err.error || "Failed to submit");
+      }
+      toast.success("Issue submitted — thank you!");
+      setIssueCategory(null);
+      setIssueDescription("");
+      setReplyMode("reply");
+    } catch (e) {
+      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setIsSubmittingIssue(false);
+    }
+  };
+
   const handleStartNewSession = async () => {
     const msg = newSessionMessage.trim();
     if (!msg || !newSessionPath || startingNewSession) return;
@@ -835,7 +870,9 @@ export default function SessionDetailPage({
         };
         readStream();
       }
+      setNewSessionMessage("");
       setStartingNewSession(false);
+      toast.success("Session started — will appear in list shortly");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start new session");
       setStartingNewSession(false);
@@ -1439,13 +1476,6 @@ export default function SessionDetailPage({
                 Help
               </Link>
               <button
-                onClick={() => setBugReport(prev => ({ ...prev, open: !prev.open, result: null }))}
-                className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
-              >
-                <Bug className="h-4 w-4 shrink-0" />
-                Report Bug
-              </button>
-              <button
                 onClick={() => {
                   const next = theme === "dark" ? "light" : "dark";
                   setTheme(next);
@@ -1458,56 +1488,6 @@ export default function SessionDetailPage({
                 Theme
               </button>
             </div>
-
-            {/* Bug report form */}
-            {bugReport.open && (
-              <div className="pt-2 border-t border-border/30 space-y-1.5">
-                {bugReport.result ? (
-                  <div className="text-xs text-green-500 px-1">{bugReport.result}</div>
-                ) : (
-                  <>
-                    <input
-                      type="text"
-                      placeholder="Bug title..."
-                      value={bugReport.title}
-                      onChange={e => setBugReport(prev => ({ ...prev, title: e.target.value }))}
-                      className="w-full px-2 py-1 text-xs bg-muted/50 border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                    <textarea
-                      placeholder="Description (optional)..."
-                      value={bugReport.desc}
-                      onChange={e => setBugReport(prev => ({ ...prev, desc: e.target.value }))}
-                      rows={2}
-                      className="w-full px-2 py-1 text-xs bg-muted/50 border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                    />
-                    <button
-                      disabled={!bugReport.title.trim() || bugReport.sending}
-                      onClick={async () => {
-                        setBugReport(prev => ({ ...prev, sending: true }));
-                        try {
-                          const res = await fetch("/api/issues", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ title: bugReport.title, description: bugReport.desc, sessionId }),
-                          });
-                          const data = await res.json();
-                          if (data.ok) {
-                            setBugReport({ open: true, title: "", desc: "", sending: false, result: `Created #${data.number} — ${data.url}` });
-                          } else {
-                            setBugReport(prev => ({ ...prev, sending: false, result: `Error: ${data.error}` }));
-                          }
-                        } catch (err) {
-                          setBugReport(prev => ({ ...prev, sending: false, result: `Error: ${err instanceof Error ? err.message : String(err)}` }));
-                        }
-                      }}
-                      className="w-full px-2 py-1 text-xs font-medium bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded disabled:opacity-40 transition-colors"
-                    >
-                      {bugReport.sending ? "Submitting..." : "Submit Bug Report"}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
           </div>
 
           {/* Sent message confirmation */}
@@ -1522,48 +1502,58 @@ export default function SessionDetailPage({
 
           {/* Reply input — pinned to bottom */}
           <div className="shrink-0 px-4 pb-4 pt-2">
-            {/* Mode toggle — only when new_session_from_reply is enabled */}
-            {settings?.new_session_from_reply === "true" && (
-              <div className="flex items-center gap-1 mb-1.5 pl-1">
-                <button
-                  onClick={() => {
-                    if (replyMode === "new" && newSessionMessage.trim()) {
-                      replyInputRef.current?.setText(newSessionMessage);
-                      setNewSessionMessage("");
-                    }
-                    setReplyMode("reply");
-                    setTimeout(() => replyInputRef.current?.focus(), 50);
-                  }}
-                  className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${replyMode === "reply" ? "text-foreground bg-muted font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
-                >
-                  Reply
-                </button>
-                <span className="text-muted-foreground/30 text-[11px]">/</span>
-                <button
-                  onClick={() => {
-                    if (replyMode === "reply") {
-                      const draft = replyInputRef.current?.getText() || "";
-                      if (draft.trim()) {
-                        setNewSessionMessage(draft);
-                        replyInputRef.current?.setText("");
+            {/* Mode toggle */}
+            <div className="flex items-center gap-1 mb-1.5 pl-1">
+              <button
+                onClick={() => {
+                  if (replyMode === "new" && newSessionMessage.trim()) {
+                    replyInputRef.current?.setText(newSessionMessage);
+                    setNewSessionMessage("");
+                  }
+                  setReplyMode("reply");
+                  setTimeout(() => replyInputRef.current?.focus(), 50);
+                }}
+                className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${replyMode === "reply" ? "text-foreground bg-muted font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
+              >
+                Reply
+              </button>
+              {settings?.new_session_from_reply === "true" && (
+                <>
+                  <span className="text-muted-foreground/30 text-[11px]">/</span>
+                  <button
+                    onClick={() => {
+                      if (replyMode === "reply") {
+                        const draft = replyInputRef.current?.getText() || "";
+                        if (draft.trim()) {
+                          setNewSessionMessage(draft);
+                          replyInputRef.current?.setText("");
+                        }
                       }
-                    }
-                    setReplyMode("new");
-                    setTimeout(() => newSessionInputRef.current?.focus(), 50);
-                  }}
-                  className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 ${replyMode === "new" ? "text-foreground bg-muted font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
-                >
-                  <Plus className="h-3 w-3" />
-                  New session
-                </button>
-              </div>
-            )}
+                      setReplyMode("new");
+                      setTimeout(() => newSessionInputRef.current?.focus(), 50);
+                    }}
+                    className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 ${replyMode === "new" ? "text-foreground bg-muted font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
+                  >
+                    <Plus className="h-3 w-3" />
+                    New session
+                  </button>
+                </>
+              )}
+              <span className="text-muted-foreground/30 text-[11px]">/</span>
+              <button
+                onClick={() => {
+                  setReplyMode("issue");
+                  setTimeout(() => issueInputRef.current?.focus(), 50);
+                }}
+                className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 ${replyMode === "issue" ? "text-foreground bg-muted font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
+              >
+                <Bug className="h-3 w-3" />
+                Submit an issue
+              </button>
+            </div>
 
             {/* Reply input — always mounted so draft isn't lost */}
-            <div className={replyMode === "new" && settings?.new_session_from_reply === "true" ? "hidden" : ""}>
-              {settings?.new_session_from_reply !== "true" && (
-                <div className="text-[11px] text-muted-foreground/50 mb-1.5 pl-1">Continue session with a new message</div>
-              )}
+            <div className={replyMode !== "reply" ? "hidden" : ""}>
               <ReplyInput
                 ref={replyInputRef}
                 sessionId={data.session_id}
@@ -1753,6 +1743,84 @@ export default function SessionDetailPage({
                 </div>
               </div>
             )}
+
+            {/* Issue submission form */}
+            {replyMode === "issue" && (
+              <div className="space-y-2">
+                {/* Category picker */}
+                <div className="flex flex-wrap gap-1.5">
+                  {([
+                    { key: "critical_problem", label: "Critical problem", icon: Flame, color: "red" },
+                    { key: "repeated_bug", label: "Repeated bug", icon: Repeat, color: "orange" },
+                    { key: "one_time_bug", label: "One-time bug", icon: Bug, color: "yellow" },
+                    { key: "idea", label: "Propose an idea", icon: Lightbulb, color: "blue" },
+                    { key: "must_have_feature", label: "Must-have feature", icon: Rocket, color: "violet" },
+                  ] as const).map(({ key, label, icon: Icon, color }) => {
+                    const selected = issueCategory === key;
+                    const colorMap: Record<string, string> = {
+                      red: selected ? "border-red-500/50 bg-red-500/10 text-red-400" : "hover:border-red-500/30 hover:text-red-400",
+                      orange: selected ? "border-orange-500/50 bg-orange-500/10 text-orange-400" : "hover:border-orange-500/30 hover:text-orange-400",
+                      yellow: selected ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-400" : "hover:border-yellow-500/30 hover:text-yellow-400",
+                      blue: selected ? "border-blue-500/50 bg-blue-500/10 text-blue-400" : "hover:border-blue-500/30 hover:text-blue-400",
+                      violet: selected ? "border-violet-500/50 bg-violet-500/10 text-violet-400" : "hover:border-violet-500/30 hover:text-violet-400",
+                    };
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => {
+                          setIssueCategory(selected ? null : key);
+                          if (!selected) setTimeout(() => issueInputRef.current?.focus(), 50);
+                        }}
+                        className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-md border transition-colors ${
+                          selected
+                            ? colorMap[color]
+                            : `border-border bg-card text-muted-foreground ${colorMap[color]}`
+                        }`}
+                      >
+                        <Icon className="h-3 w-3 shrink-0" />
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Description textarea — shown after category is selected */}
+                {issueCategory && (
+                  <div className="relative border rounded-lg border-input bg-muted/20">
+                    <textarea
+                      ref={issueInputRef}
+                      value={issueDescription}
+                      onChange={(e) => setIssueDescription(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                          e.preventDefault();
+                          handleSubmitIssue();
+                        }
+                      }}
+                      placeholder="Describe the issue..."
+                      rows={6}
+                      className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-10 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                      disabled={isSubmittingIssue}
+                    />
+                    <div className="absolute bottom-1.5 right-1.5">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={handleSubmitIssue}
+                        disabled={!issueDescription.trim() || isSubmittingIssue}
+                      >
+                        {isSubmittingIssue ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Send className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Folder browser dialog for new session */}
@@ -1861,6 +1929,17 @@ export default function SessionDetailPage({
           </div>
         </div>
       )}
+      <Toaster
+        theme="dark"
+        position="bottom-right"
+        toastOptions={{
+          style: {
+            background: "hsl(var(--popover))",
+            color: "hsl(var(--popover-foreground))",
+            border: "1px solid hsl(var(--border))",
+          },
+        }}
+      />
     </>
   );
 }
