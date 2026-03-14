@@ -5,4 +5,4 @@ compatibility_date = "2024-12-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "csm-debug-logs"
-database_id = "" # Will be filled after `wrangler d1 create csm-debug-logs`
+database_id = "62e3da13-36eb-41bd-8c2d-d249cdd3aef2"
