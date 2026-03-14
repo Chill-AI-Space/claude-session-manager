@@ -5,6 +5,7 @@ import path from "path";
 import os from "os";
 
 const execFileAsync = promisify(execFile);
+const npxBin = process.platform === "win32" ? "npx.cmd" : "npx";
 
 const CONFIG_PATH = path.join(os.homedir(), ".teamhub", "config.yaml");
 
@@ -77,7 +78,7 @@ export async function getTeamHubContext(
   try {
     // Try dynamic search first (most relevant for the query)
     const { stdout: searchOut } = await execFileAsync(
-      "npx",
+      npxBin,
       ["teamhub", "search", query, "-p", projectPath, "--top", "5", "--raw"],
       { timeout: 10_000, cwd: projectPath }
     );
@@ -92,7 +93,7 @@ export async function getTeamHubContext(
 
   try {
     const { stdout: injectOut } = await execFileAsync(
-      "npx",
+      npxBin,
       ["teamhub", "inject", "-p", projectPath, "--max-tokens", String(maxTokens)],
       { timeout: 10_000, cwd: projectPath }
     );

@@ -6,10 +6,6 @@ import os from "os";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  if (process.platform !== "darwin") {
-    return Response.json({ error: "Only supported on macOS" }, { status: 400 });
-  }
-
   const { filePath, cwd, action = "reveal" } = await request.json();
   if (!filePath || typeof filePath !== "string") {
     return Response.json({ error: "filePath required" }, { status: 400 });
@@ -18,7 +14,7 @@ export async function POST(request: NextRequest) {
   // Resolve relative paths against project cwd
   let resolved = filePath.startsWith("~")
     ? path.join(os.homedir(), filePath.slice(1))
-    : filePath.startsWith("/")
+    : filePath.startsWith("/") || /^[A-Za-z]:/.test(filePath)
       ? filePath
       : cwd
         ? path.resolve(cwd, filePath)
@@ -31,15 +27,25 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Access denied: path outside home directory" }, { status: 403 });
   }
 
-  const args = action === "reveal" ? ["-R", resolved] : [resolved];
-
   return new Promise<Response>((resolve) => {
-    const proc = spawn("open", args);
+    let proc;
+    if (process.platform === "win32") {
+      // Windows: use explorer to reveal file
+      proc = spawn("explorer", action === "reveal" ? ["/select,", resolved] : [resolved]);
+    } else if (process.platform === "darwin") {
+      // macOS: use open command
+      const args = action === "reveal" ? ["-R", resolved] : [resolved];
+      proc = spawn("open", args);
+    } else {
+      // Linux: use xdg-open on the directory
+      proc = spawn("xdg-open", [action === "reveal" ? path.dirname(resolved) : resolved]);
+    }
+
     proc.on("close", (code) => {
       if (code === 0) {
         resolve(Response.json({ ok: true, resolved }));
       } else {
-        resolve(Response.json({ error: `open exited ${code}` }, { status: 500 }));
+        resolve(Response.json({ error: `Process exited ${code}` }, { status: 500 }));
       }
     });
     proc.on("error", (err) => {
