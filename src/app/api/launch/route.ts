@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getSetting, logAction } from "@/lib/db";
-import { openInTerminal } from "@/lib/terminal-launcher";
+import { openInTerminal, WindowsTerminalPref } from "@/lib/terminal-launcher";
 import { getClaudePath } from "@/lib/claude-bin";
 import { stat } from "fs/promises";
 import os from "os";
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     const { terminal } = await openInTerminal(
       shellCmd,
       resolved,
-      isWin ? { executable: claudePath, args: claudeArgs } : undefined
+      isWin ? { executable: claudePath, args: claudeArgs, preferredTerminal: (getSetting("preferred_terminal") || "auto") as WindowsTerminalPref } : undefined
     );
     logAction("service", "launch", resolved, undefined);
     return Response.json({ ok: true, terminal });

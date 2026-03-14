@@ -1029,6 +1029,28 @@ export default function SettingsPage() {
             Terminal Integration
           </h2>
 
+          {/* Windows terminal preference */}
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              Preferred terminal (Windows)
+            </div>
+            <div className="text-xs text-muted-foreground leading-relaxed">
+              Which terminal to use when opening sessions. Auto will try Windows Terminal first, then fall back to cmd.
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <select
+                value={settings.preferred_terminal || "auto"}
+                onChange={(e) => updateSetting("preferred_terminal", e.target.value)}
+                className="px-3 py-1.5 text-sm border border-input rounded-md bg-background"
+              >
+                <option value="auto">Auto (Windows Terminal → cmd)</option>
+                <option value="wt">Windows Terminal</option>
+                <option value="pwsh">PowerShell</option>
+                <option value="cmd">cmd.exe</option>
+              </select>
+            </div>
+          </div>
+
           <label className="flex items-start gap-3 cursor-pointer group">
             <input
               type="checkbox"

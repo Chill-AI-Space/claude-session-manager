@@ -206,7 +206,7 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
               ? `${queueSize} queued — type next...`
               : "Reply to Claude…"
           }
-          rows={16}
+          rows={4}
           className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-9 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
         />
 

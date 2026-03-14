@@ -27,7 +27,9 @@ function hasBinary(name: string): boolean {
  * On Windows, prefer passing `executable` + `args` + `cwd` instead of a shell string
  * to avoid OEM codepage issues with non-ASCII paths.
  */
-export async function openInTerminal(shellCmd: string, cwd?: string, opts?: { executable?: string; args?: string[] }): Promise<{ terminal: string }> {
+export type WindowsTerminalPref = "auto" | "wt" | "pwsh" | "cmd";
+
+export async function openInTerminal(shellCmd: string, cwd?: string, opts?: { executable?: string; args?: string[]; preferredTerminal?: WindowsTerminalPref }): Promise<{ terminal: string }> {
   if (process.platform === "win32") {
     return openInWindowsTerminal(shellCmd, cwd, opts);
   }
@@ -72,8 +74,9 @@ export async function openInTerminal(shellCmd: string, cwd?: string, opts?: { ex
   return { terminal: useIterm ? "iTerm2" : "Terminal" };
 }
 
-async function openInWindowsTerminal(shellCmd: string, cwd?: string, opts?: { executable?: string; args?: string[] }): Promise<{ terminal: string }> {
+async function openInWindowsTerminal(shellCmd: string, cwd?: string, opts?: { executable?: string; args?: string[]; preferredTerminal?: WindowsTerminalPref }): Promise<{ terminal: string }> {
   const spawnOpts = { detached: true, stdio: "ignore" as const, cwd, windowsHide: true };
+  const pref = opts?.preferredTerminal || "auto";
 
   // When executable + args are provided, launch directly to avoid OEM codepage
   // issues with non-ASCII paths in shell command strings
@@ -81,8 +84,16 @@ async function openInWindowsTerminal(shellCmd: string, cwd?: string, opts?: { ex
     const exe = opts.executable;
     const args = opts.args || [];
 
-    if (hasBinary("wt.exe")) {
-      // Windows Terminal: wt -d <cwd> <exe> <args...>
+    // PowerShell: open pwsh/powershell with the executable + args
+    if (pref === "pwsh") {
+      const psCmd = [exe, ...args].map(a => `"${a}"`).join(" ");
+      const psExe = hasBinary("pwsh.exe") ? "pwsh.exe" : "powershell.exe";
+      spawn(psExe, ["-NoExit", "-Command", `Set-Location "${cwd || "."}"; & ${psCmd}`], { ...spawnOpts, windowsHide: false }).unref();
+      return { terminal: psExe === "pwsh.exe" ? "PowerShell 7" : "PowerShell" };
+    }
+
+    // Windows Terminal (explicit or auto)
+    if (pref === "wt" || (pref === "auto" && hasBinary("wt.exe"))) {
       const wtArgs = cwd
         ? ["-d", cwd, exe, ...args]
         : [exe, ...args];
@@ -90,14 +101,20 @@ async function openInWindowsTerminal(shellCmd: string, cwd?: string, opts?: { ex
       return { terminal: "Windows Terminal" };
     }
 
-    // cmd.exe: start "" /D <cwd> <exe> <args...>
+    // cmd.exe (explicit or auto fallback)
     const startArgs = ["/c", "start", "Claude Session", "/D", cwd || ".", exe, ...args];
     spawn("cmd.exe", startArgs, spawnOpts).unref();
     return { terminal: "cmd.exe" };
   }
 
   // Fallback: shell command string (legacy / macOS-style callers)
-  if (hasBinary("wt.exe")) {
+  if (pref === "pwsh") {
+    const psExe = hasBinary("pwsh.exe") ? "pwsh.exe" : "powershell.exe";
+    spawn(psExe, ["-NoExit", "-Command", shellCmd], { ...spawnOpts, windowsHide: false }).unref();
+    return { terminal: psExe === "pwsh.exe" ? "PowerShell 7" : "PowerShell" };
+  }
+
+  if (pref === "wt" || (pref === "auto" && hasBinary("wt.exe"))) {
     const args = cwd
       ? ["-d", cwd, "cmd", "/k", shellCmd]
       : ["cmd", "/k", shellCmd];

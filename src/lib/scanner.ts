@@ -5,7 +5,7 @@ import path from "path";
 import { spawn } from "child_process";
 import { getCleanEnv, claudeProjectsDir, UUID_RE } from "./utils";
 import { getClaudePath } from "./claude-bin";
-import { openInTerminal } from "./terminal-launcher";
+import { openInTerminal, WindowsTerminalPref } from "./terminal-launcher";
 import type { SessionRow } from "./types";
 
 // ── Server-side auto-retry ────────────────────────────────────────────────────
@@ -340,7 +340,7 @@ async function escalateToTerminal(sessionId: string): Promise<void> {
     const { terminal } = await openInTerminal(
       shellCmd,
       cwd,
-      isWin ? { executable: claudePath, args: claudeArgs } : undefined
+      isWin ? { executable: claudePath, args: claudeArgs, preferredTerminal: (getSetting("preferred_terminal") || "auto") as WindowsTerminalPref } : undefined
     );
     logAction("service", "permission_escalation_done", `terminal:${terminal}`, sessionId);
   } catch (err) {
