@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getDb, getSetting, logAction, getContextSourceGroups } from "@/lib/db";
+import { getDb, getSetting, logAction } from "@/lib/db";
 import { SessionRow } from "@/lib/types";
 import { killSessionProcesses } from "@/lib/process-detector";
 import { createSSEStream, sseResponse } from "@/lib/claude-runner";
@@ -30,48 +30,7 @@ export async function POST(
 
   logAction("service", "reply", `msg_len:${message.length}`, sessionId);
 
-  // Determine if this message warrants context injection
-  const { messageNeedsContext, getTeamHubContext, formatContextBlock } = await import("@/lib/teamhub");
-  const needsContext = messageNeedsContext(message);
-
-  let finalMessage = message;
-  const teamhubEnabled = getSetting("teamhub_enabled") !== "false"; // default: auto
-  if (needsContext && teamhubEnabled && session.project_path) {
-    try {
-      const ctx = await getTeamHubContext(session.project_path, message);
-      if (ctx) {
-        const block = formatContextBlock(ctx);
-        finalMessage = block + message;
-        logAction(
-          "service",
-          "teamhub_inject",
-          `hub:${ctx.hubName} ~${ctx.tokenEstimate}tok`,
-          sessionId,
-          block
-        );
-      }
-    } catch { /* teamhub unavailable — continue without context */ }
-  }
-
-  // Context Sources injection
-  if (needsContext && session.project_path) {
-    try {
-      const groups = getContextSourceGroups();
-      if (groups.length > 0) {
-        const { getContextForProject, formatContextBlock } = await import("@/lib/context-fetcher");
-        const contextResults = await getContextForProject(session.project_path, groups);
-        for (const { groupName, content, tokenEstimate } of contextResults) {
-          finalMessage = formatContextBlock(groupName, content) + finalMessage;
-          logAction(
-            "service",
-            "context_source_inject",
-            `group:${groupName} ~${tokenEstimate}tok`,
-            sessionId
-          );
-        }
-      }
-    } catch { /* non-critical */ }
-  }
+  const finalMessage = message;
 
   // Auto-kill terminal sessions if setting is enabled
   const autoKill = getSetting("auto_kill_terminal_on_reply") === "true";

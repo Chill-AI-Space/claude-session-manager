@@ -40,7 +40,6 @@ const ACTION_LABELS: Record<string, string> = {
   launch: "Launch session",
   start_web_session: "Start web session",
   ui_open_session: "Opened session",
-  teamhub_inject: "TeamHub inject",
   context_source_inject: "Context inject",
   crash_detected: "Crash detected",
   auto_retry_fired: "Auto-retry started",
@@ -108,7 +107,6 @@ function actionColor(action: string): string {
   if (WARNING_ACTIONS.has(action)) return "text-amber-600 dark:text-amber-400 font-medium";
   if (SUCCESS_ACTIONS.has(action)) return "text-green-600 dark:text-green-400";
   if (action === "reply") return "text-blue-600 dark:text-blue-400";
-  if (action === "teamhub_inject") return "text-yellow-600 dark:text-yellow-400 font-medium";
   if (action === "context_source_inject") return "text-blue-600 dark:text-blue-400 font-medium";
   if (action.startsWith("launch") || action === "start_web_session") return "text-green-600 dark:text-green-400";
   if (action.startsWith("set_")) return "text-muted-foreground";

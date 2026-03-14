@@ -357,11 +357,6 @@ const SETTING_DEFAULTS: Record<string, string> = {
   auto_kill_terminal_on_reply: "false",
   dangerously_skip_permissions: "false",
   vector_search_top_k: "20",
-  teamhub_enabled: "true",
-  context_guard_enabled: "false",
-  context_guard_min_messages: "6",
-  context_guard_block_threshold: "90",
-  context_guard_warn_threshold: "80",
   new_session_from_reply: "true",
   debug_mode: "false",
   debug_log_endpoint: "",
@@ -416,102 +411,6 @@ export function setSetting(key: string, value: string): void {
 export function getAllSettings(): Record<string, string> {
   const saved = readSettingsFile();
   return { ...SETTING_DEFAULTS, ...saved };
-}
-
-// ── Context Source Groups ──────────────────────────────────────────────────────
-
-export interface ContextSourceRow {
-  id: string;
-  group_id: string;
-  type: "github" | "url" | "local";
-  label: string | null;
-  config: string; // JSON
-}
-
-export interface ContextSourceGroupRow {
-  id: string;
-  name: string;
-  enabled: number;
-  created_at: string;
-}
-
-export interface ContextSourceGroupFull {
-  id: string;
-  name: string;
-  enabled: boolean;
-  sources: Array<{ id: string; type: string; label: string | null; config: Record<string, unknown> }>;
-  patterns: string[];
-}
-
-export function getContextSourceGroups(): ContextSourceGroupFull[] {
-  const db = getDb();
-  const groups = db.prepare("SELECT * FROM context_source_groups ORDER BY created_at ASC").all() as ContextSourceGroupRow[];
-  const allSources = db.prepare("SELECT * FROM context_sources ORDER BY created_at ASC").all() as ContextSourceRow[];
-  const allPatterns = db.prepare("SELECT * FROM context_group_projects").all() as { group_id: string; pattern: string }[];
-
-  // Index by group_id for O(1) lookup
-  const sourcesByGroup = new Map<string, ContextSourceRow[]>();
-  for (const s of allSources) {
-    const arr = sourcesByGroup.get(s.group_id) || [];
-    arr.push(s);
-    sourcesByGroup.set(s.group_id, arr);
-  }
-  const patternsByGroup = new Map<string, string[]>();
-  for (const p of allPatterns) {
-    const arr = patternsByGroup.get(p.group_id) || [];
-    arr.push(p.pattern);
-    patternsByGroup.set(p.group_id, arr);
-  }
-
-  return groups.map((g) => ({
-    id: g.id,
-    name: g.name,
-    enabled: g.enabled === 1,
-    sources: (sourcesByGroup.get(g.id) || []).map((s) => ({
-      id: s.id,
-      type: s.type,
-      label: s.label,
-      config: (() => { try { return JSON.parse(s.config); } catch { return {}; } })(),
-    })),
-    patterns: patternsByGroup.get(g.id) || [],
-  }));
-}
-
-export function upsertContextSourceGroup(
-  id: string,
-  name: string,
-  enabled: boolean,
-  sources: Array<{ id: string; type: string; label: string | null; config: Record<string, unknown> }>,
-  patterns: string[]
-): void {
-  const db = getDb();
-  const upsertGroup = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO context_source_groups (id, name, enabled) VALUES (?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET name=excluded.name, enabled=excluded.enabled`
-    ).run(id, name, enabled ? 1 : 0);
-
-    // Replace sources
-    db.prepare("DELETE FROM context_sources WHERE group_id = ?").run(id);
-    for (const s of sources) {
-      db.prepare(
-        "INSERT INTO context_sources (id, group_id, type, label, config) VALUES (?, ?, ?, ?, ?)"
-      ).run(s.id, id, s.type, s.label ?? null, JSON.stringify(s.config));
-    }
-
-    // Replace patterns
-    db.prepare("DELETE FROM context_group_projects WHERE group_id = ?").run(id);
-    for (const p of patterns) {
-      if (p.trim()) {
-        db.prepare("INSERT OR IGNORE INTO context_group_projects (group_id, pattern) VALUES (?, ?)").run(id, p.trim());
-      }
-    }
-  });
-  upsertGroup();
-}
-
-export function deleteContextSourceGroup(id: string): void {
-  getDb().prepare("DELETE FROM context_source_groups WHERE id = ?").run(id);
 }
 
 // ── Issues ──────────────────────────────────────────────────────────────────────

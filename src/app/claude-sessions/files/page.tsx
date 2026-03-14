@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { FileText, File as FilePdf, Send, Loader2, Cloud } from "lucide-react";
+import { FileText, File as FilePdf, Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 function basename(p: string) { return p.split(/[\\/]/).pop() ?? p; }
@@ -18,8 +18,6 @@ interface FileContent {
   name?: string;
 }
 
-const CODE_EXTS = new Set(["ts", "tsx", "js", "jsx", "py", "go", "rs", "rb", "sh", "json", "yaml", "yml", "toml", "sql", "css", "html", "xml"]);
-
 export default function FilesPage() {
   return (
     <Suspense fallback={<div className="flex-1 flex items-center justify-center text-muted-foreground text-sm"><Loader2 className="h-4 w-4 animate-spin mr-2" />Loading…</div>}>
@@ -32,14 +30,7 @@ function FilesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // Local file
   const filePath = searchParams.get("path");
-  // GDrive file
-  const fileId = searchParams.get("fileId");
-  const gdSource = searchParams.get("source");
-  const accountId = searchParams.get("accountId");
-
-  const isGDrive = gdSource === "gdrive" && fileId && accountId;
 
   const [content, setContent] = useState<FileContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -54,24 +45,6 @@ function FilesContent() {
     setContent(null);
     setImageUrl(null);
 
-    if (isGDrive && fileId && accountId) {
-      setLoading(true);
-      fetch(`/api/gdrive/content?accountId=${encodeURIComponent(accountId)}&fileId=${encodeURIComponent(fileId)}`)
-        .then((r) => {
-          if (r.headers.get("content-type")?.startsWith("image/")) {
-            return r.blob().then((blob) => {
-              setImageUrl(URL.createObjectURL(blob));
-              setLoading(false);
-              return null;
-            });
-          }
-          return r.json();
-        })
-        .then((data) => { if (data) { setContent(data); setLoading(false); } })
-        .catch(() => { setContent({ type: "unknown" }); setLoading(false); });
-      return;
-    }
-
     if (!filePath) return;
 
     if (IMAGE_EXTS.has(ext)) {
@@ -85,16 +58,13 @@ function FilesContent() {
       .then(setContent)
       .catch(() => setContent({ type: "unknown" }))
       .finally(() => setLoading(false));
-  }, [filePath, fileId, accountId, gdSource]);
+  }, [filePath]);
 
   const handleSend = async () => {
     if (!reply.trim()) return;
     setSending(true);
     try {
-      const ref = isGDrive && fileId
-        ? `gdrive://${fileId} (Account: ${accountId})`
-        : filePath ?? "";
-      const message = `File: ${ref}\n\n${reply.trim()}`;
+      const message = `File: ${filePath ?? ""}\n\n${reply.trim()}`;
       const cwd = filePath ? dirname(filePath) : undefined;
       const res = await fetch("/api/launch", {
         method: "POST",
@@ -113,7 +83,7 @@ function FilesContent() {
     }
   };
 
-  if (!filePath && !isGDrive) {
+  if (!filePath) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground text-sm gap-2">
         <FileText className="h-8 w-8 opacity-30" />
@@ -122,22 +92,14 @@ function FilesContent() {
     );
   }
 
-  const displayName = isGDrive
-    ? (content?.name ?? fileId ?? "Drive file")
-    : (filePath ? basename(filePath) : "");
-
-  const displayPath = isGDrive
-    ? `Google Drive · ${fileId}`
-    : (filePath ?? "");
+  const displayName = basename(filePath);
+  const displayPath = filePath;
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Header */}
       <div className="border-b border-border px-4 py-3 flex items-center gap-3 shrink-0">
-        {isGDrive
-          ? <Cloud className="h-4 w-4 text-blue-400 shrink-0" />
-          : <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-        }
+        <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
         <div className="flex-1 min-w-0">
           <h2 className="text-sm font-medium truncate">{displayName}</h2>
           <p className="text-[11px] text-muted-foreground/60 truncate">{displayPath}</p>

@@ -24,7 +24,6 @@ export async function GET() {
 
   const claudeOk = checkCommand("claude");
   const rgOk = checkCommand("rg");
-  const teamhubOk = existsSync(path.join(os.homedir(), ".teamhub", "config.yaml"));
   const geminiOk = !!process.env.GEMINI_API_KEY;
 
   const sessionsDir = path.join(os.homedir(), ".claude", "projects");
@@ -85,13 +84,6 @@ export async function GET() {
           : isMac
             ? "Install ripgrep: brew install ripgrep"
             : "Install ripgrep: apt install ripgrep",
-      },
-      {
-        id: "teamhub",
-        label: "TeamHub",
-        ok: teamhubOk,
-        required: false,
-        fix: teamhubOk ? null : "Optional: install TeamHub for shared team context injection",
       },
       {
         id: "platform_terminal",

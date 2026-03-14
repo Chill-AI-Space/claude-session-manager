@@ -6,7 +6,6 @@ import Link from "next/link";
 import { SessionList } from "@/components/SessionList";
 import { SessionSearch, GeminiResult } from "@/components/SessionSearch";
 import { SessionListItem, ProjectListItem } from "@/lib/types";
-import { GDriveAccount } from "@/lib/gdrive";
 import {
   RefreshCw, Loader2, PanelLeft, PanelLeftClose, Sparkles,
   Settings, Package, BarChart2, Archive, CircleHelp, ClipboardList,
@@ -46,7 +45,6 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   const [contentSearching, setContentSearching] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [activeTab, setActiveTab] = useState<"sessions" | "files">("sessions");
-  const [gdAccounts, setGdAccounts] = useState<GDriveAccount[]>([]);
   const [generatingTitles, setGeneratingTitles] = useState(false);
   const [titlesGenerated, setTitlesGenerated] = useState<number | null>(null);
   const initialLoadDone = useRef(false);
@@ -107,16 +105,6 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     setProjects(data.projects);
   }, []);
 
-  const fetchGDriveAccounts = useCallback(async () => {
-    try {
-      const res = await fetch("/api/settings");
-      const data = await res.json();
-      if (data.gdrive_accounts) {
-        setGdAccounts(JSON.parse(data.gdrive_accounts));
-      }
-    } catch { /* ignore */ }
-  }, []);
-
   async function triggerScan(mode: "full" | "incremental" = "incremental"): Promise<void> {
     setScanning(true);
     await fetch("/api/sessions/scan", {
@@ -141,7 +129,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   }, []);
 
   useEffect(() => {
-    Promise.all([fetchSessions(), fetchProjects(), fetchGDriveAccounts()]).then(() => {
+    Promise.all([fetchSessions(), fetchProjects()]).then(() => {
       initialLoadDone.current = true;
       triggerScan("incremental");
     });
@@ -340,7 +328,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
           {activeTab === "sessions" ? (
             <SessionList sessions={sessions} loading={loading || contentSearching} geminiResults={geminiResults} onArchive={archiveSession} />
           ) : (
-            <FileBrowser projects={projects} gdAccounts={gdAccounts} />
+            <FileBrowser projects={projects} />
           )}
         </div>
       </div>
