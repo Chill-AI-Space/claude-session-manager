@@ -1,4 +1,4 @@
-import { execFile, spawn } from "child_process";
+import { execFile, execFileSync, spawn } from "child_process";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
@@ -6,6 +6,17 @@ const execFileAsync = promisify(execFile);
 /** Wrap string for AppleScript */
 function asString(s: string): string {
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/** Check if a binary exists on the system */
+function hasBinary(name: string): boolean {
+  try {
+    const cmd = process.platform === "win32" ? "where" : "which";
+    execFileSync(cmd, [name], { stdio: "ignore", timeout: 3000 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -59,21 +70,19 @@ export async function openInTerminal(shellCmd: string, cwd?: string): Promise<{ 
 }
 
 async function openInWindowsTerminal(shellCmd: string, cwd?: string): Promise<{ terminal: string }> {
-  const spawnOpts = { detached: true, stdio: "ignore" as const, cwd };
+  const spawnOpts = { detached: true, stdio: "ignore" as const, cwd, windowsHide: true };
 
-  // Try Windows Terminal first
-  try {
+  // Try Windows Terminal first (check it actually exists)
+  if (hasBinary("wt.exe")) {
     const args = cwd
       ? ["-d", cwd, "cmd", "/k", shellCmd]
       : ["cmd", "/k", shellCmd];
     spawn("wt.exe", args, spawnOpts).unref();
     return { terminal: "Windows Terminal" };
-  } catch {
-    // Windows Terminal not available, fall back to cmd.exe
   }
 
-  const cmdShell = `cd /d "${cwd || "."}" && ${shellCmd}`;
-  spawn("cmd.exe", ["/c", "start", "cmd", "/k", cmdShell], spawnOpts).unref();
+  // Fallback to cmd.exe — use cwd spawn option instead of cd /d to avoid injection
+  spawn("cmd.exe", ["/c", "start", "cmd", "/k", shellCmd], { ...spawnOpts, cwd: cwd || undefined }).unref();
   return { terminal: "cmd.exe" };
 }
 
@@ -82,15 +91,13 @@ async function openInLinuxTerminal(shellCmd: string, cwd?: string): Promise<{ te
   const terminals = [
     { bin: "gnome-terminal", args: ["--", "bash", "-c", shellCmd] },
     { bin: "konsole", args: ["-e", "bash", "-c", shellCmd] },
-    { bin: "xterm", args: ["-e", shellCmd] },
+    { bin: "xterm", args: ["-e", "bash", "-c", shellCmd] },
   ];
 
   for (const t of terminals) {
-    try {
+    if (hasBinary(t.bin)) {
       spawn(t.bin, t.args, spawnOpts).unref();
       return { terminal: t.bin };
-    } catch {
-      continue;
     }
   }
 
