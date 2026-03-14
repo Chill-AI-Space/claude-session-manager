@@ -15,8 +15,9 @@ let _claudePath: string | null = null;
 export function getClaudePath(): string {
   if (_claudePath) return _claudePath;
 
-  // Fallback candidates — checked first on Windows to avoid OEM codepage
-  // issues with `where` when the username contains non-ASCII chars (#74)
+  // Check known candidate paths FIRST using os.homedir() which handles
+  // Unicode/Cyrillic usernames correctly on all platforms.
+  // On Windows, `where` corrupts non-ASCII paths due to OEM codepage issues.
   const candidates = isWin
     ? [
         path.join(os.homedir(), ".local", "bin", "claude.exe"),
@@ -32,20 +33,18 @@ export function getClaudePath(): string {
         "/opt/homebrew/bin/claude",
       ];
 
-  // On Windows, check known paths first to avoid `where` encoding issues
-  // with Cyrillic/Unicode usernames (OEM codepage garbles output)
-  if (isWin) {
-    for (const c of candidates) {
-      try {
-        if (fs.existsSync(c)) {
-          _claudePath = c;
-          return _claudePath;
-        }
-      } catch { /* try next */ }
-    }
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) {
+        _claudePath = c;
+        return _claudePath;
+      }
+    } catch { /* try next */ }
   }
 
-  // Use system PATH lookup
+  // Fall back to which/where for non-standard install locations.
+  // On Windows with non-ASCII usernames this may return garbled paths,
+  // so we validate with existsSync before trusting it.
   try {
     const cmd = isWin ? "where" : "which";
     const result = execFileSync(cmd, ["claude"], {
@@ -53,24 +52,12 @@ export function getClaudePath(): string {
       timeout: 5000,
     }).trim();
     const resolved = result.split(/\r?\n/)[0];
-    // Verify the resolved path actually exists (guards against encoding corruption)
-    if (resolved && (isWin ? true : fs.existsSync(resolved))) {
+
+    if (resolved && fs.existsSync(resolved)) {
       _claudePath = resolved;
       return _claudePath;
     }
   } catch { /* not in PATH */ }
-
-  // On non-Windows, also check candidates as fallback
-  if (!isWin) {
-    for (const c of candidates) {
-      try {
-        if (fs.existsSync(c)) {
-          _claudePath = c;
-          return _claudePath;
-        }
-      } catch { /* try next */ }
-    }
-  }
 
   _claudePath = "claude"; // last resort — rely on PATH
   return _claudePath;
