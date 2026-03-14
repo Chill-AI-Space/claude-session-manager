@@ -23,10 +23,13 @@ function hasBinary(name: string): boolean {
  * Open a shell command in a terminal window.
  * Supports macOS (iTerm2/Terminal.app), Windows (Windows Terminal/cmd.exe), and Linux (common terminals).
  * Returns which terminal was used.
+ *
+ * On Windows, prefer passing `executable` + `args` + `cwd` instead of a shell string
+ * to avoid OEM codepage issues with non-ASCII paths.
  */
-export async function openInTerminal(shellCmd: string, cwd?: string): Promise<{ terminal: string }> {
+export async function openInTerminal(shellCmd: string, cwd?: string, opts?: { executable?: string; args?: string[] }): Promise<{ terminal: string }> {
   if (process.platform === "win32") {
-    return openInWindowsTerminal(shellCmd, cwd);
+    return openInWindowsTerminal(shellCmd, cwd, opts);
   }
 
   if (process.platform === "linux") {
@@ -69,10 +72,31 @@ export async function openInTerminal(shellCmd: string, cwd?: string): Promise<{ 
   return { terminal: useIterm ? "iTerm2" : "Terminal" };
 }
 
-async function openInWindowsTerminal(shellCmd: string, cwd?: string): Promise<{ terminal: string }> {
+async function openInWindowsTerminal(shellCmd: string, cwd?: string, opts?: { executable?: string; args?: string[] }): Promise<{ terminal: string }> {
   const spawnOpts = { detached: true, stdio: "ignore" as const, cwd, windowsHide: true };
 
-  // Try Windows Terminal first (check it actually exists)
+  // When executable + args are provided, launch directly to avoid OEM codepage
+  // issues with non-ASCII paths in shell command strings
+  if (opts?.executable) {
+    const exe = opts.executable;
+    const args = opts.args || [];
+
+    if (hasBinary("wt.exe")) {
+      // Windows Terminal: wt -d <cwd> <exe> <args...>
+      const wtArgs = cwd
+        ? ["-d", cwd, exe, ...args]
+        : [exe, ...args];
+      spawn("wt.exe", wtArgs, spawnOpts).unref();
+      return { terminal: "Windows Terminal" };
+    }
+
+    // cmd.exe: start "" /D <cwd> <exe> <args...>
+    const startArgs = ["/c", "start", "Claude Session", "/D", cwd || ".", exe, ...args];
+    spawn("cmd.exe", startArgs, spawnOpts).unref();
+    return { terminal: "cmd.exe" };
+  }
+
+  // Fallback: shell command string (legacy / macOS-style callers)
   if (hasBinary("wt.exe")) {
     const args = cwd
       ? ["-d", cwd, "cmd", "/k", shellCmd]
@@ -81,7 +105,6 @@ async function openInWindowsTerminal(shellCmd: string, cwd?: string): Promise<{ 
     return { terminal: "Windows Terminal" };
   }
 
-  // Fallback to cmd.exe — use cwd spawn option instead of cd /d to avoid injection
   spawn("cmd.exe", ["/c", "start", "cmd", "/k", shellCmd], { ...spawnOpts, cwd: cwd || undefined }).unref();
   return { terminal: "cmd.exe" };
 }

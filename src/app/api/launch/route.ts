@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getSetting, logAction } from "@/lib/db";
 import { openInTerminal } from "@/lib/terminal-launcher";
+import { getClaudePath } from "@/lib/claude-bin";
 import { stat } from "fs/promises";
 import os from "os";
 import path from "path";
@@ -32,11 +33,24 @@ export async function POST(request: NextRequest) {
 
   const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
   const effort = getSetting("effort_level") || "high";
+
+  // Build args for claude CLI
+  const claudeArgs = ["--effort", effort];
+  if (skipPermissions) claudeArgs.push("--dangerously-skip-permissions");
+
+  // On Windows, pass executable + args directly to avoid OEM codepage
+  // issues with non-ASCII paths in shell command strings
+  const isWin = process.platform === "win32";
+  const claudePath = getClaudePath();
   const skipFlag = skipPermissions ? " --dangerously-skip-permissions" : "";
   const shellCmd = `cd "${resolved}" && claude${skipFlag} --effort ${effort}`;
 
   try {
-    const { terminal } = await openInTerminal(shellCmd);
+    const { terminal } = await openInTerminal(
+      shellCmd,
+      resolved,
+      isWin ? { executable: claudePath, args: claudeArgs } : undefined
+    );
     logAction("service", "launch", resolved, undefined);
     return Response.json({ ok: true, terminal });
   } catch (err) {

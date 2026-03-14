@@ -331,10 +331,17 @@ async function escalateToTerminal(sessionId: string): Promise<void> {
   logAction("service", "permission_escalation_fired", "pushing to terminal with --dangerously-skip-permissions", sessionId);
 
   const claudePath = getClaudePath();
-  const shellCmd = `cd ${JSON.stringify(session.project_path)} && ${claudePath} --resume ${sessionId} --dangerously-skip-permissions -p "check access again please"`;
+  const cwd = session.project_path;
+  const claudeArgs = ["--resume", sessionId, "--dangerously-skip-permissions", "-p", "check access again please"];
+  const shellCmd = `cd ${JSON.stringify(cwd)} && ${claudePath} --resume ${sessionId} --dangerously-skip-permissions -p "check access again please"`;
 
+  const isWin = process.platform === "win32";
   try {
-    const { terminal } = await openInTerminal(shellCmd);
+    const { terminal } = await openInTerminal(
+      shellCmd,
+      cwd,
+      isWin ? { executable: claudePath, args: claudeArgs } : undefined
+    );
     logAction("service", "permission_escalation_done", `terminal:${terminal}`, sessionId);
   } catch (err) {
     logAction("service", "permission_escalation_failed", `${err}`, sessionId);
