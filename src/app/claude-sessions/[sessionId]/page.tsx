@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, Send, AlertTriangle, PanelRightClose, PanelRight, Paperclip } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, Send, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug } from "lucide-react";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
 import { getCachedSession, setCachedSession } from "@/lib/session-cache";
@@ -146,6 +146,7 @@ export default function SessionDetailPage({
   const [terminalKilled, setTerminalKilled] = useState(false);
   const [hasReplied, setHasReplied] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [bugReport, setBugReport] = useState<{ open: boolean; title: string; desc: string; sending: boolean; result: string | null }>({ open: false, title: "", desc: "", sending: false, result: null });
   const [focusError, setFocusError] = useState<string | null>(null);
   const [focusOk, setFocusOk] = useState(false);
 
@@ -1438,6 +1439,13 @@ export default function SessionDetailPage({
                 Help
               </Link>
               <button
+                onClick={() => setBugReport(prev => ({ ...prev, open: !prev.open, result: null }))}
+                className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
+              >
+                <Bug className="h-4 w-4 shrink-0" />
+                Report Bug
+              </button>
+              <button
                 onClick={() => {
                   const next = theme === "dark" ? "light" : "dark";
                   setTheme(next);
@@ -1450,6 +1458,56 @@ export default function SessionDetailPage({
                 Theme
               </button>
             </div>
+
+            {/* Bug report form */}
+            {bugReport.open && (
+              <div className="pt-2 border-t border-border/30 space-y-1.5">
+                {bugReport.result ? (
+                  <div className="text-xs text-green-500 px-1">{bugReport.result}</div>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      placeholder="Bug title..."
+                      value={bugReport.title}
+                      onChange={e => setBugReport(prev => ({ ...prev, title: e.target.value }))}
+                      className="w-full px-2 py-1 text-xs bg-muted/50 border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <textarea
+                      placeholder="Description (optional)..."
+                      value={bugReport.desc}
+                      onChange={e => setBugReport(prev => ({ ...prev, desc: e.target.value }))}
+                      rows={2}
+                      className="w-full px-2 py-1 text-xs bg-muted/50 border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                    />
+                    <button
+                      disabled={!bugReport.title.trim() || bugReport.sending}
+                      onClick={async () => {
+                        setBugReport(prev => ({ ...prev, sending: true }));
+                        try {
+                          const res = await fetch("/api/issues", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ title: bugReport.title, description: bugReport.desc, sessionId }),
+                          });
+                          const data = await res.json();
+                          if (data.ok) {
+                            setBugReport({ open: true, title: "", desc: "", sending: false, result: `Created #${data.number} — ${data.url}` });
+                          } else {
+                            setBugReport(prev => ({ ...prev, sending: false, result: `Error: ${data.error}` }));
+                          }
+                        } catch (err) {
+                          setBugReport(prev => ({ ...prev, sending: false, result: `Error: ${err instanceof Error ? err.message : String(err)}` }));
+                        }
+                      }}
+                      className="w-full px-2 py-1 text-xs font-medium bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded disabled:opacity-40 transition-colors"
+                    >
+                      {bugReport.sending ? "Submitting..." : "Submit Bug Report"}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Sent message confirmation */}
