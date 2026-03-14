@@ -155,7 +155,7 @@ function extractLastAssistantText(jsonlPath: string): string {
     fs.readSync(fd, buf, 0, buf.length, start);
     fs.closeSync(fd);
 
-    const lines = buf.toString("utf-8").split("\n").filter(Boolean);
+    const lines = buf.toString("utf-8").split(/\r?\n/).filter(Boolean);
     // If we started mid-file, first line is likely truncated — skip it
     if (start > 0) lines.shift();
     lines.reverse();
@@ -266,7 +266,7 @@ function detectPermissionLoop(jsonlPath: string): boolean {
     fs.readSync(fd, buf, 0, buf.length, start);
     fs.closeSync(fd);
 
-    const lines = buf.toString("utf-8").split("\n").filter(Boolean);
+    const lines = buf.toString("utf-8").split(/\r?\n/).filter(Boolean);
     if (start > 0) lines.shift(); // skip partial first line
 
     let permissionHits = 0;
@@ -385,7 +385,7 @@ interface JsonlMetadata {
 function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
   try {
     const content = fs.readFileSync(filePath, "utf-8");
-    const lines = content.split("\n").filter((l) => l.trim());
+    const lines = content.split(/\r?\n/).filter((l) => l.trim());
 
     let sessionId = "";
     let projectPath = "";
@@ -799,9 +799,17 @@ export async function scanSessions(
 
 // Claude stores project dirs as cwd with path separators replaced by "-".
 // macOS: "/Users/vova/project" → "-Users-vova-project"
-// Windows: "C:\Users\vova\project" → "C--Users-vova-project" (drive colon kept)
+// Windows: "C:\Users\vova\project" → "C:-Users-vova-project"
+// NOTE: This is a lossy operation — hyphens in folder names are indistinguishable
+// from path separators. Prefer metadata.projectPath when available (line 711).
 function dirToPath(dirName: string): string {
-  const restored = dirName.replace(/-/g, "/");
-  // On Windows, convert forward slashes to backslashes
-  return process.platform === "win32" ? restored.replace(/\//g, "\\") : restored;
+  if (process.platform === "win32") {
+    // Handle Windows drive letter: "C:-Users-vova-project" → "C:\Users\vova\project"
+    const driveMatch = dirName.match(/^([A-Za-z]):-(.*)$/);
+    if (driveMatch) {
+      return driveMatch[1] + ":\\" + driveMatch[2].replace(/-/g, "\\");
+    }
+    return dirName.replace(/-/g, "\\");
+  }
+  return dirName.replace(/-/g, "/");
 }

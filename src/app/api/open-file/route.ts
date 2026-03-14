@@ -43,7 +43,8 @@ export async function POST(request: NextRequest) {
     }
 
     proc.on("close", (code) => {
-      if (code === 0) {
+      // explorer.exe on Windows returns non-zero exit codes even on success
+      if (code === 0 || process.platform === "win32") {
         resolve(Response.json({ ok: true, resolved }));
       } else {
         resolve(Response.json({ error: `Process exited ${code}` }, { status: 500 }));

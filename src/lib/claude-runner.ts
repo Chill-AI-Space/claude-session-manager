@@ -152,7 +152,7 @@ export function createSSEStream(opts: SSEStreamOptions): ReadableStream {
       proc.stdout!.on("data", (data: Buffer) => {
         if (closed) return;
         buffer += data.toString();
-        const lines = buffer.split("\n");
+        const lines = buffer.split(/\r?\n/);
         buffer = lines.pop() || "";
 
         for (const line of lines) {

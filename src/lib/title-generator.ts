@@ -100,7 +100,7 @@ ${sessionsText}`;
   );
 
   let generated = 0;
-  const lines = stdout.split("\n");
+  const lines = stdout.split(/\r?\n/);
 
   for (const line of lines) {
     const match = line.match(/^\[(\d+)\]\s*(.+)$/);

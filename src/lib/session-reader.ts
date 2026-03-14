@@ -10,7 +10,7 @@ export function readSessionMessages(
   }
 
   const content = fs.readFileSync(jsonlPath, "utf-8");
-  const lines = content.split("\n").filter((l) => l.trim());
+  const lines = content.split(/\r?\n/).filter((l) => l.trim());
   const messages: ParsedMessage[] = [];
 
   for (const line of lines) {
@@ -157,7 +157,7 @@ export function getSessionMessageCount(jsonlPath: string): number {
   if (!fs.existsSync(jsonlPath)) return 0;
 
   const content = fs.readFileSync(jsonlPath, "utf-8");
-  const lines = content.split("\n").filter((l) => l.trim());
+  const lines = content.split(/\r?\n/).filter((l) => l.trim());
   let count = 0;
 
   for (const line of lines) {
