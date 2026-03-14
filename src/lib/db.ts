@@ -364,6 +364,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   context_guard_warn_threshold: "80",
   new_session_from_reply: "true",
   debug_mode: "false",
+  debug_log_endpoint: "",
 };
 
 // Settings cache — avoids reading JSON file on every getSetting() call

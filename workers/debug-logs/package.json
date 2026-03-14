@@ -1,0 +1,14 @@
+{
+  "name": "csm-debug-logs",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create csm-debug-logs",
+    "db:init": "wrangler d1 execute csm-debug-logs --file=./schema.sql --remote",
+    "db:init-local": "wrangler d1 execute csm-debug-logs --file=./schema.sql --local"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

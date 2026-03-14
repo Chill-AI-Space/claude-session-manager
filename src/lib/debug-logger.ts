@@ -1,12 +1,14 @@
 /**
- * Structured debug logger with ring buffer and SSE streaming.
+ * Structured debug logger with ring buffer, SSE streaming, and remote push.
  *
  * - Captures all server-side events (scan, crash, retry, spawn, errors)
  * - Ring buffer keeps last N entries in memory
  * - SSE subscribers get real-time stream + buffer replay on connect
+ * - Remote push: batches entries and POSTs to `debug_log_endpoint` every 10s
  * - Controlled by `debug_mode` setting
  */
 
+import os from "os";
 import { getSetting } from "./db";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -18,6 +20,10 @@ export interface LogEntry {
   message: string;
   data?: Record<string, unknown>;
 }
+
+// ── Instance identity (sent with remote logs) ────────────────────────────────
+
+const instanceId = `${os.hostname()}-${process.platform}-${process.pid}`;
 
 // ── Ring Buffer ──────────────────────────────────────────────────────────────
 
@@ -43,6 +49,9 @@ function pushEntry(entry: LogEntry): void {
       // subscriber dead, will be cleaned up
     }
   }
+
+  // Queue for remote push
+  remoteBatch.push(entry);
 }
 
 /** Get all buffered entries in chronological order */
@@ -67,6 +76,57 @@ export function subscribe(fn: Subscriber): () => void {
 export function subscriberCount(): number {
   return subscribers.size;
 }
+
+// ── Remote Push ──────────────────────────────────────────────────────────────
+
+const FLUSH_INTERVAL_MS = 10_000;
+const MAX_BATCH_SIZE = 100;
+let remoteBatch: LogEntry[] = [];
+let flushTimer: NodeJS.Timeout | null = null;
+
+function startRemoteFlush(): void {
+  if (flushTimer) return;
+  flushTimer = setInterval(flushRemote, FLUSH_INTERVAL_MS);
+  // Don't keep the process alive just for log flushing
+  if (flushTimer.unref) flushTimer.unref();
+}
+
+async function flushRemote(): Promise<void> {
+  if (remoteBatch.length === 0) return;
+
+  const endpoint = getSetting("debug_log_endpoint");
+  if (!endpoint) return;
+
+  // Grab current batch and reset
+  const batch = remoteBatch.slice(0, MAX_BATCH_SIZE);
+  remoteBatch = remoteBatch.slice(MAX_BATCH_SIZE);
+
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instance: instanceId,
+        entries: batch,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      // Put entries back for retry (but cap to prevent unbounded growth)
+      if (remoteBatch.length < MAX_ENTRIES) {
+        remoteBatch = [...batch, ...remoteBatch];
+      }
+    }
+  } catch {
+    // Network error — put entries back (capped)
+    if (remoteBatch.length < MAX_ENTRIES) {
+      remoteBatch = [...batch, ...remoteBatch];
+    }
+  }
+}
+
+// Start flush timer on module load
+startRemoteFlush();
 
 // ── Logging API ──────────────────────────────────────────────────────────────
 
