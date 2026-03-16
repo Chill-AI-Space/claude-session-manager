@@ -1,0 +1,110 @@
+[2026-03-16 15:21:13] Checking for new deals...
+  Copied: Нирвана/ИТ -> Воронка найма
+  Synced 1 new deals
+[2026-03-16 15:26:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 15:31:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 15:36:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 15:41:14] Checking for new deals...
+  No new deals to sync
+[2026-03-16 15:46:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 15:51:13] Checking for new deals...
+Traceback (most recent call last):
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\urllib\request.py", line 1344, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 1093, in _send_output
+    self.send(msg)
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 1037, in send
+    self.connect()
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 1472, in connect
+    super().connect()
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\socket.py", line 841, in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\socket.py", line 978, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno 11001] getaddrinfo failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\админ\claude-session-manager\scripts\weeek-sync.py", line 173, in <module>
+    sync()
+  File "C:\Users\админ\claude-session-manager\scripts\weeek-sync.py", line 76, in sync
+    data = api_get(f'crm/statuses/{SOURCE_STATUS_ID}/deals')
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\админ\claude-session-manager\scripts\weeek-sync.py", line 37, in api_get
+    return json.loads(urllib.request.urlopen(req).read())
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\urllib\request.py", line 215, in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\urllib\request.py", line 515, in open
+    response = self._open(req, data)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\urllib\request.py", line 532, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\urllib\request.py", line 492, in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\urllib\request.py", line 1392, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\админ\AppData\Local\Programs\Python\Python312\Lib\urllib\request.py", line 1347, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 11001] getaddrinfo failed>
+[2026-03-16 15:56:13] Checking for new deals...
+  Copied: Лилия/РОП -> Воронка найма
+  Synced 1 new deals
+[2026-03-16 16:01:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:06:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:11:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:16:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:21:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:26:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:31:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:36:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:41:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:46:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:51:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 16:56:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 17:01:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 17:06:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 17:11:13] Checking for new deals...
+  No new deals to sync
+[2026-03-16 20:26:14] Checking for new deals...
+  No new deals to sync
+[2026-03-16 20:31:14] Checking for new deals...
+  No new deals to sync
+[2026-03-16 20:36:14] Checking for new deals...
+  No new deals to sync
+[2026-03-16 20:41:14] Checking for new deals...
+  No new deals to sync
