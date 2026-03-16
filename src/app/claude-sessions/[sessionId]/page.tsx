@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, Send, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Search } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -18,6 +18,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import Link from "next/link";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
 import { useAutodetect } from "@/hooks/useAutodetect";
+import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 
 const CTX_MAX = 200_000;
@@ -104,6 +105,7 @@ interface SessionDetailData {
   messages_total: number;
   metadata: SessionRow;
   is_active: boolean;
+  file_age_ms?: number;
 }
 
 export default function SessionDetailPage({
@@ -179,11 +181,27 @@ export default function SessionDetailPage({
   const [learningsError, setLearningsError] = useState<string | null>(null);
   const [learningsOpen, setLearningsOpen] = useState(false);
 
+  // MD view (default — primary display mode)
+  const [mdView, setMdView] = useState(true);
+  const [mdContent, setMdContent] = useState<string | null>(null);
+  const [mdLoading, setMdLoading] = useState(false);
+  const mdScrollRef = useRef<HTMLDivElement>(null);
+  const [mdSearch, setMdSearch] = useState(false);
+  const [mdSearchQuery, setMdSearchQuery] = useState("");
+  const mdSearchInputRef = useRef<HTMLInputElement>(null);
+
+  // Summary
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [startingNewSession, setStartingNewSession] = useState(false);
+  const [showNewSessionOpts, setShowNewSessionOpts] = useState(false);
   const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
   const [newSessionMessage, setNewSessionMessage] = useState("");
   const newSessionInputRef = useRef<HTMLTextAreaElement>(null);
@@ -322,6 +340,10 @@ export default function SessionDetailPage({
     lastStreamEventRef.current = 0;
     setTerminalKilled(false);
     setHasReplied(false);
+    setMdView(true);
+    setMdContent(null);
+    setSummary(null);
+    setSummaryOpen(false);
     queueRef.current = [];
     processingRef.current = false;
     prevTotalRef.current = 0;
@@ -376,6 +398,45 @@ export default function SessionDetailPage({
     window.addEventListener("sessions-scanned", handler);
     return () => window.removeEventListener("sessions-scanned", handler);
   }, [fetchSession]);
+
+  // Auto-load MD view when data arrives (MD is the default display mode)
+  useEffect(() => {
+    if (!data?.session_id || mdContent || mdLoading) return;
+    setMdLoading(true);
+    fetch(`/api/sessions/${data.session_id}/md`)
+      .then(r => r.json())
+      .then(json => {
+        if (json.markdown) setMdContent(json.markdown);
+      })
+      .catch(() => {})
+      .finally(() => setMdLoading(false));
+  }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Scroll to bottom when MD content loads
+  useEffect(() => {
+    if (mdContent && mdScrollRef.current) {
+      requestAnimationFrame(() => {
+        mdScrollRef.current?.scrollTo({ top: mdScrollRef.current.scrollHeight });
+      });
+    }
+  }, [mdContent]);
+
+  // Cmd+F search in MD view
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f" && mdView) {
+        e.preventDefault();
+        setMdSearch(prev => !prev);
+        setTimeout(() => mdSearchInputRef.current?.focus(), 50);
+      }
+      if (e.key === "Escape" && mdSearch) {
+        setMdSearch(false);
+        setMdSearchQuery("");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [mdView, mdSearch]);
 
   // Watchdog: detect dead streams and clean up
   useEffect(() => {
@@ -789,8 +850,9 @@ export default function SessionDetailPage({
     if (newFileInputRef.current) newFileInputRef.current.value = "";
   };
 
-  const handleNewSessionAutodetect = async () => {
-    const firstPath = await newAutodetect.detect(newSessionMessage);
+  const handleNewSessionAutodetect = async (overrideMessage?: string) => {
+    const msg = overrideMessage || newSessionMessage;
+    const firstPath = await newAutodetect.detect(msg);
     if (firstPath) setNewSessionPath(firstPath);
   };
 
@@ -823,8 +885,8 @@ export default function SessionDetailPage({
     }
   };
 
-  const handleStartNewSession = async () => {
-    const msg = newSessionMessage.trim();
+  const handleStartNewSession = async (overrideMessage?: string) => {
+    const msg = (overrideMessage || newSessionMessage).trim();
     if (!msg || !newSessionPath || startingNewSession) return;
     setStartingNewSession(true);
     setError(null);
@@ -843,7 +905,7 @@ export default function SessionDetailPage({
           if (ctxRes.ok) {
             const ctxData = await ctxRes.json();
             if (ctxData.context && ctxData.context.length > 20) {
-              fullMessage = `<context>\nRelevant context from previous session:\n${ctxData.context}\n</context>\n\n${msg}`;
+              fullMessage = `${msg}\n\n<context>\nRelevant context from previous session:\n${ctxData.context}\n</context>`;
             }
           }
         } catch { /* non-critical — send without context */ }
@@ -871,6 +933,7 @@ export default function SessionDetailPage({
         readStream();
       }
       setNewSessionMessage("");
+      if (overrideMessage) replyInputRef.current?.setText("");
       setStartingNewSession(false);
       toast.success("Session started — will appear in list shortly");
     } catch (e) {
@@ -1037,7 +1100,12 @@ export default function SessionDetailPage({
     <>
       {/* Session header — single line: status + title */}
       {(() => {
-        const activityStatus = getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role });
+        let activityStatus = getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role });
+        // If JSONL was written to recently and process is alive, Claude is actively working
+        // (not just waiting at prompt — the "terminal-open" heuristic is wrong mid-tool-execution)
+        if (data.is_active && data.file_age_ms != null && data.file_age_ms < 30_000 && activityStatus === "terminal-open") {
+          activityStatus = "active";
+        }
         const isRunning = activityStatus === "active";
         const isWaiting = activityStatus === "waiting";
         const isInterrupted = activityStatus === "interrupted";
@@ -1078,7 +1146,203 @@ export default function SessionDetailPage({
       <div className="flex-1 flex min-h-0">
         {/* ── Left: Messages ──────────────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          {/* Messages — auto-loads earlier on scroll to top */}
+          {/* ── Summary + Learnings — top of messages area ─────────────────── */}
+          <div className="shrink-0 border-b border-border/30">
+            {/* Trigger bar */}
+            <div className="flex items-center gap-3 px-5 py-1.5">
+              <button
+                onClick={async () => {
+                  if (summaryOpen) { setSummaryOpen(false); return; }
+                  setSummaryOpen(true);
+                  if (summary) return;
+                  setSummaryLoading(true);
+                  setSummaryError(null);
+                  try {
+                    const res = await fetch(`/api/sessions/${data.session_id}/summary`, { method: "POST" });
+                    const json = await res.json();
+                    if (json.error) setSummaryError(json.error);
+                    else setSummary(json.summary);
+                  } catch (e) {
+                    setSummaryError(e instanceof Error ? e.message : "Failed");
+                  } finally { setSummaryLoading(false); }
+                }}
+                className={`flex items-center gap-1.5 text-[11px] py-0.5 rounded transition-all duration-300 ${
+                  summaryLoading
+                    ? "text-blue-400 animate-pulse"
+                    : summary
+                      ? "text-green-500/60 hover:text-green-500"
+                      : summaryOpen
+                        ? "text-foreground"
+                        : "text-muted-foreground/40 hover:text-muted-foreground"
+                }`}
+                title="Generate session summary"
+              >
+                <ScrollText className="h-3 w-3" />
+                Summary
+              </button>
+              <button
+                onClick={async () => {
+                  if (learningsOpen) { setLearningsOpen(false); return; }
+                  setLearningsOpen(true);
+                  if (learnings) return;
+                  setLearningsLoading(true);
+                  setLearningsError(null);
+                  try {
+                    const res = await fetch(`/api/sessions/${data.session_id}/learnings`, { method: "POST" });
+                    const json = await res.json();
+                    if (json.error) setLearningsError(json.error);
+                    else setLearnings(json.learnings);
+                  } catch (e) {
+                    setLearningsError(e instanceof Error ? e.message : "Failed");
+                  } finally { setLearningsLoading(false); }
+                }}
+                className={`flex items-center gap-1.5 text-[11px] py-0.5 rounded transition-all duration-300 ${
+                  learningsLoading
+                    ? "text-blue-400 animate-pulse"
+                    : learnings
+                      ? "text-green-500/60 hover:text-green-500"
+                      : learningsOpen
+                        ? "text-foreground"
+                        : "text-muted-foreground/40 hover:text-muted-foreground"
+                }`}
+                title="Extract session learnings"
+              >
+                <Lightbulb className="h-3 w-3" />
+                Learnings
+              </button>
+            </div>
+
+            {/* Summary panel — expands below trigger */}
+            {summaryOpen && (
+              <div className="border-t border-border/20 bg-muted/10 px-5 py-3 max-h-[40vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">Summary</span>
+                  <button
+                    onClick={() => setSummaryOpen(false)}
+                    className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground flex items-center gap-1 transition-colors"
+                  >
+                    <ChevronsDownUp className="h-3 w-3" />
+                    Collapse
+                  </button>
+                </div>
+                {summaryLoading && (
+                  <div className="flex items-center gap-2 py-4 justify-center text-[11px] text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+                    <span className="text-blue-400/70">Generating summary…</span>
+                  </div>
+                )}
+                {summaryError && <div className="text-[11px] text-red-500 py-1">{summaryError}</div>}
+                {summary && <MarkdownContent content={summary} projectPath={data?.project_path} compact />}
+              </div>
+            )}
+
+            {/* Learnings panel — expands below trigger */}
+            {learningsOpen && (
+              <div className="border-t border-border/20 bg-muted/10 px-5 py-3 max-h-[40vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">Learnings</span>
+                  <button
+                    onClick={() => setLearningsOpen(false)}
+                    className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground flex items-center gap-1 transition-colors"
+                  >
+                    <ChevronsDownUp className="h-3 w-3" />
+                    Collapse
+                  </button>
+                </div>
+                {learningsLoading && (
+                  <div className="flex items-center gap-2 py-4 justify-center text-[11px] text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+                    <span className="text-blue-400/70">Extracting learnings…</span>
+                  </div>
+                )}
+                {learningsError && <div className="text-[11px] text-red-500 py-1">{learningsError}</div>}
+                {learnings && (() => {
+                  const l = learnings as Record<string, string | string[]>;
+                  const categories = [
+                    { key: "summary", label: "Summary", single: true },
+                    { key: "discoveries", label: "Discoveries", single: false },
+                    { key: "friction_loops", label: "Friction / Loops", single: false },
+                    { key: "claude_md_rules", label: "CLAUDE.md Rules", single: false },
+                    { key: "patterns", label: "Patterns", single: false },
+                    { key: "bugs_fixed", label: "Bugs Fixed", single: false },
+                    { key: "tools_learned", label: "Tools Learned", single: false },
+                    { key: "preferences", label: "Preferences", single: false },
+                    { key: "gotchas", label: "Gotchas", single: false },
+                  ];
+                  return (
+                    <div className="space-y-2.5">
+                      {categories.map(({ key, label, single }) => {
+                        const val = l[key];
+                        if (!val || (Array.isArray(val) && val.length === 0)) return null;
+                        return (
+                          <div key={key}>
+                            <div className="text-[9px] font-medium text-muted-foreground/50 uppercase tracking-wider mb-0.5">{label}</div>
+                            {single ? (
+                              <p className="text-[11px] text-foreground/80 leading-relaxed">{val as string}</p>
+                            ) : (
+                              <ul className="space-y-0.5">
+                                {(val as string[]).map((item, i) => (
+                                  <li key={i} className="text-[11px] text-foreground/80 leading-relaxed flex gap-1.5">
+                                    <span className="text-muted-foreground/30 shrink-0">•</span>
+                                    <span
+                                      className="cursor-pointer hover:bg-muted/50 rounded px-0.5 -mx-0.5 transition-colors"
+                                      onClick={() => navigator.clipboard.writeText(item)}
+                                      title="Click to copy"
+                                    >{item}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+
+          {/* MD view (default) or bubble messages */}
+          {mdView ? (
+            <div className="flex-1 min-h-0 overflow-y-auto relative" ref={mdScrollRef}>
+              {/* Search bar (Cmd+F) */}
+              {mdSearch && (
+                <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b px-4 py-2 flex items-center gap-2">
+                  <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <input
+                    ref={mdSearchInputRef}
+                    type="text"
+                    value={mdSearchQuery}
+                    onChange={e => setMdSearchQuery(e.target.value)}
+                    placeholder="Search in session…"
+                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    onKeyDown={e => {
+                      if (e.key === "Escape") { setMdSearch(false); setMdSearchQuery(""); }
+                      if (e.key === "Enter" && mdSearchQuery && mdScrollRef.current) {
+                        // Use browser find — highlight next match
+                        const w = window as unknown as { find: (s: string) => boolean };
+                        if (w.find) w.find(mdSearchQuery);
+                      }
+                    }}
+                  />
+                  <button onClick={() => { setMdSearch(false); setMdSearchQuery(""); }} className="text-muted-foreground hover:text-foreground">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+              {mdLoading ? (
+                <div className="flex items-center justify-center h-full gap-2 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span className="text-sm">Loading session…</span>
+                </div>
+              ) : mdContent ? (
+                <div className="max-w-4xl mx-auto px-6 py-6">
+                  <MarkdownContent content={mdContent} projectPath={data.project_path} compact />
+                </div>
+              ) : null}
+            </div>
+          ) : (
           <MessageView
             messages={allMessages}
             sessionId={data.session_id}
@@ -1092,6 +1356,7 @@ export default function SessionDetailPage({
             onLoadEarlier={hasEarlier ? loadEarlierMessages : undefined}
             loadingEarlier={loadingEarlier}
           />
+          )}
 
           {/* Permission requests from Claude CLI */}
           {pendingPermissions.length > 0 && (
@@ -1161,6 +1426,7 @@ export default function SessionDetailPage({
               </div>
             </div>
           )}
+
         </div>
 
         {/* ── Right: Reply panel ──────────────────────────────────────────────── */}
@@ -1266,35 +1532,13 @@ export default function SessionDetailPage({
               </a>
               <Button
                 size="sm"
-                variant={learningsOpen ? "secondary" : "ghost"}
+                variant={!mdView ? "secondary" : "ghost"}
                 className="gap-1 text-xs h-7"
-                onClick={async () => {
-                  if (learningsOpen) {
-                    setLearningsOpen(false);
-                    return;
-                  }
-                  setLearningsOpen(true);
-                  if (learnings) return; // already loaded
-                  setLearningsLoading(true);
-                  setLearningsError(null);
-                  try {
-                    const res = await fetch(`/api/sessions/${data.session_id}/learnings`, { method: "POST" });
-                    const json = await res.json();
-                    if (json.error) {
-                      setLearningsError(json.error);
-                    } else {
-                      setLearnings(json.learnings);
-                    }
-                  } catch (e) {
-                    setLearningsError(e instanceof Error ? e.message : "Failed to extract");
-                  } finally {
-                    setLearningsLoading(false);
-                  }
-                }}
-                title="Extract learnings from this session"
+                onClick={() => setMdView(v => !v)}
+                title={mdView ? "Switch to bubble view" : "Switch to Markdown view"}
               >
-                {learningsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="h-3.5 w-3.5" />}
-                Learnings
+                {mdView ? <MessageSquare className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                {mdView ? "Bubbles" : "MD"}
               </Button>
               {shareState === "done" && shareUrl ? (
                 <div className="flex items-center gap-1">
@@ -1350,16 +1594,18 @@ export default function SessionDetailPage({
               </div>
             ) : data.is_active && !queuedMessages.length ? (
               <div className="flex items-center gap-2 p-2.5 text-xs rounded-lg border border-border bg-muted/30 text-muted-foreground">
-                {(data.metadata.last_message_role !== "assistant" || hasReplied)
+                {(data.metadata.last_message_role !== "assistant" || hasReplied || (data.file_age_ms != null && data.file_age_ms < 30_000))
                   ? <Loader2 className="h-3 w-3 animate-spin shrink-0" />
                   : <Terminal className="h-3 w-3 shrink-0 opacity-60" />
                 }
                 <span>
-                  {data.metadata.last_message_role !== "assistant"
+                  {(data.file_age_ms != null && data.file_age_ms < 30_000)
                     ? "Claude is working…"
-                    : hasReplied
-                      ? "Waiting for Claude…"
-                      : "Waiting for reply"}
+                    : data.metadata.last_message_role !== "assistant"
+                      ? "Claude is working…"
+                      : hasReplied
+                        ? "Waiting for Claude…"
+                        : "Waiting for reply"}
                 </span>
               </div>
             ) : null}
@@ -1372,69 +1618,6 @@ export default function SessionDetailPage({
                 <button className="text-red-400 hover:text-red-300 shrink-0" onClick={() => setContextGuardError(null)}>
                   <X className="h-3 w-3" />
                 </button>
-              </div>
-            )}
-
-            {/* Learnings panel */}
-            {learningsOpen && (
-              <div className="border border-border/50 rounded-lg bg-card/50 overflow-hidden">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
-                  <span className="text-xs font-medium flex items-center gap-1.5">
-                    <Lightbulb className="h-3 w-3 text-amber-500" />
-                    Session Learnings
-                  </span>
-                  <button onClick={() => setLearningsOpen(false)} className="text-muted-foreground/50 hover:text-muted-foreground">
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-                <div className="px-3 py-2 max-h-[400px] overflow-y-auto space-y-3">
-                  {learningsLoading && (
-                    <div className="flex items-center gap-2 py-4 justify-center text-xs text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Extracting learnings via Haiku…
-                    </div>
-                  )}
-                  {learningsError && (
-                    <div className="text-xs text-red-500 py-2">{learningsError}</div>
-                  )}
-                  {learnings && (() => {
-                    const l = learnings as Record<string, string | string[]>;
-                    const categories = [
-                      { key: "summary", label: "Summary", single: true },
-                      { key: "claude_md_rules", label: "CLAUDE.md Rules", single: false },
-                      { key: "patterns", label: "Patterns", single: false },
-                      { key: "bugs_fixed", label: "Bugs Fixed", single: false },
-                      { key: "tools_learned", label: "Tools Learned", single: false },
-                      { key: "preferences", label: "Preferences", single: false },
-                      { key: "gotchas", label: "Gotchas", single: false },
-                    ];
-                    return categories.map(({ key, label, single }) => {
-                      const val = l[key];
-                      if (!val || (Array.isArray(val) && val.length === 0)) return null;
-                      return (
-                        <div key={key}>
-                          <div className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-1">{label}</div>
-                          {single ? (
-                            <p className="text-xs text-foreground/80 leading-relaxed">{val as string}</p>
-                          ) : (
-                            <ul className="space-y-1">
-                              {(val as string[]).map((item, i) => (
-                                <li key={i} className="text-xs text-foreground/80 leading-relaxed flex gap-1.5">
-                                  <span className="text-muted-foreground/40 shrink-0">•</span>
-                                  <span
-                                    className="cursor-pointer hover:bg-muted/50 rounded px-0.5 -mx-0.5 transition-colors"
-                                    onClick={() => navigator.clipboard.writeText(item)}
-                                    title="Click to copy"
-                                  >{item}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      );
-                    });
-                  })()}
-                </div>
               </div>
             )}
 
@@ -1500,59 +1683,50 @@ export default function SessionDetailPage({
             </div>
           )}
 
-          {/* Reply input — pinned to bottom */}
+          {/* Input area — pinned to bottom */}
           <div className="shrink-0 px-4 pb-4 pt-2">
-            {/* Mode toggle */}
-            <div className="flex items-center gap-1 mb-1.5 pl-1">
+            {/* Hidden file input for new session */}
+            <input
+              ref={newFileInputRef}
+              type="file"
+              className="hidden"
+              multiple
+              onChange={handleNewSessionFileInput}
+            />
+
+            {/* Mode tabs — Reply | Issue only (no New — new session is a send action) */}
+            <div className="inline-flex items-center gap-1 rounded-lg bg-muted p-1">
               <button
                 onClick={() => {
-                  if (replyMode === "new" && newSessionMessage.trim()) {
-                    replyInputRef.current?.setText(newSessionMessage);
-                    setNewSessionMessage("");
-                  }
                   setReplyMode("reply");
                   setTimeout(() => replyInputRef.current?.focus(), 50);
                 }}
-                className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${replyMode === "reply" ? "text-foreground bg-muted font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
+                className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${
+                  replyMode === "reply"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                }`}
               >
                 Reply
               </button>
-              {settings?.new_session_from_reply === "true" && (
-                <>
-                  <span className="text-muted-foreground/30 text-[11px]">/</span>
-                  <button
-                    onClick={() => {
-                      if (replyMode === "reply") {
-                        const draft = replyInputRef.current?.getText() || "";
-                        if (draft.trim()) {
-                          setNewSessionMessage(draft);
-                          replyInputRef.current?.setText("");
-                        }
-                      }
-                      setReplyMode("new");
-                      setTimeout(() => newSessionInputRef.current?.focus(), 50);
-                    }}
-                    className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 ${replyMode === "new" ? "text-foreground bg-muted font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
-                  >
-                    <Plus className="h-3 w-3" />
-                    New session
-                  </button>
-                </>
-              )}
-              <span className="text-muted-foreground/30 text-[11px]">/</span>
+
               <button
                 onClick={() => {
                   setReplyMode("issue");
+                  setShowNewSessionOpts(false);
                   setTimeout(() => issueInputRef.current?.focus(), 50);
                 }}
-                className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 ${replyMode === "issue" ? "text-foreground bg-muted font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
+                className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${
+                  replyMode === "issue"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-background/50"
+                }`}
               >
-                <Bug className="h-3 w-3" />
-                Submit an issue
+                Issue
               </button>
             </div>
 
-            {/* Reply input — always mounted so draft isn't lost */}
+            {/* Reply textarea — single textarea for both reply and new session */}
             <div className={replyMode !== "reply" ? "hidden" : ""}>
               <ReplyInput
                 ref={replyInputRef}
@@ -1560,201 +1734,237 @@ export default function SessionDetailPage({
                 onSend={handleSend}
                 queueSize={queuedMessages.length}
                 isStreaming={isStreaming}
+                bgClassName="border-border bg-muted/30"
               />
             </div>
 
-            {/* New session form — same footprint as ReplyInput */}
-            {replyMode === "new" && settings?.new_session_from_reply === "true" && (
-              <div className="space-y-1.5">
-                {/* Autodetect suggestions */}
-                {newAutodetect.suggestions.length > 0 && (
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {newAutodetect.suggestions.map((s, i) => {
-                      const isSelected = newSessionPath === s.project_path;
-                      return (
-                        <button
-                          key={s.project_dir}
-                          onClick={() => {
-                            setNewSessionPath(s.project_path);
-                            newAutodetect.setAutodetected(true);
-                            setTimeout(() => newSessionInputRef.current?.focus(), 50);
-                          }}
-                          className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition-colors ${
-                            isSelected
-                              ? "border-violet-500/50 bg-violet-500/10 text-violet-400"
-                              : "border-border bg-card text-muted-foreground hover:border-violet-500/30 hover:text-violet-400"
-                          }`}
-                        >
-                          <span className="text-[10px] text-muted-foreground/50">{i + 1}</span>
-                          <FolderOpen className="h-3 w-3 shrink-0" />
-                          <span className="truncate max-w-[120px]">{s.display_name}</span>
-                        </button>
-                      );
-                    })}
-                    <button
-                      onClick={() => setFolderBrowserOpen(true)}
-                      className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-dashed border-border text-muted-foreground/50 hover:border-violet-500/30 hover:text-violet-400 transition-colors"
-                      title="Choose a different folder"
-                    >
-                      <FolderPlus className="h-3 w-3 shrink-0" />
-                      <span>other...</span>
-                    </button>
-                  </div>
-                )}
-
-                <input
-                  ref={newFileInputRef}
-                  type="file"
-                  className="hidden"
-                  multiple
-                  onChange={handleNewSessionFileInput}
+            {/* Issue textarea */}
+            {replyMode === "issue" && (
+              <div className="border rounded-lg border-border bg-muted/20">
+                <textarea
+                  ref={issueInputRef}
+                  value={issueDescription}
+                  onChange={(e) => setIssueDescription(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      handleSubmitIssue();
+                    }
+                  }}
+                  placeholder="Describe the issue..."
+                  rows={16}
+                  className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                  disabled={isSubmittingIssue}
                 />
-                <div
-                  className={`relative border rounded-lg transition-colors ${newSessionDragging ? "border-ring border-dashed bg-muted/40" : "border-input bg-muted/20"}`}
-                  onDrop={handleNewSessionDrop}
-                  onDragEnter={handleNewSessionDragEnter}
-                  onDragLeave={handleNewSessionDragLeave}
-                  onDragOver={handleNewSessionDragOver}
-                >
-                  {newSessionDragging && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-muted/60 pointer-events-none">
-                      <span className="text-xs text-muted-foreground font-medium">Drop to attach</span>
-                    </div>
-                  )}
-                  <textarea
-                    ref={newSessionInputRef}
-                    value={newSessionMessage}
-                    onChange={(e) => {
-                      setNewSessionMessage(e.target.value);
-                      if (newAutodetect.suggestions.length > 0) newAutodetect.clearSuggestions();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        if (newSessionPath) {
-                          handleStartNewSession();
-                        } else {
-                          handleNewSessionAutodetect();
-                        }
-                      } else if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleStartNewSession();
-                      }
-                    }}
-                    placeholder="First message for new session..."
-                    rows={16}
-                    className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-16 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                    disabled={startingNewSession}
-                  />
-                  {/* Bottom bar — two rows */}
-                  <div className="absolute bottom-1 left-1.5 right-1.5 space-y-0.5">
-                    {/* Row 1: attach + folder + auto */}
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => newFileInputRef.current?.click()}
-                        className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
-                        title="Attach file or drag & drop"
-                        type="button"
-                      >
-                        <Paperclip className="h-3 w-3" />
-                      </button>
-                      <button
-                        onClick={() => setFolderBrowserOpen(true)}
-                        className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded min-w-0 ${
-                          newAutodetect.autodetected
-                            ? "text-violet-500 hover:text-violet-600 hover:bg-violet-500/10"
-                            : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
-                        }`}
-                        title={newSessionPath || "Select folder"}
-                      >
-                        <FolderOpen className="h-3 w-3 shrink-0" />
-                        <span className="truncate max-w-[140px]">
-                          {newSessionPath ? newSessionPath.split(/[\\/]/).pop() : "folder..."}
-                        </span>
-                      </button>
-                      <button
-                        onClick={handleNewSessionAutodetect}
-                        disabled={!newSessionMessage.trim() || newAutodetect.detecting}
-                        className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-violet-500 disabled:opacity-30 transition-colors px-1.5 py-0.5 rounded hover:bg-violet-500/10"
-                        title="Auto-detect project from your prompt"
-                      >
-                        {newAutodetect.detecting ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-3 w-3" />
-                        )}
-                        <span>auto</span>
-                      </button>
-                    </div>
-                    {/* Row 2: skip-perms, context, send */}
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={skipPerms.toggle}
-                        className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
-                          skipPerms.value
-                            ? "text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
-                            : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
-                        }`}
-                        title={skipPerms.value ? "Skip permissions enabled — click to disable" : "Skip permissions disabled — click to enable"}
-                      >
-                        <ShieldOff className="h-3 w-3" />
-                        <span>skip perms</span>
-                        <span className={`font-medium ${skipPerms.value ? "text-amber-400" : "text-muted-foreground/60"}`}>
-                          {skipPerms.value ? "on" : "off"}
-                        </span>
-                      </button>
-                      <label
-                        className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground cursor-pointer select-none px-1 py-0.5 rounded hover:bg-muted/50"
-                        title={
-                          !includeSummary
-                            ? "Include relevant context from this session"
-                            : settings?.gemini_configured === "true"
-                              ? "Smart context: Gemini extracts only what's relevant to your question"
-                              : "Basic context: truncated transcript (connect Gemini in Settings for smart extraction)"
-                        }
-                      >
-                        <input
-                          type="checkbox"
-                          checked={includeSummary}
-                          onChange={(e) => setIncludeSummary(e.target.checked)}
-                          className="h-3 w-3 rounded border-muted-foreground/30"
-                        />
-                        <span>Context</span>
-                        {includeSummary && settings?.gemini_configured !== "true" && (
-                          <AlertTriangle className="h-3 w-3 text-amber-500" />
-                        )}
-                      </label>
-                      <div className="flex-1" />
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={handleStartNewSession}
-                        disabled={!newSessionMessage.trim() || !newSessionPath || startingNewSession}
-                      >
-                        {startingNewSession ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Send className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
 
-            {/* Issue submission form */}
+            {/* Bottom bar: attach + new session + send */}
+            <div className="flex items-center gap-1.5 mt-1.5 pl-0.5">
+              {replyMode !== "issue" && (
+                <button
+                  onClick={() => replyInputRef.current?.triggerAttach()}
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground/40 hover:text-muted-foreground transition-colors px-1.5 py-1 rounded hover:bg-muted/50"
+                  title="Attach file"
+                  type="button"
+                >
+                  <Paperclip className="h-3 w-3" />
+                </button>
+              )}
+
+              <div className="flex-1" />
+
+              {/* New Session — toggles options panel */}
+              {replyMode === "reply" && settings?.new_session_from_reply === "true" && (
+                <button
+                  onClick={() => {
+                    const next = !showNewSessionOpts;
+                    setShowNewSessionOpts(next);
+                    if (next && !newSessionPath) {
+                      const msg = replyInputRef.current?.getText() || "";
+                      if (msg.trim()) handleNewSessionAutodetect(msg);
+                    }
+                  }}
+                  className={`text-[11px] px-2.5 py-1 rounded-md transition-colors border ${
+                    showNewSessionOpts
+                      ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-400"
+                      : "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/15 hover:border-emerald-500/60"
+                  }`}
+                  title={showNewSessionOpts ? "Hide new session options" : "New session options"}
+                >
+                  New ↗
+                </button>
+              )}
+
+              {/* Send = reply to current session */}
+              <button
+                onClick={() => {
+                  if (replyMode === "reply") replyInputRef.current?.triggerSend();
+                  else if (replyMode === "issue") handleSubmitIssue();
+                }}
+                disabled={
+                  replyMode === "issue" ? (!issueCategory || !issueDescription.trim() || isSubmittingIssue) :
+                  false
+                }
+                className="text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 bg-foreground text-background hover:bg-foreground/80"
+              >
+                {isSubmittingIssue && replyMode === "issue" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  "Send Reply"
+                )}
+              </button>
+            </div>
+
+            {/* Autodetect suggestions — shown after clicking New ↗ */}
+            {replyMode === "reply" && showNewSessionOpts && newAutodetect.suggestions.length > 0 && (
+              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                {newAutodetect.suggestions.map((s, i) => {
+                  const isSelected = newSessionPath === s.project_path;
+                  return (
+                    <button
+                      key={s.project_dir}
+                      onClick={() => {
+                        setNewSessionPath(s.project_path);
+                        newAutodetect.setAutodetected(true);
+                        replyInputRef.current?.focus();
+                      }}
+                      className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition-colors ${
+                        isSelected
+                          ? "border-violet-500/50 bg-violet-500/10 text-violet-400"
+                          : "border-border bg-card text-muted-foreground hover:border-violet-500/30 hover:text-violet-400"
+                      }`}
+                    >
+                      <span className="text-[10px] text-muted-foreground/50">{i + 1}</span>
+                      <FolderOpen className="h-3 w-3 shrink-0" />
+                      <span className="truncate max-w-[120px]">{s.display_name}</span>
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => setFolderBrowserOpen(true)}
+                  className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-dashed border-border text-muted-foreground/50 hover:border-violet-500/30 hover:text-violet-400 transition-colors"
+                  title="Choose a different folder"
+                >
+                  <FolderPlus className="h-3 w-3 shrink-0" />
+                  <span>other...</span>
+                </button>
+              </div>
+            )}
+
+            {/* New session options — visible after clicking New ↗ */}
+            {replyMode === "reply" && showNewSessionOpts && settings?.new_session_from_reply === "true" && (
+              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                <button
+                  onClick={() => setFolderBrowserOpen(true)}
+                  className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded min-w-0 ${
+                    newSessionPath
+                      ? "text-violet-500 hover:text-violet-600 hover:bg-violet-500/10"
+                      : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
+                  }`}
+                  title={newSessionPath || "Select folder for new session"}
+                >
+                  <FolderOpen className="h-3 w-3 shrink-0" />
+                  <span className="truncate max-w-[140px]">
+                    {newSessionPath ? newSessionPath.split(/[\\/]/).pop() : "folder..."}
+                  </span>
+                </button>
+                <button
+                  onClick={() => {
+                    const msg = replyInputRef.current?.getText() || "";
+                    handleNewSessionAutodetect(msg);
+                  }}
+                  disabled={newAutodetect.detecting}
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-violet-500 disabled:opacity-30 transition-colors px-1.5 py-0.5 rounded hover:bg-violet-500/10"
+                  title="Auto-detect project from your prompt"
+                >
+                  {newAutodetect.detecting ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3 w-3" />
+                  )}
+                  <span>auto</span>
+                </button>
+                <button
+                  onClick={skipPerms.toggle}
+                  className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
+                    skipPerms.value
+                      ? "text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
+                      : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
+                  }`}
+                  title={skipPerms.value ? "Skip permissions enabled" : "Skip permissions disabled"}
+                >
+                  <ShieldOff className="h-3 w-3" />
+                  <span>skip perms</span>
+                  <span className={`font-medium ${skipPerms.value ? "text-amber-400" : "text-muted-foreground/60"}`}>
+                    {skipPerms.value ? "on" : "off"}
+                  </span>
+                </button>
+                <label
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground cursor-pointer select-none px-1 py-0.5 rounded hover:bg-muted/50"
+                  title={
+                    !includeSummary
+                      ? "Include relevant context from this session"
+                      : settings?.gemini_configured === "true"
+                        ? "Smart context: Gemini extracts only what's relevant"
+                        : "Basic context: truncated transcript"
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    checked={includeSummary}
+                    onChange={(e) => setIncludeSummary(e.target.checked)}
+                    className="h-3 w-3 rounded border-muted-foreground/30"
+                  />
+                  <span>Context</span>
+                  {includeSummary && settings?.gemini_configured !== "true" && (
+                    <AlertTriangle className="h-3 w-3 text-amber-500" />
+                  )}
+                </label>
+
+                <div className="flex-1" />
+
+                {/* Start — explicit send action */}
+                <button
+                  onClick={async () => {
+                    const msg = replyInputRef.current?.getText() || "";
+                    if (!msg.trim()) return;
+                    if (!newSessionPath) {
+                      const firstPath = await newAutodetect.detect(msg);
+                      if (firstPath) {
+                        setNewSessionPath(firstPath);
+                        setTimeout(() => handleStartNewSession(msg), 50);
+                      } else {
+                        setFolderBrowserOpen(true);
+                      }
+                      return;
+                    }
+                    handleStartNewSession(msg);
+                    replyInputRef.current?.setText("");
+                    setShowNewSessionOpts(false);
+                  }}
+                  disabled={startingNewSession}
+                  className="text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 bg-emerald-600 text-white hover:bg-emerald-500"
+                >
+                  {startingNewSession ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    "Start ↗"
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Issue category picker — below button bar */}
             {replyMode === "issue" && (
-              <div className="space-y-2">
-                {/* Category picker */}
+              <div className="mt-1.5">
                 <div className="flex flex-wrap gap-1.5">
                   {([
-                    { key: "critical_problem", label: "Critical problem", icon: Flame, color: "red" },
+                    { key: "critical_problem", label: "Critical", icon: Flame, color: "red" },
                     { key: "repeated_bug", label: "Repeated bug", icon: Repeat, color: "orange" },
                     { key: "one_time_bug", label: "One-time bug", icon: Bug, color: "yellow" },
-                    { key: "idea", label: "Propose an idea", icon: Lightbulb, color: "blue" },
-                    { key: "must_have_feature", label: "Must-have feature", icon: Rocket, color: "violet" },
+                    { key: "idea", label: "Idea", icon: Lightbulb, color: "blue" },
+                    { key: "must_have_feature", label: "Must-have", icon: Rocket, color: "violet" },
                   ] as const).map(({ key, label, icon: Icon, color }) => {
                     const selected = issueCategory === key;
                     const colorMap: Record<string, string> = {
@@ -1767,11 +1977,8 @@ export default function SessionDetailPage({
                     return (
                       <button
                         key={key}
-                        onClick={() => {
-                          setIssueCategory(selected ? null : key);
-                          if (!selected) setTimeout(() => issueInputRef.current?.focus(), 50);
-                        }}
-                        className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-md border transition-colors ${
+                        onClick={() => setIssueCategory(selected ? null : key)}
+                        className={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md border transition-colors ${
                           selected
                             ? colorMap[color]
                             : `border-border bg-card text-muted-foreground ${colorMap[color]}`
@@ -1783,42 +1990,6 @@ export default function SessionDetailPage({
                     );
                   })}
                 </div>
-
-                {/* Description textarea — shown after category is selected */}
-                {issueCategory && (
-                  <div className="relative border rounded-lg border-input bg-muted/20">
-                    <textarea
-                      ref={issueInputRef}
-                      value={issueDescription}
-                      onChange={(e) => setIssueDescription(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                          e.preventDefault();
-                          handleSubmitIssue();
-                        }
-                      }}
-                      placeholder="Describe the issue..."
-                      rows={6}
-                      className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-10 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                      disabled={isSubmittingIssue}
-                    />
-                    <div className="absolute bottom-1.5 right-1.5">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={handleSubmitIssue}
-                        disabled={!issueDescription.trim() || isSubmittingIssue}
-                      >
-                        {isSubmittingIssue ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Send className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
