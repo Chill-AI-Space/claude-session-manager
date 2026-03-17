@@ -88,10 +88,14 @@ sleep 3
 Run the smoke test after every deploy. It verifies server, APIs, data loading, MD pagination, and content rendering — not just HTTP 200.
 
 ```bash
+# API smoke test (fast, 13 checks — server, APIs, data)
 scripts/smoke-test.sh
+
+# Browser smoke test (headless Chrome — catches React errors, hangs, empty UI)
+node scripts/browser-smoke-test.mjs
 ```
 
-If the smoke test fails, check error logs and fix before considering the deploy done.
+Both must pass. If any check fails — fix before considering the deploy done.
 
 For individual manual checks:
 
