@@ -114,11 +114,30 @@ function splitSections(content: string): string[] {
 const INITIAL_VISIBLE = 15;
 
 function MarkdownRenderer({ content, projectPath, compact }: MarkdownContentProps) {
-  const codeSize = compact ? "text-[11px]" : "text-[12.5px]";
+  const codeSize = compact ? "text-[10.5px]" : "text-[12.5px]";
   const inlineCodeSize = compact ? "text-[11px]" : "text-[13px]";
 
+  // Compact: 12px body, GitHub-like spacing. Normal: default prose-sm.
+  const compactClasses = compact ? [
+    "text-[12px] leading-[1.7]",
+    // Paragraph spacing — enough breathing room
+    "prose-p:my-2.5 prose-p:text-[12px] prose-p:leading-[1.7]",
+    // Headings
+    "prose-h1:text-[15px] prose-h1:mt-6 prose-h1:mb-3",
+    "prose-h2:text-[13.5px] prose-h2:mt-5 prose-h2:mb-2",
+    "prose-h3:text-[12.5px] prose-h3:mt-4 prose-h3:mb-1.5",
+    // Lists
+    "prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-li:text-[12px]",
+    // Tables
+    "prose-td:text-[11px] prose-th:text-[10.5px] prose-table:my-3",
+    // Code blocks
+    "prose-pre:my-3",
+    // Blockquotes & hrs
+    "prose-blockquote:my-2.5 prose-hr:my-4",
+  ].join(" ") : "";
+
   return (
-    <div className={`markdown-body prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-headings:my-2 prose-headings:first:mt-0 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none prose-hr:my-3 prose-blockquote:my-1.5 prose-blockquote:pl-3 prose-blockquote:border-l-2 prose-blockquote:border-muted-foreground/30 prose-table:my-2 ${compact ? "text-[13px] leading-[1.6] prose-h1:text-[16px] prose-h2:text-[14px] prose-h3:text-[13px] prose-p:text-[13px] prose-li:text-[13px] prose-td:text-[12px] prose-th:text-[11px]" : ""}`}>
+    <div className={`markdown-body prose prose-sm dark:prose-invert max-w-none prose-code:before:content-none prose-code:after:content-none prose-headings:first:mt-0 prose-blockquote:pl-3 prose-blockquote:border-l-2 prose-blockquote:border-muted-foreground/30 ${compactClasses}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
@@ -167,9 +186,9 @@ function MarkdownRenderer({ content, projectPath, compact }: MarkdownContentProp
           th({ children }) { return <th className="px-3 py-2.5 text-left text-[12px] font-semibold text-foreground/80 border-b border-border/50 whitespace-nowrap">{children}</th>; },
           td({ children }) { return <td className="px-3 py-2 text-[13px] border-b border-border/20 text-foreground/90">{children}</td>; },
           tr({ children }) { return <tr className="even:bg-muted/15 hover:bg-muted/30 transition-colors">{children}</tr>; },
-          h1({ children }) { return <h1 className={`font-bold mt-4 mb-2 first:mt-0 ${compact ? "text-[16px]" : "text-xl"}`}>{children}</h1>; },
-          h2({ children }) { return <h2 className={`font-semibold mt-3 mb-1.5 first:mt-0 ${compact ? "text-[14px]" : "text-lg"}`}>{children}</h2>; },
-          h3({ children }) { return <h3 className={`font-semibold mt-2.5 mb-1 first:mt-0 ${compact ? "text-[13px]" : "text-[15px]"}`}>{children}</h3>; },
+          h1({ children }) { return <h1 className={`font-bold first:mt-0 ${compact ? "text-[15px] mt-6 mb-3" : "text-xl mt-5 mb-3"}`}>{children}</h1>; },
+          h2({ children }) { return <h2 className={`font-semibold first:mt-0 ${compact ? "text-[13.5px] mt-5 mb-2" : "text-lg mt-4 mb-2"}`}>{children}</h2>; },
+          h3({ children }) { return <h3 className={`font-semibold first:mt-0 ${compact ? "text-[12.5px] mt-4 mb-1.5" : "text-[15px] mt-3 mb-1.5"}`}>{children}</h3>; },
           ul({ children }) { return <ul className="my-2 pl-5 space-y-1 list-disc marker:text-muted-foreground/50">{children}</ul>; },
           ol({ children }) { return <ol className="my-2 pl-5 space-y-1 list-decimal marker:text-muted-foreground/60">{children}</ol>; },
           li({ children }) { return <li className="pl-1">{children}</li>; },
