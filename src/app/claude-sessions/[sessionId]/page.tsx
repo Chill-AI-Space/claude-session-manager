@@ -439,6 +439,18 @@ export default function SessionDetailPage({
     setMdLoadingEarlier(false);
   }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Pre-populate summary/learnings from DB cache (no LLM call needed)
+  useEffect(() => {
+    if (!data?.metadata) return;
+    if (!summary && data.metadata.summary) setSummary(data.metadata.summary);
+    if (!learnings && data.metadata.learnings) {
+      try {
+        setLearnings(typeof data.metadata.learnings === "string"
+          ? JSON.parse(data.metadata.learnings) : data.metadata.learnings);
+      } catch { /* ignore */ }
+    }
+  }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Scroll to bottom when MD content loads
   useEffect(() => {
     if (mdContent && mdScrollRef.current) {
