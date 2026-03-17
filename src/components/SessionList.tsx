@@ -29,6 +29,11 @@ export function SessionList({ sessions, loading, geminiResults, onArchive, hasMo
   }, []);
   const now = Math.floor(nowRaw / 10_000) * 10_000; // 10s bucket
 
+  // IntersectionObserver refs — must be before any early returns (Rules of Hooks)
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const onLoadMoreRef = useRef(onLoadMore);
+  onLoadMoreRef.current = onLoadMore;
+
   // Memoize Gemini-derived maps — only recompute when results change
   const { displaySessions, snippetMap, queryMap } = useMemo(() => {
     if (!geminiResults?.length) {
@@ -46,6 +51,18 @@ export function SessionList({ sessions, loading, geminiResults, onArchive, hasMo
     return { displaySessions, snippetMap, queryMap };
   }, [geminiResults, sessions]);
 
+  useEffect(() => {
+    if (!hasMore || !sentinelRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) onLoadMoreRef.current?.();
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, displaySessions.length]);
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -61,23 +78,6 @@ export function SessionList({ sessions, loading, geminiResults, onArchive, hasMo
       </div>
     );
   }
-
-  // IntersectionObserver for auto-loading more sessions on scroll
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const onLoadMoreRef = useRef(onLoadMore);
-  onLoadMoreRef.current = onLoadMore;
-
-  useEffect(() => {
-    if (!hasMore || !sentinelRef.current) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) onLoadMoreRef.current?.();
-      },
-      { rootMargin: "200px" }
-    );
-    observer.observe(sentinelRef.current);
-    return () => observer.disconnect();
-  }, [hasMore, displaySessions.length]);
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
