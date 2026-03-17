@@ -1397,6 +1397,19 @@ export default function SessionDetailPage({
                   )}
                   <MarkdownContent content={mdContent} projectPath={data.project_path} compact />
 
+                  {/* ── Live activity indicator ── */}
+                  {data.is_active && (
+                    <div className="my-4 flex items-center gap-2 text-[12px] text-green-600 dark:text-green-400 animate-pulse">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span className="font-medium">Claude is working…</span>
+                      {streamingText && (
+                        <span className="text-muted-foreground font-normal truncate max-w-[400px]">
+                          {streamingText.split('\n').pop()?.slice(0, 80)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {/* ── Summary & Learnings — collapsible at bottom ── */}
                   <div className="mt-6 space-y-2 pb-4">
                     {/* Summary */}
