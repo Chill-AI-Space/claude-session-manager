@@ -1185,9 +1185,8 @@ export default function SessionDetailPage({
       <div className="flex-1 flex min-h-0">
         {/* ── Left: Messages ──────────────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          {/* ── Summary + Learnings — top of messages area ─────────────────── */}
-          <div className="shrink-0 border-b border-border/30">
-            {/* Trigger bar */}
+          {/* ── Summary + Learnings triggers — hidden, moved to bottom of MD ── */}
+          <div className="shrink-0 border-b border-border/30 hidden">
             <div className="flex items-center gap-3 px-5 py-1.5">
               <button
                 onClick={async () => {
@@ -1390,6 +1389,100 @@ export default function SessionDetailPage({
                     </div>
                   )}
                   <MarkdownContent content={mdContent} projectPath={data.project_path} compact />
+
+                  {/* ── Summary & Learnings — collapsible at bottom ── */}
+                  <div className="mt-6 space-y-2 pb-4">
+                    {/* Summary */}
+                    <div className="border border-border/30 rounded-lg overflow-hidden">
+                      <button
+                        onClick={async () => {
+                          if (summaryOpen) { setSummaryOpen(false); return; }
+                          setSummaryOpen(true);
+                          if (summary) return;
+                          setSummaryLoading(true);
+                          setSummaryError(null);
+                          try {
+                            const res = await fetch(`/api/sessions/${data.session_id}/summary`, { method: "POST" });
+                            const json = await res.json();
+                            if (json.error) setSummaryError(json.error);
+                            else setSummary(json.summary);
+                          } catch (e) {
+                            setSummaryError(e instanceof Error ? e.message : "Failed");
+                          } finally { setSummaryLoading(false); }
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <span className={summaryOpen ? "rotate-90 transition-transform" : "transition-transform"}>▶</span>
+                        <ScrollText className="h-3.5 w-3.5" />
+                        <span className="font-medium">Summary</span>
+                        {summary && <span className="text-[10px] text-green-500 font-medium ml-1">ready</span>}
+                        {summaryLoading && <Loader2 className="h-3 w-3 animate-spin text-blue-400 ml-1" />}
+                      </button>
+                      {summaryOpen && (
+                        <div className="px-4 pb-3 border-t border-border/20">
+                          {summaryError && <div className="text-[11px] text-red-500 py-2">{summaryError}</div>}
+                          {summary && <div className="pt-2"><MarkdownContent content={summary} projectPath={data?.project_path} compact /></div>}
+                          {!summary && !summaryLoading && !summaryError && <div className="text-[11px] text-muted-foreground py-2">Click to generate…</div>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Learnings */}
+                    <div className="border border-border/30 rounded-lg overflow-hidden">
+                      <button
+                        onClick={async () => {
+                          if (learningsOpen) { setLearningsOpen(false); return; }
+                          setLearningsOpen(true);
+                          if (learnings) return;
+                          setLearningsLoading(true);
+                          setLearningsError(null);
+                          try {
+                            const res = await fetch(`/api/sessions/${data.session_id}/learnings`, { method: "POST" });
+                            const json = await res.json();
+                            if (json.error) setLearningsError(json.error);
+                            else setLearnings(json.learnings);
+                          } catch (e) {
+                            setLearningsError(e instanceof Error ? e.message : "Failed");
+                          } finally { setLearningsLoading(false); }
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <span className={learningsOpen ? "rotate-90 transition-transform" : "transition-transform"}>▶</span>
+                        <Lightbulb className="h-3.5 w-3.5" />
+                        <span className="font-medium">Learnings</span>
+                        {learnings && <span className="text-[10px] text-green-500 font-medium ml-1">ready</span>}
+                        {learningsLoading && <Loader2 className="h-3 w-3 animate-spin text-blue-400 ml-1" />}
+                      </button>
+                      {learningsOpen && (
+                        <div className="px-4 pb-3 border-t border-border/20">
+                          {learningsError && <div className="text-[11px] text-red-500 py-2">{learningsError}</div>}
+                          {learnings && (() => {
+                            const l = learnings as Record<string, string | string[]>;
+                            const entries = Object.entries(l).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : !!v));
+                            return (
+                              <div className="pt-2 space-y-2">
+                                {entries.map(([key, value]) => (
+                                  <div key={key}>
+                                    <div className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider mb-1">{key.replace(/_/g, " ")}</div>
+                                    {typeof value === "string" ? (
+                                      <p className="text-[12px] text-foreground/80">{value}</p>
+                                    ) : (
+                                      <ul className="list-disc pl-4 space-y-0.5">
+                                        {(value as string[]).map((item, i) => (
+                                          <li key={i} className="text-[12px] text-foreground/80">{item}</li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                          {!learnings && !learningsLoading && !learningsError && <div className="text-[11px] text-muted-foreground py-2">Click to generate…</div>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </div>
