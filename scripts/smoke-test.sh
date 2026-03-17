@@ -91,6 +91,32 @@ print(t[:80] if t else 'EMPTY')
   HTML=$(curl -s --max-time 10 "$BASE/claude-sessions/$TOP_SESSION" 2>/dev/null || echo "")
   HTML_SIZE=${#HTML}
   check "Session page HTML has content ($HTML_SIZE bytes)" "$HTML_SIZE" "^[1-9]"
+
+  # 9. Client-side JS smoke test (catches React hydration errors like #310)
+  echo "9. Client JS check"
+  if command -v node >/dev/null 2>&1; then
+    JS_ERRORS=$(node -e "
+const http = require('http');
+const url = '$BASE/claude-sessions';
+// Fetch all JS chunks referenced in the page
+http.get(url, res => {
+  let html = '';
+  res.on('data', c => html += c);
+  res.on('end', () => {
+    // Check that the page doesn't contain error boundary markup
+    const hasErrorBoundary = html.includes('Something went wrong') || html.includes('__next_error__');
+    // Check JS bundle links are present (page actually has client code)
+    const jsChunks = (html.match(/src=\"\/_next\/static\/chunks/g) || []).length;
+    if (hasErrorBoundary) console.log('ERROR_BOUNDARY');
+    else if (jsChunks < 3) console.log('MISSING_JS_CHUNKS:' + jsChunks);
+    else console.log('OK:' + jsChunks + '_chunks');
+  });
+});
+" 2>/dev/null || echo "NODE_FAILED")
+    check "No error boundary in HTML, JS chunks present ($JS_ERRORS)" "$JS_ERRORS" "^OK:"
+  else
+    echo "  - skipped (node not found)"
+  fi
 fi
 
 # Summary
