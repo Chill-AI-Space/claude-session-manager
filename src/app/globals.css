@@ -173,3 +173,10 @@
   border: none;
   border-top: 1px solid var(--border);
 }
+
+/* Gap between consecutive code blocks (e.g. file path + diff) */
+.markdown-body .not-prose + .not-prose,
+.markdown-body pre + pre,
+.markdown-body div.group\/code + div.group\/code {
+  margin-top: 0.5rem;
+}
