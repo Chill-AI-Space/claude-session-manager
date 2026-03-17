@@ -189,6 +189,9 @@ export default function SessionDetailPage({
   const [mdSearch, setMdSearch] = useState(false);
   const [mdSearchQuery, setMdSearchQuery] = useState("");
   const mdSearchInputRef = useRef<HTMLInputElement>(null);
+  const [mdHasEarlier, setMdHasEarlier] = useState(false);
+  const [mdRenderStart, setMdRenderStart] = useState(0);
+  const [mdLoadingEarlier, setMdLoadingEarlier] = useState(false);
 
   // Summary
   const [summary, setSummary] = useState<string | null>(null);
@@ -342,6 +345,10 @@ export default function SessionDetailPage({
     setHasReplied(false);
     setMdView(true);
     setMdContent(null);
+    setMdLoading(false);
+    setMdHasEarlier(false);
+    setMdRenderStart(0);
+    setMdLoadingEarlier(false);
     setSummary(null);
     setSummaryOpen(false);
     queueRef.current = [];
@@ -400,16 +407,36 @@ export default function SessionDetailPage({
   }, [fetchSession]);
 
   // Auto-load MD view when data arrives (MD is the default display mode)
+  // Server returns last 30 messages by default for fast initial load
   useEffect(() => {
     if (!data?.session_id || mdContent || mdLoading) return;
     setMdLoading(true);
     fetch(`/api/sessions/${data.session_id}/md`)
       .then(r => r.json())
       .then(json => {
-        if (json.markdown) setMdContent(json.markdown);
+        if (json.markdown) {
+          setMdContent(json.markdown);
+          setMdHasEarlier(json.has_earlier ?? false);
+          setMdRenderStart(json.render_start ?? 0);
+        }
       })
       .catch(() => {})
       .finally(() => setMdLoading(false));
+  }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load full MD history (user clicks "Load earlier")
+  const loadAllMdMessages = useCallback(async () => {
+    if (!data?.session_id || mdLoadingEarlier) return;
+    setMdLoadingEarlier(true);
+    try {
+      const res = await fetch(`/api/sessions/${data.session_id}/md?limit=0`);
+      const json = await res.json();
+      if (json.markdown) {
+        setMdContent(json.markdown);
+        setMdHasEarlier(false);
+      }
+    } catch { /* ignore */ }
+    setMdLoadingEarlier(false);
   }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Scroll to bottom when MD content loads
@@ -1338,6 +1365,18 @@ export default function SessionDetailPage({
                 </div>
               ) : mdContent ? (
                 <div className="max-w-4xl mx-auto px-6 py-6">
+                  {mdHasEarlier && (
+                    <div className="flex items-center justify-center py-3 mb-4 border-b border-dashed border-muted-foreground/20">
+                      <button
+                        onClick={loadAllMdMessages}
+                        disabled={mdLoadingEarlier}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5"
+                      >
+                        {mdLoadingEarlier && <Loader2 className="h-3 w-3 animate-spin" />}
+                        Load {mdRenderStart} earlier messages
+                      </button>
+                    </div>
+                  )}
                   <MarkdownContent content={mdContent} projectPath={data.project_path} compact />
                 </div>
               ) : null}
