@@ -8,6 +8,7 @@ import { FolderOpen, Check, Maximize2, X } from "lucide-react";
 interface MarkdownContentProps {
   content: string;
   projectPath?: string;
+  compact?: boolean;
 }
 
 // Detect file/directory path strings that are worth making clickable.

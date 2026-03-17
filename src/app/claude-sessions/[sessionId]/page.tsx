@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Search, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Search } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -105,7 +105,6 @@ interface SessionDetailData {
   messages_total: number;
   metadata: SessionRow;
   is_active: boolean;
-  has_result: boolean;
   file_age_ms?: number;
 }
 
@@ -187,7 +186,6 @@ export default function SessionDetailPage({
   const [mdContent, setMdContent] = useState<string | null>(null);
   const [mdLoading, setMdLoading] = useState(false);
   const mdScrollRef = useRef<HTMLDivElement>(null);
-  const mdFetchedForTotal = useRef(0);
   const [mdSearch, setMdSearch] = useState(false);
   const [mdSearchQuery, setMdSearchQuery] = useState("");
   const mdSearchInputRef = useRef<HTMLInputElement>(null);
@@ -197,10 +195,6 @@ export default function SessionDetailPage({
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const [summaryCopied, setSummaryCopied] = useState(false);
-  const [learningsCopied, setLearningsCopied] = useState(false);
-  const summaryMsgCountRef = useRef<number>(0); // message count when summary was last generated
-  const learningsMsgCountRef = useRef<number>(0);
 
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
@@ -348,23 +342,8 @@ export default function SessionDetailPage({
     setHasReplied(false);
     setMdView(true);
     setMdContent(null);
-    setMdLoading(false);
     setSummary(null);
     setSummaryOpen(false);
-    setSummaryError(null);
-    setSummaryCopied(false);
-    setLearnings(null);
-    setLearningsOpen(false);
-    setLearningsError(null);
-    setLearningsCopied(false);
-    summaryMsgCountRef.current = 0;
-    learningsMsgCountRef.current = 0;
-    mdFetchedForTotal.current = 0;
-    setMdHasEarlier(false);
-    setMdRenderStart(0);
-    setMdTotalMessages(0);
-    setMdLoadingEarlier(false);
-    setMdFullyLoaded(false);
     queueRef.current = [];
     processingRef.current = false;
     prevTotalRef.current = 0;
@@ -403,34 +382,6 @@ export default function SessionDetailPage({
     return () => clearInterval(id);
   }, [data?.is_active, isStreaming, fetchSession]);
 
-  // During SSE streaming, poll session status to detect completion outside of SSE.
-  // Handles broken SSE connections: if Claude finishes but the stream died,
-  // this catches it and refreshes the UI instead of waiting for the 45s watchdog.
-  useEffect(() => {
-    if (!isStreaming) return;
-    const startTime = Date.now();
-    const id = setInterval(async () => {
-      // Grace period: don't check for first 15s (process may not be detected yet)
-      if (Date.now() - startTime < 15_000) return;
-      try {
-        const res = await fetch(`/api/sessions/${sessionId}`);
-        if (!res.ok) return;
-        const json = await res.json();
-        // Session went inactive AND JSONL hasn't been touched in 30s → truly done
-        if (!json.is_active && json.file_age_ms != null && json.file_age_ms > 30_000) {
-          abortRef.current?.abort("watchdog: session completed outside SSE");
-          setIsStreaming(false);
-          setStreamingText("");
-          setStreamStatus(null);
-          processingRef.current = false;
-          setQueuedMessages([...queueRef.current]);
-          fetchSession({ clearExtras: true }).catch(() => {});
-        }
-      } catch { /* ignore */ }
-    }, 10_000);
-    return () => clearInterval(id);
-  }, [isStreaming, sessionId, fetchSession]);
-
   // Default folder for new session = current session's project path
   useEffect(() => {
     if (data?.project_path && !newSessionPath) {
@@ -448,197 +399,27 @@ export default function SessionDetailPage({
     return () => window.removeEventListener("sessions-scanned", handler);
   }, [fetchSession]);
 
-  // ── Progressive loading pipeline ──────────────────────────────────────
-  // Phase 1: Last 30 msgs → MD → show instantly
-  // Phase 2: Auto-load full MD history in background
-  // Phase 3: Generate summary (only after full MD, only if not cached)
-  // Phase 4: Generate learnings (only after summary, only if not cached)
-  //
-  // For cached sessions (summary/learnings in DB): phases 3-4 are instant (no LLM).
-  // For new sessions: phases 3-4 are deferred until content is fully loaded.
-
-  const [mdHasEarlier, setMdHasEarlier] = useState(false);
-  const [mdRenderStart, setMdRenderStart] = useState(0);
-  const [mdTotalMessages, setMdTotalMessages] = useState(0);
-  const [mdLoadingEarlier, setMdLoadingEarlier] = useState(false);
-  const [mdFullyLoaded, setMdFullyLoaded] = useState(false);
-
-  // Detect meta-analysis sessions (learnings/summary/title-gen) — skip auto-generation for them
-  const isMetaSession = (() => {
-    const fp = (data?.metadata?.first_prompt || "").toLowerCase();
-    return fp.includes("analyzing a claude code session transcript") ||
-      fp.includes("extract structured learnings from this session") ||
-      fp.includes("generate a short descriptive title");
-  })();
-
-  const generateSummary = useCallback(async (sid: string) => {
-    setSummaryLoading(true);
-    setSummaryError(null);
-    try {
-      const res = await fetch(`/api/sessions/${sid}/summary`, { method: "POST" });
-      const json = await res.json();
-      if (json.error) setSummaryError(json.error);
-      else setSummary(json.summary);
-    } catch (e) {
-      setSummaryError(e instanceof Error ? e.message : "Failed");
-    } finally { setSummaryLoading(false); }
-  }, []);
-
-  const generateLearnings = useCallback(async (sid: string) => {
-    setLearningsLoading(true);
-    setLearningsError(null);
-    try {
-      const res = await fetch(`/api/sessions/${sid}/learnings`, { method: "POST" });
-      const json = await res.json();
-      if (json.error) setLearningsError(json.error);
-      else setLearnings(json.learnings);
-    } catch (e) {
-      setLearningsError(e instanceof Error ? e.message : "Failed");
-    } finally { setLearningsLoading(false); }
-  }, []);
-
-  // Phase 1: Load last 30 messages as MD — show instantly
+  // Auto-load MD view when data arrives (MD is the default display mode)
   useEffect(() => {
-    if (!data?.session_id) return;
-    const total = data.messages_total ?? 0;
-    if (mdContent && total === mdFetchedForTotal.current) return;
-    if (!mdContent) setMdLoading(true);
-    mdFetchedForTotal.current = total;
+    if (!data?.session_id || mdContent || mdLoading) return;
+    setMdLoading(true);
     fetch(`/api/sessions/${data.session_id}/md`)
       .then(r => r.json())
       .then(json => {
-        if (json.markdown) {
-          setMdContent(json.markdown);
-          const hasEarlier = json.has_earlier ?? false;
-          setMdHasEarlier(hasEarlier);
-          setMdRenderStart(json.render_start ?? 0);
-          setMdTotalMessages(json.total_messages ?? 0);
-          if (!hasEarlier) setMdFullyLoaded(true);
-        }
+        if (json.markdown) setMdContent(json.markdown);
       })
       .catch(() => {})
       .finally(() => setMdLoading(false));
-  }, [data?.session_id, data?.messages_total]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Phase 2: Auto-load full MD in background (after phase 1 completes)
-  useEffect(() => {
-    if (!data?.session_id || !mdHasEarlier || mdLoadingEarlier || mdFullyLoaded) return;
-    // Small delay to let the user see the initial content first
-    const timer = setTimeout(async () => {
-      setMdLoadingEarlier(true);
-      try {
-        const res = await fetch(`/api/sessions/${data.session_id}/md?limit=0`);
-        const json = await res.json();
-        if (json.markdown) {
-          setMdContent(json.markdown);
-          setMdHasEarlier(false);
-          setMdRenderStart(0);
-          setMdFullyLoaded(true);
-        }
-      } catch { /* ignore */ }
-      setMdLoadingEarlier(false);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [data?.session_id, mdHasEarlier, mdFullyLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Load all messages manually (fallback button, in case auto-load fails)
-  const loadAllMdMessages = useCallback(async () => {
-    if (!data?.session_id || mdLoadingEarlier) return;
-    setMdLoadingEarlier(true);
-    try {
-      const res = await fetch(`/api/sessions/${data.session_id}/md?limit=0`);
-      const json = await res.json();
-      if (json.markdown) {
-        setMdContent(json.markdown);
-        setMdHasEarlier(false);
-        setMdRenderStart(0);
-        setMdFullyLoaded(true);
-      }
-    } catch { /* ignore */ }
-    setMdLoadingEarlier(false);
-  }, [data?.session_id, mdLoadingEarlier]);
-
-  // Scroll to bottom when MD content loads (only if user is already near the bottom)
-  const mdWasAtBottom = useRef(true);
+  // Scroll to bottom when MD content loads
   useEffect(() => {
     if (mdContent && mdScrollRef.current) {
       requestAnimationFrame(() => {
-        if (mdWasAtBottom.current) {
-          mdScrollRef.current?.scrollTo({ top: mdScrollRef.current.scrollHeight });
-        }
+        mdScrollRef.current?.scrollTo({ top: mdScrollRef.current.scrollHeight });
       });
     }
   }, [mdContent]);
-
-  // Pre-populate summary/learnings from DB cache when session data loads (instant, no LLM)
-  useEffect(() => {
-    if (!data?.metadata) return;
-    if (!summary && data.metadata.summary) {
-      setSummary(data.metadata.summary);
-      summaryMsgCountRef.current = data.metadata.message_count ?? 0;
-    }
-    if (!learnings && data.metadata.learnings) {
-      try {
-        const parsed = typeof data.metadata.learnings === "string"
-          ? JSON.parse(data.metadata.learnings)
-          : data.metadata.learnings;
-        setLearnings(parsed);
-        learningsMsgCountRef.current = data.metadata.message_count ?? 0;
-      } catch { /* ignore bad JSON */ }
-    }
-  }, [data?.session_id, data?.metadata]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Phase 3: Generate summary — only AFTER full MD is loaded, only if not cached
-  useEffect(() => {
-    if (!mdFullyLoaded || !data?.session_id) return;
-    if (summary || summaryLoading) return;
-    if (settings && settings.auto_generate_summary === "false") return;
-    if (isMetaSession) return;
-    const msgCount = data.metadata?.message_count ?? 0;
-    if (msgCount < 4) return;
-    summaryMsgCountRef.current = msgCount;
-    generateSummary(data.session_id);
-  }, [mdFullyLoaded, data?.session_id, settings?.auto_generate_summary, isMetaSession]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Phase 4: Generate learnings — only AFTER summary is done, only if not cached
-  useEffect(() => {
-    if (!mdFullyLoaded || !data?.session_id) return;
-    // Wait for summary to finish first (don't stack two LLM calls)
-    if (summaryLoading) return;
-    if (learnings || learningsLoading) return;
-    if (settings && settings.auto_generate_learnings === "false") return;
-    if (isMetaSession) return;
-    const msgCount = data.metadata?.message_count ?? 0;
-    if (msgCount < 4) return;
-    learningsMsgCountRef.current = msgCount;
-    generateLearnings(data.session_id);
-  }, [mdFullyLoaded, summaryLoading, data?.session_id, settings?.auto_generate_learnings, isMetaSession]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Incremental refresh: when session becomes inactive and messages grew, refresh summary/learnings
-  useEffect(() => {
-    if (!data?.session_id || data.is_active || isMetaSession) return;
-    const msgCount = data.metadata?.message_count ?? 0;
-    if (msgCount < 4) return;
-    // Refresh summary if messages grew by ≥2
-    if (summary && !summaryLoading && msgCount - summaryMsgCountRef.current >= 2) {
-      if (settings && settings.auto_generate_summary !== "false") {
-        summaryMsgCountRef.current = msgCount;
-        generateSummary(data.session_id);
-      }
-    }
-  }, [data?.is_active, data?.metadata?.message_count, isMetaSession]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!data?.session_id || data.is_active || isMetaSession) return;
-    const msgCount = data.metadata?.message_count ?? 0;
-    if (msgCount < 4) return;
-    if (learnings && !learningsLoading && msgCount - learningsMsgCountRef.current >= 2) {
-      if (settings && settings.auto_generate_learnings !== "false") {
-        learningsMsgCountRef.current = msgCount;
-        generateLearnings(data.session_id);
-      }
-    }
-  }, [data?.is_active, data?.metadata?.message_count, isMetaSession]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cmd+F search in MD view
   useEffect(() => {
@@ -664,7 +445,6 @@ export default function SessionDetailPage({
     // Case 1: session went inactive with no streaming text — stream died
     if (!streamingText && !data?.is_active) {
       const timer = setTimeout(() => {
-        abortRef.current?.abort("watchdog: session inactive");
         setIsStreaming(false);
         setStreamingText("");
         setStreamStatus(null);
@@ -674,12 +454,11 @@ export default function SessionDetailPage({
       return () => clearTimeout(timer);
     }
 
-    // Case 2: no real SSE data events for 45s — stream is stuck or connection dropped
-    // (keepalive pings are intentionally NOT counted, so this catches stuck streams too)
+    // Case 2: no SSE events received for 45s — connection likely dropped silently
+    // (keepalive pings come every 15s, so 45s = 3 missed pings)
     const check = setInterval(() => {
       const elapsed = Date.now() - lastStreamEventRef.current;
       if (lastStreamEventRef.current > 0 && elapsed > 45_000) {
-        abortRef.current?.abort("watchdog: stream timeout");
         setIsStreaming(false);
         setStreamingText("");
         setStreamStatus(null);
@@ -729,13 +508,12 @@ export default function SessionDetailPage({
     startBackoff();
   }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Start backoff on initial load for recently-modified inactive sessions.
-  // Uses live file_age_ms (JSONL mtime) instead of DB modified_at which can be stale.
+  // Start backoff on initial load for recently-modified inactive sessions
   const backoffInitRef = useRef<string | null>(null);
   useEffect(() => {
     if (!data || data.is_active || backoffInitRef.current === data.session_id) return;
     backoffInitRef.current = data.session_id;
-    const ageMs = data.file_age_ms ?? Infinity;
+    const ageMs = Date.now() - new Date(data.metadata.modified_at).getTime();
     if (ageMs < 20 * 60 * 1000) startBackoff();
   }, [data, startBackoff]);
 
@@ -768,17 +546,6 @@ export default function SessionDetailPage({
     !isStreaming
   );
 
-  // Detect "incomplete exit": Claude said something (assistant) then process died.
-  // file_age > 2min + process dead + last role = assistant → probably died mid-intent.
-  // The server-side orchestrator will also detect this and auto-resume, but the client
-  // shows a countdown banner so the user knows what's happening.
-  const isIncompleteExit = !!(
-    data && !data.is_active &&
-    data.metadata.last_message_role === "assistant" &&
-    data.file_age_ms != null && data.file_age_ms > 2 * 60 * 1000 &&
-    !isStreaming
-  );
-
   useEffect(() => {
     if (!isInterrupted || settings?.auto_retry_on_crash === "false") return;
     // Only start once per session
@@ -800,29 +567,6 @@ export default function SessionDetailPage({
     }, 1000);
     return () => cancelRetry();
   }, [isInterrupted, sessionId, settings?.auto_retry_on_crash, cancelRetry]);
-
-  // Auto-retry for incomplete exit sessions (Claude said "I'll do X" then died)
-  const incompleteRetryInitRef = useRef<string | null>(null);
-  const INCOMPLETE_RETRY_DELAY = 45;
-  useEffect(() => {
-    if (!isIncompleteExit || settings?.auto_retry_on_crash === "false") return;
-    if (incompleteRetryInitRef.current === sessionId) return;
-    incompleteRetryInitRef.current = sessionId;
-
-    setRetryCountdown(INCOMPLETE_RETRY_DELAY);
-    let remaining = INCOMPLETE_RETRY_DELAY;
-    retryTimerRef.current = setInterval(() => {
-      remaining--;
-      setRetryCountdown(remaining);
-      if (remaining <= 0) {
-        cancelRetry();
-        queueRef.current.push("Your process exited unexpectedly after your last response. Please check what you were doing and continue where you left off.");
-        setQueuedMessages([...queueRef.current]);
-        processQueueRef.current();
-      }
-    }, 1000);
-    return () => cancelRetry();
-  }, [isIncompleteExit, sessionId, settings?.auto_retry_on_crash, cancelRetry]);
 
   // Cancel retry when user starts typing or streaming starts
   useEffect(() => {
@@ -920,8 +664,8 @@ export default function SessionDetailPage({
               // ignore parse errors
             }
           } else if (line.startsWith(":")) {
-            // SSE comment (keepalive ping) — do NOT update lastStreamEventRef
-            // so the watchdog can detect streams stuck with only keepalives
+            // SSE comment (keepalive ping) — just update timestamp
+            lastStreamEventRef.current = Date.now();
           }
         }
       }
@@ -1352,222 +1096,14 @@ export default function SessionDetailPage({
         .map(([k]) => SETTING_LABELS[k] || k)
     : [];
 
-  // Copy summary as plain text
-  const copySummary = () => {
-    if (!summary) return;
-    navigator.clipboard.writeText(summary);
-    setSummaryCopied(true);
-    setTimeout(() => setSummaryCopied(false), 2000);
-  };
-
-  // Copy learnings as plain text
-  const copyLearnings = () => {
-    if (!learnings) return;
-    const l = learnings as Record<string, string | string[]>;
-    const cats = [
-      { key: "summary", label: "Summary" },
-      { key: "discoveries", label: "Discoveries" },
-      { key: "friction_loops", label: "Friction / Loops" },
-      { key: "claude_md_rules", label: "CLAUDE.md Rules" },
-      { key: "patterns", label: "Patterns" },
-      { key: "bugs_fixed", label: "Bugs Fixed" },
-      { key: "tools_learned", label: "Tools Learned" },
-      { key: "preferences", label: "Preferences" },
-      { key: "gotchas", label: "Gotchas" },
-    ];
-    const parts: string[] = [];
-    for (const { key, label } of cats) {
-      const val = l[key];
-      if (!val || (Array.isArray(val) && val.length === 0)) continue;
-      parts.push(`## ${label}`);
-      if (typeof val === "string") {
-        parts.push(val);
-      } else {
-        for (const item of val as string[]) parts.push(`- ${item}`);
-      }
-      parts.push("");
-    }
-    navigator.clipboard.writeText(parts.join("\n"));
-    setLearningsCopied(true);
-    setTimeout(() => setLearningsCopied(false), 2000);
-  };
-
-  // Inline Summary & Learnings block — rendered at bottom of session scroll area
-  const inlineSummaryLearnings = (data.metadata?.message_count ?? 0) >= 4 ? (
-    <div className="border-t border-border/50 mt-6 pt-4 space-y-4 pb-4">
-      {/* ── Summary section ── */}
-      <div>
-        <button
-          onClick={() => setSummaryOpen(v => !v)}
-          className="flex items-center gap-2 w-full text-left group"
-        >
-          {summaryOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/50" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />}
-          <ScrollText className="h-3.5 w-3.5 text-muted-foreground/60" />
-          <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors">Summary</span>
-          {summaryLoading && <Loader2 className="h-3 w-3 animate-spin text-blue-400" />}
-          {summary && !summaryOpen && <span className="text-[10px] text-green-500/60 ml-1">ready</span>}
-        </button>
-        {summaryOpen && (
-          <div className="ml-7 mt-2">
-            {summaryLoading && !summary && (
-              <div className="flex items-center gap-2 py-3 text-[11px] text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
-                <span className="text-blue-400/70">Generating summary…</span>
-              </div>
-            )}
-            {summaryError && <div className="text-[11px] text-red-500 py-1">{summaryError}</div>}
-            {summary && (
-              <>
-                <MarkdownContent content={summary} projectPath={data?.project_path} compact />
-                <div className="flex items-center gap-2 mt-3">
-                  <button
-                    onClick={copySummary}
-                    className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
-                    title="Copy summary"
-                  >
-                    {summaryCopied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-                    {summaryCopied ? "Copied" : "Copy"}
-                  </button>
-                  <button
-                    onClick={() => { summaryMsgCountRef.current = 0; generateSummary(data.session_id); }}
-                    className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
-                    title="Regenerate summary"
-                  >
-                    <RefreshCw className={`h-3 w-3 ${summaryLoading ? "animate-spin" : ""}`} />
-                    Refresh
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── Learnings section ── */}
-      <div>
-        <button
-          onClick={() => {
-            const willOpen = !learningsOpen;
-            setLearningsOpen(willOpen);
-            // Trigger fetch when opening if nothing loaded yet
-            if (willOpen && !learnings && !learningsLoading && !learningsError && data?.session_id) {
-              generateLearnings(data.session_id);
-            }
-          }}
-          className="flex items-center gap-2 w-full text-left group"
-        >
-          {learningsOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/50" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />}
-          <Lightbulb className="h-3.5 w-3.5 text-muted-foreground/60" />
-          <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors">Learnings</span>
-          {learningsLoading && <Loader2 className="h-3 w-3 animate-spin text-blue-400" />}
-          {learnings && !learningsOpen && <span className="text-[10px] text-green-500/60 ml-1">ready</span>}
-        </button>
-        {learningsOpen && (
-          <div className="ml-7 mt-2">
-            {learningsLoading && !learnings && (
-              <div className="flex items-center gap-2 py-3 text-[11px] text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
-                <span className="text-blue-400/70">Extracting learnings…</span>
-              </div>
-            )}
-            {learningsError && (
-              <div className="flex items-center gap-2 py-1">
-                <span className="text-[11px] text-red-500">{learningsError}</span>
-                <button
-                  onClick={() => { setLearningsError(null); data?.session_id && generateLearnings(data.session_id); }}
-                  className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground underline"
-                >Retry</button>
-              </div>
-            )}
-            {!learnings && !learningsLoading && !learningsError && (
-              <div className="py-2 text-[11px] text-muted-foreground/60">
-                No learnings yet.{" "}
-                <button
-                  onClick={() => data?.session_id && generateLearnings(data.session_id)}
-                  className="text-blue-400/70 hover:text-blue-400 underline"
-                >Generate now</button>
-              </div>
-            )}
-            {learnings && (() => {
-              const l = learnings as Record<string, string | string[]>;
-              const categories = [
-                { key: "summary", label: "Summary", single: true },
-                { key: "discoveries", label: "Discoveries", single: false },
-                { key: "friction_loops", label: "Friction / Loops", single: false },
-                { key: "claude_md_rules", label: "CLAUDE.md Rules", single: false },
-                { key: "patterns", label: "Patterns", single: false },
-                { key: "bugs_fixed", label: "Bugs Fixed", single: false },
-                { key: "tools_learned", label: "Tools Learned", single: false },
-                { key: "preferences", label: "Preferences", single: false },
-                { key: "gotchas", label: "Gotchas", single: false },
-              ];
-              return (
-                <div className="space-y-2.5">
-                  {categories.map(({ key, label, single }) => {
-                    const val = l[key];
-                    if (!val || (Array.isArray(val) && val.length === 0)) return null;
-                    return (
-                      <div key={key}>
-                        <div className="text-[9px] font-medium text-muted-foreground/50 uppercase tracking-wider mb-0.5">{label}</div>
-                        {single ? (
-                          <p className="text-[11px] text-foreground/80 leading-relaxed">{val as string}</p>
-                        ) : (
-                          <ul className="space-y-0.5">
-                            {(val as string[]).map((item, i) => (
-                              <li key={i} className="text-[11px] text-foreground/80 leading-relaxed flex gap-1.5">
-                                <span className="text-muted-foreground/30 shrink-0">•</span>
-                                <span
-                                  className="cursor-pointer hover:bg-muted/50 rounded px-0.5 -mx-0.5 transition-colors"
-                                  onClick={() => navigator.clipboard.writeText(item)}
-                                  title="Click to copy"
-                                >{item}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <div className="flex items-center gap-2 mt-3">
-                    <button
-                      onClick={copyLearnings}
-                      className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
-                      title="Copy all learnings"
-                    >
-                      {learningsCopied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-                      {learningsCopied ? "Copied" : "Copy all"}
-                    </button>
-                    <button
-                      onClick={() => { learningsMsgCountRef.current = 0; generateLearnings(data.session_id); }}
-                      className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
-                      title="Regenerate learnings"
-                    >
-                      <RefreshCw className={`h-3 w-3 ${learningsLoading ? "animate-spin" : ""}`} />
-                      Refresh
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-      </div>
-
-      {/* Settings hint */}
-      <div className="text-[10px] text-muted-foreground/30 pt-1">
-        Prompt customizable in <Link href="/claude-sessions/settings" className="underline underline-offset-2 hover:text-muted-foreground/60">Settings</Link>
-      </div>
-    </div>
-  ) : null;
-
   return (
     <>
       {/* Session header — single line: status + title */}
       {(() => {
         let activityStatus = getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role });
-        // If JSONL was written to very recently and process is alive, Claude is actively working
+        // If JSONL was written to recently and process is alive, Claude is actively working
         // (not just waiting at prompt — the "terminal-open" heuristic is wrong mid-tool-execution)
-        if (data.is_active && data.file_age_ms != null && data.file_age_ms < 10_000 && activityStatus === "terminal-open") {
+        if (data.is_active && data.file_age_ms != null && data.file_age_ms < 30_000 && activityStatus === "terminal-open") {
           activityStatus = "active";
         }
         const isRunning = activityStatus === "active";
@@ -1609,14 +1145,167 @@ export default function SessionDetailPage({
       {/* Two-column layout: messages left, reply panel right */}
       <div className="flex-1 flex min-h-0">
         {/* ── Left: Messages ──────────────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          {/* ── Summary + Learnings — top of messages area ─────────────────── */}
+          <div className="shrink-0 border-b border-border/30">
+            {/* Trigger bar */}
+            <div className="flex items-center gap-3 px-5 py-1.5">
+              <button
+                onClick={async () => {
+                  if (summaryOpen) { setSummaryOpen(false); return; }
+                  setSummaryOpen(true);
+                  if (summary) return;
+                  setSummaryLoading(true);
+                  setSummaryError(null);
+                  try {
+                    const res = await fetch(`/api/sessions/${data.session_id}/summary`, { method: "POST" });
+                    const json = await res.json();
+                    if (json.error) setSummaryError(json.error);
+                    else setSummary(json.summary);
+                  } catch (e) {
+                    setSummaryError(e instanceof Error ? e.message : "Failed");
+                  } finally { setSummaryLoading(false); }
+                }}
+                className={`flex items-center gap-1.5 text-[11px] py-0.5 rounded transition-all duration-300 ${
+                  summaryLoading
+                    ? "text-blue-400 animate-pulse"
+                    : summary
+                      ? "text-green-500/60 hover:text-green-500"
+                      : summaryOpen
+                        ? "text-foreground"
+                        : "text-muted-foreground/40 hover:text-muted-foreground"
+                }`}
+                title="Generate session summary"
+              >
+                <ScrollText className="h-3 w-3" />
+                Summary
+              </button>
+              <button
+                onClick={async () => {
+                  if (learningsOpen) { setLearningsOpen(false); return; }
+                  setLearningsOpen(true);
+                  if (learnings) return;
+                  setLearningsLoading(true);
+                  setLearningsError(null);
+                  try {
+                    const res = await fetch(`/api/sessions/${data.session_id}/learnings`, { method: "POST" });
+                    const json = await res.json();
+                    if (json.error) setLearningsError(json.error);
+                    else setLearnings(json.learnings);
+                  } catch (e) {
+                    setLearningsError(e instanceof Error ? e.message : "Failed");
+                  } finally { setLearningsLoading(false); }
+                }}
+                className={`flex items-center gap-1.5 text-[11px] py-0.5 rounded transition-all duration-300 ${
+                  learningsLoading
+                    ? "text-blue-400 animate-pulse"
+                    : learnings
+                      ? "text-green-500/60 hover:text-green-500"
+                      : learningsOpen
+                        ? "text-foreground"
+                        : "text-muted-foreground/40 hover:text-muted-foreground"
+                }`}
+                title="Extract session learnings"
+              >
+                <Lightbulb className="h-3 w-3" />
+                Learnings
+              </button>
+            </div>
+
+            {/* Summary panel — expands below trigger */}
+            {summaryOpen && (
+              <div className="border-t border-border/20 bg-muted/10 px-5 py-3 max-h-[40vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">Summary</span>
+                  <button
+                    onClick={() => setSummaryOpen(false)}
+                    className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground flex items-center gap-1 transition-colors"
+                  >
+                    <ChevronsDownUp className="h-3 w-3" />
+                    Collapse
+                  </button>
+                </div>
+                {summaryLoading && (
+                  <div className="flex items-center gap-2 py-4 justify-center text-[11px] text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+                    <span className="text-blue-400/70">Generating summary…</span>
+                  </div>
+                )}
+                {summaryError && <div className="text-[11px] text-red-500 py-1">{summaryError}</div>}
+                {summary && <MarkdownContent content={summary} projectPath={data?.project_path} compact />}
+              </div>
+            )}
+
+            {/* Learnings panel — expands below trigger */}
+            {learningsOpen && (
+              <div className="border-t border-border/20 bg-muted/10 px-5 py-3 max-h-[40vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">Learnings</span>
+                  <button
+                    onClick={() => setLearningsOpen(false)}
+                    className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground flex items-center gap-1 transition-colors"
+                  >
+                    <ChevronsDownUp className="h-3 w-3" />
+                    Collapse
+                  </button>
+                </div>
+                {learningsLoading && (
+                  <div className="flex items-center gap-2 py-4 justify-center text-[11px] text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+                    <span className="text-blue-400/70">Extracting learnings…</span>
+                  </div>
+                )}
+                {learningsError && <div className="text-[11px] text-red-500 py-1">{learningsError}</div>}
+                {learnings && (() => {
+                  const l = learnings as Record<string, string | string[]>;
+                  const categories = [
+                    { key: "summary", label: "Summary", single: true },
+                    { key: "discoveries", label: "Discoveries", single: false },
+                    { key: "friction_loops", label: "Friction / Loops", single: false },
+                    { key: "claude_md_rules", label: "CLAUDE.md Rules", single: false },
+                    { key: "patterns", label: "Patterns", single: false },
+                    { key: "bugs_fixed", label: "Bugs Fixed", single: false },
+                    { key: "tools_learned", label: "Tools Learned", single: false },
+                    { key: "preferences", label: "Preferences", single: false },
+                    { key: "gotchas", label: "Gotchas", single: false },
+                  ];
+                  return (
+                    <div className="space-y-2.5">
+                      {categories.map(({ key, label, single }) => {
+                        const val = l[key];
+                        if (!val || (Array.isArray(val) && val.length === 0)) return null;
+                        return (
+                          <div key={key}>
+                            <div className="text-[9px] font-medium text-muted-foreground/50 uppercase tracking-wider mb-0.5">{label}</div>
+                            {single ? (
+                              <p className="text-[11px] text-foreground/80 leading-relaxed">{val as string}</p>
+                            ) : (
+                              <ul className="space-y-0.5">
+                                {(val as string[]).map((item, i) => (
+                                  <li key={i} className="text-[11px] text-foreground/80 leading-relaxed flex gap-1.5">
+                                    <span className="text-muted-foreground/30 shrink-0">•</span>
+                                    <span
+                                      className="cursor-pointer hover:bg-muted/50 rounded px-0.5 -mx-0.5 transition-colors"
+                                      onClick={() => navigator.clipboard.writeText(item)}
+                                      title="Click to copy"
+                                    >{item}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
 
           {/* MD view (default) or bubble messages */}
           {mdView ? (
-            <div className="flex-1 min-h-0 overflow-y-auto relative" ref={mdScrollRef} onScroll={(e) => {
-              const el = e.currentTarget;
-              mdWasAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-            }}>
+            <div className="flex-1 min-h-0 overflow-y-auto relative" ref={mdScrollRef}>
               {/* Search bar (Cmd+F) */}
               {mdSearch && (
                 <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b px-4 py-2 flex items-center gap-2">
@@ -1649,24 +1338,7 @@ export default function SessionDetailPage({
                 </div>
               ) : mdContent ? (
                 <div className="max-w-4xl mx-auto px-6 py-6">
-                  {mdHasEarlier && (
-                    <div className="flex items-center justify-center py-3 mb-4 border-b border-dashed border-muted-foreground/20">
-                      <button
-                        onClick={loadAllMdMessages}
-                        disabled={mdLoadingEarlier}
-                        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5"
-                      >
-                        {mdLoadingEarlier ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <ChevronDown className="h-3 w-3 rotate-180" />
-                        )}
-                        Load {mdRenderStart} earlier messages
-                      </button>
-                    </div>
-                  )}
                   <MarkdownContent content={mdContent} projectPath={data.project_path} compact />
-                  {inlineSummaryLearnings}
                 </div>
               ) : null}
             </div>
@@ -1683,9 +1355,7 @@ export default function SessionDetailPage({
             projectPath={data.project_path}
             onLoadEarlier={hasEarlier ? loadEarlierMessages : undefined}
             loadingEarlier={loadingEarlier}
-          >
-            {inlineSummaryLearnings}
-          </MessageView>
+          />
           )}
 
           {/* Permission requests from Claude CLI */}
@@ -1757,8 +1427,6 @@ export default function SessionDetailPage({
             </div>
           )}
 
-          {/* Summary/Learnings — now inline inside scroll areas */}
-
         </div>
 
         {/* ── Right: Reply panel ──────────────────────────────────────────────── */}
@@ -1785,7 +1453,7 @@ export default function SessionDetailPage({
             </button>
           </div>
           {/* Scrollable info section */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-0 pb-5 space-y-2">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-0 space-y-2">
             {/* Session metadata */}
             <div className="text-xs text-muted-foreground space-y-1">
               <div className="flex items-center gap-2">
@@ -1894,29 +1562,8 @@ export default function SessionDetailPage({
               )}
             </div>
 
-            {/* Status alerts: incomplete exit > crashed > streaming > terminal active */}
-            {isIncompleteExit && !isStreaming && !isInterrupted ? (
-              <div className="flex items-start gap-2 p-2.5 text-xs rounded-lg border border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400">
-                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <span>Process exited after last response — may have died before completing the task</span>
-                  {retryCountdown !== null && (
-                    <span className="block mt-0.5 opacity-80">Auto-resume in <strong>{retryCountdown}s</strong></span>
-                  )}
-                  <div className="flex gap-1.5 mt-1.5">
-                    {retryCountdown !== null ? (
-                      <Button size="sm" variant="ghost" className="h-5 text-[11px] px-1.5 gap-0.5 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10" onClick={cancelRetry}>
-                        <X className="h-2.5 w-2.5" /> Cancel
-                      </Button>
-                    ) : (
-                      <Button size="sm" variant="ghost" className="h-5 text-[11px] px-1.5 gap-0.5 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10" onClick={() => { cancelRetry(); queueRef.current.push("Your process exited unexpectedly after your last response. Please check what you were doing and continue where you left off."); setQueuedMessages([...queueRef.current]); processQueue(); }}>
-                        <Repeat className="h-2.5 w-2.5" /> Resume now
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : isInterrupted && !isStreaming ? (
+            {/* Status alerts: crashed > streaming > terminal active */}
+            {isInterrupted && !isStreaming ? (
               <div className="flex items-start gap-2 p-2.5 text-xs rounded-lg border border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-400">
                 <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
@@ -1985,6 +1632,45 @@ export default function SessionDetailPage({
               <span><kbd className="font-mono">⌘L</kbd> input</span>
             </div>
 
+            {/* Navigation — 2 columns */}
+            <div className="pt-1 border-t border-border/30 grid grid-cols-2 gap-x-1 gap-y-0.5">
+              <Link href="/claude-sessions/settings" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <Settings className="h-4 w-4 shrink-0" />
+                Settings
+              </Link>
+              <Link href="/claude-sessions/actions" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <ClipboardList className="h-4 w-4 shrink-0" />
+                Actions log
+              </Link>
+              <Link href="/claude-sessions/analytics" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <BarChart2 className="h-4 w-4 shrink-0" />
+                Analytics
+              </Link>
+              <Link href="/claude-sessions/archive" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <Archive className="h-4 w-4 shrink-0" />
+                Archive
+              </Link>
+              <Link href="/claude-sessions/store" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <Package className="h-4 w-4 shrink-0" />
+                Store
+              </Link>
+              <Link href="/claude-sessions/help" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
+                <CircleHelp className="h-4 w-4 shrink-0" />
+                Help
+              </Link>
+              <button
+                onClick={() => {
+                  const next = theme === "dark" ? "light" : "dark";
+                  setTheme(next);
+                  document.documentElement.className = next === "light" ? "" : "dark";
+                  localStorage.setItem("theme", next);
+                }}
+                className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
+              >
+                {theme === "dark" ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
+                Theme
+              </button>
+            </div>
           </div>
 
           {/* Sent message confirmation */}
@@ -1997,8 +1683,8 @@ export default function SessionDetailPage({
             </div>
           )}
 
-          {/* Input area — pinned to bottom (pb-8 = raised ~5mm above browser floor) */}
-          <div className="shrink-0 px-4 pb-8 pt-2">
+          {/* Input area — pinned to bottom */}
+          <div className="shrink-0 px-4 pb-4 pt-2">
             {/* Hidden file input for new session */}
             <input
               ref={newFileInputRef}
@@ -2045,26 +1731,10 @@ export default function SessionDetailPage({
               <ReplyInput
                 ref={replyInputRef}
                 sessionId={data.session_id}
-                onSend={showNewSessionOpts ? (msg: string) => {
-                  if (!newSessionPath) {
-                    newAutodetect.detect(msg).then((firstPath) => {
-                      if (firstPath) {
-                        setNewSessionPath(firstPath);
-                        setTimeout(() => handleStartNewSession(msg), 50);
-                      } else {
-                        setFolderBrowserOpen(true);
-                      }
-                    });
-                    return;
-                  }
-                  handleStartNewSession(msg);
-                  replyInputRef.current?.setText("");
-                  setShowNewSessionOpts(false);
-                } : handleSend}
+                onSend={handleSend}
                 queueSize={queuedMessages.length}
                 isStreaming={isStreaming}
-                bgClassName={showNewSessionOpts ? "border-emerald-500/40 bg-emerald-500/5" : "border-border bg-muted/30"}
-                placeholder={showNewSessionOpts ? "New session prompt… (Enter = start new)" : undefined}
+                bgClassName="border-border bg-muted/30"
               />
             </div>
 
@@ -2117,16 +1787,16 @@ export default function SessionDetailPage({
                   }}
                   className={`text-[11px] px-2.5 py-1 rounded-md transition-colors border ${
                     showNewSessionOpts
-                      ? "border-muted-foreground/30 bg-muted/50 text-muted-foreground hover:bg-muted/70"
+                      ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-400"
                       : "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/15 hover:border-emerald-500/60"
                   }`}
-                  title={showNewSessionOpts ? "Cancel new session" : "New session options"}
+                  title={showNewSessionOpts ? "Hide new session options" : "New session options"}
                 >
-                  {showNewSessionOpts ? "Cancel" : "New ↗"}
+                  New ↗
                 </button>
               )}
 
-              {/* Send = reply to current session (dimmed when new session mode active) */}
+              {/* Send = reply to current session */}
               <button
                 onClick={() => {
                   if (replyMode === "reply") replyInputRef.current?.triggerSend();
@@ -2134,13 +1804,9 @@ export default function SessionDetailPage({
                 }}
                 disabled={
                   replyMode === "issue" ? (!issueCategory || !issueDescription.trim() || isSubmittingIssue) :
-                  showNewSessionOpts
+                  false
                 }
-                className={`text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 ${
-                  showNewSessionOpts
-                    ? "bg-muted text-muted-foreground"
-                    : "bg-foreground text-background hover:bg-foreground/80"
-                }`}
+                className="text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 bg-foreground text-background hover:bg-foreground/80"
               >
                 {isSubmittingIssue && replyMode === "issue" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

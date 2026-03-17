@@ -1,360 +1,9 @@
-import { getDb, indexSessionContent, logAction, getSetting } from "./db";
+import { getDb, indexSessionContent, logAction } from "./db";
 import { glob } from "glob";
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
-import { getCleanEnv, claudeProjectsDir, UUID_RE } from "./utils";
-import { getClaudePath } from "./claude-bin";
-import { openInTerminal } from "./terminal-launcher";
-import type { SessionRow } from "./types";
-
-// ── Server-side auto-retry ────────────────────────────────────────────────────
-
-/** Session IDs with a pending server-side retry — prevents double-scheduling. */
-const retryScheduled = new Set<string>();
-
-// ── Server-side stall detection + auto-continue ───────────────────────────────
-
-/** Session IDs already scheduled for stall-continue — prevents double-scheduling. */
-const stallScheduled = new Set<string>();
-
-/**
- * How long (ms) a session must be silent (no JSONL writes) while active
- * before we consider it "stalled" and potentially auto-continue it.
- */
-const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
-
-/**
- * Ask a small LLM (claude-haiku-4-5) whether the last assistant message
- * is asking the user for clarification/input.
- * Returns true = Claude is waiting for user, false = Claude just stopped mid-task.
- */
-async function isWaitingForUser(lastAssistantText: string): Promise<boolean> {
-  if (!lastAssistantText.trim()) return false;
-
-  // Cheap heuristic first — avoid API call when obvious
-  const lower = lastAssistantText.toLowerCase();
-  const waitingPatterns = [
-    /\?\s*$/, // ends with question mark
-    /which (option|approach|do you|would you)/,
-    /do you want/,
-    /should i (proceed|continue|go ahead)/,
-    /let me know/,
-    /please (confirm|clarify|specify|choose|select|provide)/,
-    /what (would|do) you (like|prefer|want)/,
-    /готов|подтверди|выбери|какой вариант|хотите|скажи/,
-  ];
-  const looksLikeQuestion = waitingPatterns.some((re) => re.test(lower));
-
-  // If clearly asking a question, trust the heuristic — no API call needed
-  if (looksLikeQuestion) return true;
-
-  // For ambiguous cases: call Haiku to classify
-  try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return false;
-
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 5,
-        messages: [{
-          role: "user",
-          content: `Is this message asking the user for clarification, confirmation, or a decision before proceeding? Answer only YES or NO.\n\nMessage:\n${lastAssistantText.slice(0, 1500)}`,
-        }],
-      }),
-    });
-
-    if (!response.ok) return false;
-    const json = await response.json();
-    const answer = json.content?.[0]?.text?.trim().toUpperCase() ?? "";
-    return answer.startsWith("YES");
-  } catch {
-    return false; // default: assume not waiting, safe to continue
-  }
-}
-
-/**
- * Send "continue" to a stalled session if Claude is not waiting for user input.
- */
-async function serverAutoContinue(sessionId: string): Promise<void> {
-  const db = getDb();
-  const session = db
-    .prepare("SELECT project_path, last_message_role, last_message, jsonl_path FROM sessions WHERE session_id = ?")
-    .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path"> & { last_message: string | null } | undefined;
-
-  if (!session) return;
-  if (getSetting("auto_continue_on_stall") !== "true") return;
-
-  // Re-check: session must still be active (process still running) with assistant as last message
-  const { isSessionActive } = await import("./process-detector");
-  if (!isSessionActive(sessionId)) return;
-
-  // Re-check mtime — if it changed, session is no longer stalled
-  try {
-    const mtime = fs.statSync(session.jsonl_path).mtimeMs;
-    if (Date.now() - mtime < STALL_THRESHOLD_MS) return;
-  } catch {
-    return;
-  }
-
-  if (session.last_message_role !== "assistant") return;
-
-  // Get last assistant text from JSONL for LLM classification
-  const lastAssistantText = extractLastAssistantText(session.jsonl_path);
-  const waiting = await isWaitingForUser(lastAssistantText);
-
-  if (waiting) {
-    logAction("service", "stall_continue_skipped", "Claude is asking user a question", sessionId);
-    return;
-  }
-
-  logAction("service", "stall_continue_fired", `stalled >${STALL_THRESHOLD_MS / 60_000}min`, sessionId);
-
-  const context = session.last_message
-    ? `\n\nFor context, the user's last message was: "${session.last_message.slice(0, 200)}"`
-    : "";
-  const stallPrompt = `You appear to have stalled — no output for over 5 minutes. I noticed and auto-resumed you. Please check what you were doing and continue the task.${context}`;
-
-  const proc = spawn(
-    getClaudePath(),
-    ["--resume", sessionId, "-p", stallPrompt, "--output-format", "stream-json", "--verbose"],
-    { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"] }
-  );
-  proc.stdout?.resume();
-  proc.stderr?.resume();
-  proc.on("close", (code) => {
-    logAction("service", code === 0 ? "stall_continue_done" : "stall_continue_failed", `exit:${code}`, sessionId);
-  });
-}
-
-function scheduleStallContinue(sessionId: string, delayMs = 60_000): void {
-  if (stallScheduled.has(sessionId)) return;
-  stallScheduled.add(sessionId);
-  setTimeout(async () => {
-    stallScheduled.delete(sessionId);
-    await serverAutoContinue(sessionId);
-  }, delayMs);
-}
-
-/** Extract the last assistant text block from a JSONL file for LLM classification.
- *  Reads only the tail of the file (64 KB) to avoid loading multi-MB files. */
-function extractLastAssistantText(jsonlPath: string): string {
-  try {
-    const stat = fs.statSync(jsonlPath);
-    const TAIL_BYTES = 64 * 1024;
-    const start = Math.max(0, stat.size - TAIL_BYTES);
-    const fd = fs.openSync(jsonlPath, "r");
-    const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
-    fs.readSync(fd, buf, 0, buf.length, start);
-    fs.closeSync(fd);
-
-    const lines = buf.toString("utf-8").split(/\r?\n/).filter(Boolean);
-    // If we started mid-file, first line is likely truncated — skip it
-    if (start > 0) lines.shift();
-    lines.reverse();
-
-    for (const line of lines) {
-      try {
-        const obj = JSON.parse(line);
-        if (obj.type !== "assistant" || !obj.message?.content) continue;
-        const content = obj.message.content;
-        if (typeof content === "string") return content;
-        if (Array.isArray(content)) {
-          const text = content
-            .filter((b: { type: string; text?: string }) => b.type === "text" && b.text)
-            .map((b: { text: string }) => b.text)
-            .join("\n");
-          if (text.trim()) return text;
-        }
-      } catch { /* skip malformed */ }
-    }
-  } catch { /* ignore */ }
-  return "";
-}
-
-/**
- * Spawn `claude --resume {id}` in the background with a helpful crash-recovery prompt.
- * Called automatically 30s after a crash is detected during scanning.
- */
-function serverAutoRetry(sessionId: string): void {
-  const db = getDb();
-  const session = db
-    .prepare("SELECT project_path, last_message_role, last_message FROM sessions WHERE session_id = ?")
-    .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role"> & { last_message: string | null } | undefined;
-
-  // Bail if session recovered on its own or setting was disabled
-  if (!session || session.last_message_role !== "tool_result") return;
-  if (getSetting("auto_retry_on_crash") === "false") return;
-
-  logAction("service", "auto_retry_fired", "server-side 30s timeout", sessionId);
-
-  const context = session.last_message
-    ? `\n\nFor context, the user's last message was: "${session.last_message.slice(0, 200)}"`
-    : "";
-  const retryPrompt = `You crashed mid-tool-execution. I noticed and auto-resumed you. Please check what you were doing, pick up where you left off, and continue the task.${context}`;
-
-  const proc = spawn(
-    getClaudePath(),
-    ["--resume", sessionId, "-p", retryPrompt, "--output-format", "stream-json", "--verbose"],
-    { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"] }
-  );
-
-  // Drain stdout/stderr so buffers don't block the process
-  proc.stdout?.resume();
-  proc.stderr?.resume();
-
-  proc.on("close", (code) => {
-    logAction(
-      "service",
-      code === 0 ? "auto_retry_done" : "auto_retry_failed",
-      `exit:${code}`,
-      sessionId
-    );
-  });
-}
-
-function scheduleServerAutoRetry(sessionId: string, delayMs = 30_000): void {
-  if (retryScheduled.has(sessionId)) return; // already queued
-  retryScheduled.add(sessionId);
-  setTimeout(() => {
-    retryScheduled.delete(sessionId);
-    serverAutoRetry(sessionId);
-  }, delayMs);
-}
-
-// ── Permission escalation — push stuck sessions to terminal ──────────────────
-
-/** Session IDs already escalated to terminal — prevents double-escalation. */
-const escalationScheduled = new Set<string>();
-
-/**
- * Permission-denied patterns in tool_result content or assistant text.
- * When Claude hits these repeatedly it means the web-spawned process
- * lacks permissions that a terminal session with --dangerously-skip-permissions would have.
- */
-const PERMISSION_PATTERNS = [
-  /permission denied/i,
-  /operation not permitted/i,
-  /EACCES/,
-  /access denied/i,
-  /not authorized/i,
-  /sandbox.*restrict/i,
-  /cannot (write|read|access|create|delete|modify)/i,
-  /unable to (write|read|access|create|delete)/i,
-  /read-only file system/i,
-];
-
-/**
- * Check the tail of a JSONL file for permission-denied patterns.
- * Looks at the last N tool_result blocks and assistant messages.
- * Returns true if 2+ distinct permission errors are found (= stuck in a loop).
- */
-function detectPermissionLoop(jsonlPath: string): boolean {
-  try {
-    const stat = fs.statSync(jsonlPath);
-    const TAIL_BYTES = 128 * 1024; // last 128KB
-    const start = Math.max(0, stat.size - TAIL_BYTES);
-    const fd = fs.openSync(jsonlPath, "r");
-    const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
-    fs.readSync(fd, buf, 0, buf.length, start);
-    fs.closeSync(fd);
-
-    const lines = buf.toString("utf-8").split(/\r?\n/).filter(Boolean);
-    if (start > 0) lines.shift(); // skip partial first line
-
-    let permissionHits = 0;
-
-    // Check last 30 lines for permission patterns
-    const recentLines = lines.slice(-30);
-    for (const line of recentLines) {
-      try {
-        const obj = JSON.parse(line);
-
-        // Check tool_result content for permission errors
-        if (obj.type === "user" && Array.isArray(obj.message?.content)) {
-          for (const block of obj.message.content) {
-            if (block.type === "tool_result") {
-              const text = typeof block.content === "string"
-                ? block.content
-                : Array.isArray(block.content)
-                  ? block.content.map((b: { text?: string }) => b.text || "").join(" ")
-                  : "";
-              if (PERMISSION_PATTERNS.some((re) => re.test(text))) {
-                permissionHits++;
-              }
-            }
-          }
-        }
-
-        // Check assistant text asking about permissions
-        if (obj.type === "assistant" && obj.message?.content) {
-          const content = obj.message.content;
-          const text = typeof content === "string"
-            ? content
-            : Array.isArray(content)
-              ? content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join(" ")
-              : "";
-          if (PERMISSION_PATTERNS.some((re) => re.test(text))) {
-            permissionHits++;
-          }
-        }
-      } catch { /* skip malformed */ }
-    }
-
-    return permissionHits >= 2;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Escalate a permission-stuck session to a terminal window.
- * Opens iTerm2/Terminal with `claude --resume --dangerously-skip-permissions`
- * and sends "check access again please" as the prompt.
- */
-async function escalateToTerminal(sessionId: string): Promise<void> {
-  const db = getDb();
-  const session = db
-    .prepare("SELECT project_path FROM sessions WHERE session_id = ?")
-    .get(sessionId) as { project_path: string } | undefined;
-
-  if (!session) return;
-  if (getSetting("auto_retry_on_crash") === "false") return;
-
-  logAction("service", "permission_escalation_fired", "pushing to terminal with --dangerously-skip-permissions", sessionId);
-
-  const claudePath = getClaudePath();
-  const shellCmd = `cd ${JSON.stringify(session.project_path)} && ${claudePath} --resume ${sessionId} --dangerously-skip-permissions -p "check access again please"`;
-
-  try {
-    const { terminal } = await openInTerminal(shellCmd);
-    logAction("service", "permission_escalation_done", `terminal:${terminal}`, sessionId);
-  } catch (err) {
-    logAction("service", "permission_escalation_failed", `${err}`, sessionId);
-  }
-}
-
-function schedulePermissionEscalation(sessionId: string, jsonlPath: string, delayMs = 15_000): void {
-  if (escalationScheduled.has(sessionId)) return;
-  escalationScheduled.add(sessionId);
-  setTimeout(async () => {
-    escalationScheduled.delete(sessionId);
-    // Re-check: still looks like a permission issue?
-    if (detectPermissionLoop(jsonlPath)) {
-      await escalateToTerminal(sessionId);
-    } else {
-      // Not a permission issue after all — fall back to normal retry
-      serverAutoRetry(sessionId);
-    }
-  }, delayMs);
-}
+import { claudeProjectsDir, UUID_RE } from "./utils";
+import { getOrchestrator, STALL_THRESHOLD_MS } from "./orchestrator";
 
 const CLAUDE_DIR = claudeProjectsDir();
 
@@ -374,6 +23,7 @@ interface JsonlMetadata {
   firstPrompt: string | null;
   lastMessage: string | null;
   lastMessageRole: string | null;
+  hasResult: boolean;
   messageCount: number;
   totalInputTokens: number;
   totalOutputTokens: number;
@@ -395,6 +45,7 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
     let firstPrompt: string | null = null;
     let lastMessage: string | null = null;
     let lastMessageRole: string | null = null;
+    let hasResult = false;
     let messageCount = 0;
     const textParts: string[] = [];
     let totalInputTokens = 0;
@@ -405,6 +56,11 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
     for (const line of lines) {
       try {
         const obj = JSON.parse(line);
+
+        // Track result events — present when Claude exits normally, absent on crash
+        if (obj.type === "result") {
+          hasResult = true;
+        }
 
         if (obj.type === "user" || obj.type === "assistant") {
           messageCount++;
@@ -507,6 +163,7 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
       firstPrompt,
       lastMessage,
       lastMessageRole,
+      hasResult,
       messageCount,
       totalInputTokens,
       totalOutputTokens,
@@ -558,12 +215,12 @@ export async function scanSessions(
     INSERT INTO sessions (
       session_id, jsonl_path, project_dir, project_path,
       git_branch, claude_version, model, first_prompt, last_message, last_message_role,
-      message_count, total_input_tokens, total_output_tokens,
+      has_result, message_count, total_input_tokens, total_output_tokens,
       created_at, modified_at, file_mtime, file_size, last_scanned_at
     ) VALUES (
       @session_id, @jsonl_path, @project_dir, @project_path,
       @git_branch, @claude_version, @model, @first_prompt, @last_message, @last_message_role,
-      @message_count, @total_input_tokens, @total_output_tokens,
+      @has_result, @message_count, @total_input_tokens, @total_output_tokens,
       @created_at, @modified_at, @file_mtime, @file_size, @last_scanned_at
     )
     ON CONFLICT(session_id) DO UPDATE SET
@@ -576,6 +233,7 @@ export async function scanSessions(
       first_prompt = COALESCE(@first_prompt, sessions.first_prompt),
       last_message = COALESCE(@last_message, sessions.last_message),
       last_message_role = COALESCE(@last_message_role, sessions.last_message_role),
+      has_result = @has_result,
       message_count = @message_count,
       total_input_tokens = @total_input_tokens,
       total_output_tokens = @total_output_tokens,
@@ -670,27 +328,26 @@ export async function scanSessions(
 
       projectDirs.add(dirName);
 
-      // Detect newly-crashed sessions
+      // Detect newly-crashed sessions → delegate to orchestrator
+      // Uses file_mtime change (not just role transition) to catch repeated crashes
       if (metadata.lastMessageRole === "tool_result") {
         const prev = db
-          .prepare("SELECT last_message_role FROM sessions WHERE session_id = ?")
-          .get(sessionId) as { last_message_role: string | null } | undefined;
-        if (prev?.last_message_role !== "tool_result") {
-          logAction("service", "crash_detected", `jsonl:${filePath}`, sessionId);
+          .prepare("SELECT last_message_role, file_mtime FROM sessions WHERE session_id = ?")
+          .get(sessionId) as { last_message_role: string | null; file_mtime: number | null } | undefined;
+        const isNewCrash = !prev || prev.last_message_role !== "tool_result";
+        const isRepeatedCrash = prev?.last_message_role === "tool_result" &&
+          prev.file_mtime !== null && Math.abs(stat.mtimeMs - prev.file_mtime) > 1000;
+        if (isNewCrash || isRepeatedCrash) {
+          logAction("service", isRepeatedCrash ? "repeated_crash_detected" : "crash_detected", `jsonl:${filePath}`, sessionId);
           const capturedPath = filePath;
           postTxActions.push(() => {
-            // Check if this looks like a permission loop — escalate to terminal instead of normal retry
-            if (detectPermissionLoop(capturedPath)) {
-              logAction("service", "permission_loop_detected", `jsonl:${capturedPath}`, sessionId);
-              schedulePermissionEscalation(sessionId, capturedPath);
-            } else {
-              scheduleServerAutoRetry(sessionId);
-            }
+            getOrchestrator().enqueueCrashRetry(sessionId, capturedPath);
           });
         }
       }
 
-      // Detect stalled sessions — defer isSessionActive check to after transaction
+      // Detect stalled sessions (process alive but not writing) → delegate to orchestrator
+      // Note: incomplete_exit (process dead) is handled by detectIncompleteExits() post-scan
       if (metadata.lastMessageRole === "assistant") {
         const silentMs = Date.now() - stat.mtimeMs;
         if (silentMs > STALL_THRESHOLD_MS) {
@@ -700,7 +357,7 @@ export async function scanSessions(
             const { isSessionActive } = require("./process-detector");
             if (isSessionActive(capturedSessionId)) {
               logAction("service", "stall_detected", `silent:${Math.round(capturedSilentMs / 60_000)}min`, capturedSessionId);
-              scheduleStallContinue(capturedSessionId, 10_000);
+              getOrchestrator().enqueueStallContinue(capturedSessionId);
             }
           });
         }
@@ -717,6 +374,7 @@ export async function scanSessions(
         first_prompt: metadata.firstPrompt,
         last_message: metadata.lastMessage,
         last_message_role: metadata.lastMessageRole,
+        has_result: metadata.hasResult ? 1 : 0,
         message_count: metadata.messageCount,
         total_input_tokens: metadata.totalInputTokens,
         total_output_tokens: metadata.totalOutputTokens,
@@ -791,6 +449,9 @@ export async function scanSessions(
     updateProjects();
   }
 
+  // Post-scan: detect incomplete exits from DB (catches files skipped by incremental scan)
+  detectIncompleteExits(db);
+
   const result = {
     sessionsScanned,
     sessionsSkipped,
@@ -799,6 +460,51 @@ export async function scanSessions(
   };
   dlog.info("scanner", `scan complete: ${sessionsScanned} scanned, ${sessionsSkipped} skipped, ${result.duration}ms`, result);
   return result;
+}
+
+/**
+ * Post-scan detection of incomplete exits.
+ * Queries the DB for sessions where:
+ *  - last_message_role = 'assistant' (Claude was about to act)
+ *  - has_result = 0 (no result event = didn't finish normally)
+ *  - file is older than STALL_THRESHOLD_MS (enough time has passed)
+ *  - not too old (< 30 min — stale sessions shouldn't auto-resume)
+ *
+ * This runs AFTER the main scan, so it catches files that were
+ * skipped by incremental mode (same mtime → skipped → in-loop check never fires).
+ */
+function detectIncompleteExits(db: ReturnType<typeof getDb>): void {
+  const { isSessionActive } = require("./process-detector");
+  const orch = getOrchestrator();
+  const MAX_AGE_MS = 30 * 60 * 1000; // Don't auto-resume sessions older than 30 min
+
+  const cutoffRecent = Date.now() - STALL_THRESHOLD_MS;
+  const cutoffOld = Date.now() - MAX_AGE_MS;
+
+  const candidates = db.prepare(`
+    SELECT session_id, jsonl_path, file_mtime
+    FROM sessions
+    WHERE last_message_role = 'assistant'
+      AND file_mtime < ?
+      AND file_mtime > ?
+  `).all(cutoffRecent, cutoffOld) as Array<{
+    session_id: string;
+    jsonl_path: string;
+    file_mtime: number;
+  }>;
+
+  for (const session of candidates) {
+    // Skip if process is still alive (that's a stall, not incomplete exit)
+    if (isSessionActive(session.session_id)) continue;
+
+    // Skip if orchestrator is already handling this session
+    const state = orch.status(session.session_id);
+    if (state && !["idle", "completed", "failed"].includes(state.phase)) continue;
+
+    const silentMin = Math.round((Date.now() - session.file_mtime) / 60_000);
+    logAction("service", "incomplete_exit_detected", `silent:${silentMin}min (post-scan)`, session.session_id);
+    orch.enqueueIncompleteExitResume(session.session_id, session.jsonl_path);
+  }
 }
 
 // Claude stores project dirs as cwd with path separators replaced by "-".

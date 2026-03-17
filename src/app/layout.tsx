@@ -30,6 +30,11 @@ export default function RootLayout({
             __html: `(function(){try{var t=localStorage.getItem("theme");document.documentElement.className=t==="light"?"":"dark"}catch(e){document.documentElement.className="dark"}})()`,
           }}
         />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){window.addEventListener("error",function(e){if(e.message&&(e.message.indexOf("Loading chunk")!==-1||e.message.indexOf("Failed to fetch dynamically imported module")!==-1)){var k="__chunk_reload",v=sessionStorage.getItem(k);if(!v||Date.now()-Number(v)>10000){sessionStorage.setItem(k,String(Date.now()));window.location.reload()}}})})()`,
+          }}
+        />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}

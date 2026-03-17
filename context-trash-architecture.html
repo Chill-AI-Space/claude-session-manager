@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context Trash MCP — How It Works</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2333;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #7ee787;
+    --accent3: #d2a8ff;
+    --orange: #f0883e;
+    --red: #f85149;
+    --yellow: #d29922;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+  .hero {
+    background: linear-gradient(135deg, #0d1117 0%, #1a1e2e 50%, #0d1117 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 60px 40px 40px;
+    text-align: center;
+  }
+  .hero h1 {
+    font-size: 2.4em;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 12px;
+  }
+  .hero .subtitle { font-size: 1.1em; color: var(--text-dim); max-width: 700px; margin: 0 auto; }
+  .container { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+  h2 {
+    font-size: 1.6em; font-weight: 700; color: var(--accent);
+    margin: 50px 0 16px; padding-bottom: 6px; border-bottom: 2px solid var(--border);
+  }
+  h3 { font-size: 1.2em; font-weight: 600; color: var(--accent3); margin: 28px 0 10px; }
+  h4 { font-size: 1.05em; font-weight: 600; color: var(--accent2); margin: 20px 0 8px; }
+  p { margin: 10px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  ul, ol { padding-left: 24px; margin: 10px 0; }
+  li { margin: 5px 0; }
+  code {
+    background: var(--surface2); padding: 2px 6px; border-radius: 4px;
+    font-size: 0.9em; color: var(--accent2);
+  }
+  pre {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; margin: 12px 0;
+  }
+  pre code { background: none; padding: 0; color: var(--text); }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin: 16px 0;
+  }
+  .card.highlight { border-color: var(--accent); background: linear-gradient(135deg, rgba(88,166,255,0.05), rgba(210,168,255,0.05)); }
+  .card.success { border-color: var(--accent2); background: rgba(126,231,135,0.05); }
+  .card.warning { border-color: var(--orange); background: rgba(240,136,62,0.05); }
+  .card.free { border-color: var(--accent2); border-width: 2px; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 0.92em; }
+  th, td { padding: 10px 14px; border: 1px solid var(--border); text-align: left; }
+  th { background: var(--surface2); color: var(--accent); font-weight: 600; }
+  td { background: var(--surface); }
+
+  .flow {
+    margin: 20px 0;
+    position: relative;
+  }
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    margin: 0;
+    position: relative;
+  }
+  .flow-step + .flow-step { margin-top: 4px; }
+  .flow-num {
+    width: 40px; height: 40px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 0.9em; flex-shrink: 0;
+    margin-right: 16px; margin-top: 12px;
+  }
+  .flow-num.user { background: #1f6feb; color: #fff; }
+  .flow-num.claude { background: #d2a8ff; color: #000; }
+  .flow-num.mcp { background: #7ee787; color: #000; }
+  .flow-num.ocr { background: #f0883e; color: #000; }
+  .flow-num.gemini { background: #f85149; color: #fff; }
+  .flow-num.free { background: #238636; color: #fff; }
+  .flow-content {
+    flex: 1; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 18px;
+  }
+  .flow-content .who {
+    font-size: 0.8em; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; margin-bottom: 4px;
+  }
+  .flow-content .who.user { color: var(--accent); }
+  .flow-content .who.claude { color: var(--accent3); }
+  .flow-content .who.mcp { color: var(--accent2); }
+  .flow-content .who.ocr { color: var(--orange); }
+  .flow-content .who.gemini { color: var(--red); }
+  .flow-arrow {
+    width: 40px; display: flex; justify-content: center;
+    margin-right: 16px; color: var(--text-dim); font-size: 1.2em;
+    padding: 2px 0;
+  }
+  .flow-spacer { height: 4px; }
+
+  .cost-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 12px;
+    font-size: 0.8em; font-weight: 700; margin-left: 8px;
+  }
+  .cost-badge.free { background: rgba(126,231,135,0.2); color: var(--accent2); }
+  .cost-badge.cheap { background: rgba(210,168,255,0.2); color: var(--accent3); }
+  .cost-badge.paid { background: rgba(248,81,73,0.2); color: var(--red); }
+
+  .token-box {
+    display: inline-block; padding: 3px 10px; border-radius: 6px;
+    font-size: 0.85em; font-weight: 600; margin: 2px;
+  }
+  .token-box.before { background: rgba(248,81,73,0.15); color: var(--red); }
+  .token-box.after { background: rgba(126,231,135,0.15); color: var(--accent2); }
+
+  .comparison-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0;
+  }
+  @media (max-width: 700px) {
+    .comparison-grid { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 1.6em; }
+  }
+
+  footer {
+    text-align: center; padding: 30px; color: var(--text-dim);
+    font-size: 0.85em; border-top: 1px solid var(--border); margin-top: 40px;
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Context Trash MCP</h1>
+  <p class="subtitle">Proxy MCP-сервер для сжатия тяжёлого контента перед попаданием в контекст Claude Code. Пошаговая архитектура, стоимость, и кто за что платит.</p>
+</div>
+
+<div class="container">
+
+<!-- ============================================================ -->
+<h2>Главный вопрос: что это и для кого</h2>
+
+<div class="card highlight">
+  <h4>В одном предложении</h4>
+  <p><strong>Context Trash MCP</strong> — это прокси, который садится <em>между</em> Claude Code и любым MCP-сервером (Playwright, файлы, API и т.д.) и автоматически сжимает "жирные" ответы перед тем, как Claude их увидит.</p>
+</div>
+
+<div class="comparison-grid">
+  <div class="card">
+    <h4>Без Context Trash</h4>
+    <pre><code>Claude Code
+  → вызывает Playwright "сделай скриншот"
+  → Playwright возвращает base64 PNG
+  → 250,000 токенов попадают в контекст
+  → контекст забит за 3 скриншота
+  → compact → потеря памяти</code></pre>
+  </div>
+  <div class="card success">
+    <h4>Со Context Trash</h4>
+    <pre><code>Claude Code
+  → вызывает Playwright "сделай скриншот"
+  → Playwright возвращает base64 PNG
+  → Context Trash перехватывает
+  → OCR: извлекает текст → 500 токенов
+  → Claude видит текст, не картинку
+  → контекст чистый часами</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2>Кто за что платит: полная раскладка</h2>
+
+<table>
+  <tr>
+    <th>Операция</th>
+    <th>Кто выполняет</th>
+    <th>Стоимость</th>
+    <th>Скорость</th>
+  </tr>
+  <tr>
+    <td><strong>OCR скриншотов</strong><br>(base64 → текст)</td>
+    <td>tesseract (локально) или<br>Apple Vision (macOS)</td>
+    <td><span class="cost-badge free">$0 — бесплатно</span><br>Работает на твоём компе, без API</td>
+    <td>1-3 сек</td>
+  </tr>
+  <tr>
+    <td><strong>Чистка DOM snapshots</strong><br>(убрать [ref=xxx], generic)</td>
+    <td>Regex (локально)</td>
+    <td><span class="cost-badge free">$0 — бесплатно</span><br>Простой парсинг текста</td>
+    <td>&lt;100 мс</td>
+  </tr>
+  <tr>
+    <td><strong>Суммаризация большого текста</strong><br>(файлы &gt;2k tok, API ответы)</td>
+    <td>Gemini Flash API<br><em>(опционально)</em></td>
+    <td><span class="cost-badge cheap">~$0.0001 за элемент</span><br>Gemini Flash: $0.075/1M input tok</td>
+    <td>1-3 сек</td>
+  </tr>
+  <tr>
+    <td><strong>Прокси MCP (сам сервер)</strong></td>
+    <td>Node.js процесс (локально)</td>
+    <td><span class="cost-badge free">$0 — бесплатно</span><br>Просто пересылает вызовы</td>
+    <td>&lt;10 мс overhead</td>
+  </tr>
+</table>
+
+<div class="card success">
+  <h4>Итого: 90% функциональности — бесплатно</h4>
+  <p>OCR скриншотов (главный use case, 300x сжатие) = <strong>бесплатно</strong>, работает локально.</p>
+  <p>Чистка DOM snapshots = <strong>бесплатно</strong>, regex.</p>
+  <p>Gemini нужен <strong>только</strong> для "умной" суммаризации текстовых блоков. Без него тоже работает — просто обрезаем до N символов вместо суммаризации.</p>
+  <p><strong>Gemini Flash стоит копейки:</strong> $0.075 за 1M входных токенов. Одна сессия с 50 элементами по 5k = 250k токенов = <strong>$0.02</strong>. Два цента.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>Пошаговый сценарий: что происходит</h2>
+
+<h3>Сценарий 1: Playwright скриншот (самый частый)</h3>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-num user">1</div>
+    <div class="flow-content">
+      <div class="who user">Юзер → Claude Code</div>
+      <p>"Открой страницу example.com и покажи что там"</p>
+      <p><span class="token-box before">~20 токенов</span></p>
+    </div>
+  </div>
+
+  <div class="flow-step"><div class="flow-arrow">↓</div></div>
+
+  <div class="flow-step">
+    <div class="flow-num claude">2</div>
+    <div class="flow-content">
+      <div class="who claude">Claude Code → Context Trash MCP</div>
+      <p>Claude вызывает tool <code>browser_navigate</code> + <code>browser_take_screenshot</code></p>
+      <p>Context Trash получает вызов и <strong>проксирует</strong> его дальше к настоящему Playwright MCP</p>
+      <p><em>Context Trash тут просто пересылает запрос, ничего не меняет</em></p>
+    </div>
+  </div>
+
+  <div class="flow-step"><div class="flow-arrow">↓</div></div>
+
+  <div class="flow-step">
+    <div class="flow-num mcp">3</div>
+    <div class="flow-content">
+      <div class="who mcp">Playwright MCP → ответ</div>
+      <p>Playwright открывает страницу, делает скриншот, возвращает:</p>
+      <pre><code>{ type: "image", source: { type: "base64", data: "iVBORw0KGgo..." } }
+// 300KB base64 = ~100,000 токенов</code></pre>
+      <p><span class="token-box before">~100,000 токенов base64</span></p>
+    </div>
+  </div>
+
+  <div class="flow-step"><div class="flow-arrow">↓</div></div>
+
+  <div class="flow-step">
+    <div class="flow-num ocr">4</div>
+    <div class="flow-content">
+      <div class="who ocr">Context Trash — перехват и обработка</div>
+      <p><strong>Вот тут магия:</strong></p>
+      <ol>
+        <li>Видит что ответ содержит base64 image</li>
+        <li>Декодирует base64 → PNG файл → сохраняет на диск (для истории)</li>
+        <li>Запускает OCR (tesseract или Apple Vision) → получает текст</li>
+        <li>Заменяет base64 image на текст:</li>
+      </ol>
+      <pre><code>{ type: "text", text: "[Screenshot OCR — example.com]\n
+## AI Recruiter — Hire Top Talent 10x Faster\n
+- Navigation: Products, Pricing, Resources, Login\n
+- Hero: 'Your ATS gathers thousands of profiles...'\n
+- CTA: 'Book a demo' button\n
+- Stats: 10x faster, 90% accuracy" }</code></pre>
+      <p><span class="token-box before">100,000 ток (было)</span> → <span class="token-box after">~200 ток (стало)</span></p>
+      <p><span class="cost-badge free">$0 — tesseract работает локально</span></p>
+    </div>
+  </div>
+
+  <div class="flow-step"><div class="flow-arrow">↓</div></div>
+
+  <div class="flow-step">
+    <div class="flow-num claude">5</div>
+    <div class="flow-content">
+      <div class="who claude">Claude Code получает сжатый ответ</div>
+      <p>Claude видит текстовое описание страницы вместо 100k base64.</p>
+      <p>Отвечает юзеру: "На example.com вижу landing page с заголовком 'AI Recruiter'..."</p>
+      <p><strong>Claude НЕ ЗНАЕТ</strong> что вместо картинки получил текст. Для него это просто tool_result.</p>
+    </div>
+  </div>
+</div>
+
+<h3>Сценарий 2: DOM snapshot (browser_snapshot)</h3>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-num claude">1</div>
+    <div class="flow-content">
+      <div class="who claude">Claude → browser_snapshot</div>
+      <p>Claude хочет увидеть структуру страницы для клика</p>
+    </div>
+  </div>
+
+  <div class="flow-step"><div class="flow-arrow">↓</div></div>
+
+  <div class="flow-step">
+    <div class="flow-num mcp">2</div>
+    <div class="flow-content">
+      <div class="who mcp">Playwright возвращает accessibility tree</div>
+      <pre><code>### Open tabs\n- 0: [ExampleApp](https://example.app)\n- 1: ...\n### Snapshot\n
+- generic [ref=e47]:\n  - generic:\n    - generic:\n      - generic: Desktop\n  - iframe [ref=e49]:\n    - generic [active] [ref=f71e1]: ...</code></pre>
+      <p><span class="token-box before">~14,000 токенов</span></p>
+    </div>
+  </div>
+
+  <div class="flow-step"><div class="flow-arrow">↓</div></div>
+
+  <div class="flow-step">
+    <div class="flow-num free">3</div>
+    <div class="flow-content">
+      <div class="who mcp">Context Trash — regex cleanup</div>
+      <p>Убирает <code>[ref=xxx]</code>, схлопывает пустые <code>generic</code> обёртки, оставляет семантику:</p>
+      <pre><code>### Tabs: ExampleApp (current), Notion, Gmail\n### Page: https://example.app\n
+- link "Solve your problem" → #book\n- heading[h3]: "Your ATS gathers thousands of profiles"\n
+- button: "Book a demo"\n- section: Stats (10x, 90%)</code></pre>
+      <p><span class="token-box before">14,000 ток</span> → <span class="token-box after">~2,000 ток</span></p>
+      <p><span class="cost-badge free">$0 — regex, локально</span></p>
+      <p><strong>Важно:</strong> ref-ы нужны для кликов! Context Trash сохраняет маппинг ref → element отдельно и подставляет ref обратно когда Claude делает click.</p>
+    </div>
+  </div>
+</div>
+
+<h3>Сценарий 3: Большой текстовый результат (Read, Bash, Grep)</h3>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-num claude">1</div>
+    <div class="flow-content">
+      <div class="who claude">Claude → Read tool</div>
+      <p>Claude читает файл на 8000 токенов</p>
+    </div>
+  </div>
+
+  <div class="flow-step"><div class="flow-arrow">↓</div></div>
+
+  <div class="flow-step">
+    <div class="flow-num mcp">2</div>
+    <div class="flow-content">
+      <div class="who mcp">Результат: полное содержимое файла</div>
+      <p><span class="token-box before">~8,000 токенов</span></p>
+    </div>
+  </div>
+
+  <div class="flow-step"><div class="flow-arrow">↓</div></div>
+
+  <div class="flow-step">
+    <div class="flow-num gemini">3</div>
+    <div class="flow-content">
+      <div class="who gemini">Context Trash — решение</div>
+      <p><strong>Два варианта (настраивается):</strong></p>
+      <p><strong>A) Без Gemini (бесплатно):</strong> Если файл &gt; порога (напр. 4000 ток) и это НЕ последний запрос — обрезать до первых/последних 500 токенов + заметка "[truncated, full file: /path/to/file]"</p>
+      <p><strong>B) С Gemini Flash (2 цента за сессию):</strong> Отправить файл в Gemini Flash с промптом "Summarize this code file in 3-5 bullet points" → получить summary 200 токенов</p>
+      <p><span class="token-box before">8,000 ток</span> → <span class="token-box after">~500 ток</span></p>
+      <p><span class="cost-badge cheap">Вариант A: $0 | Вариант B: ~$0.0006</span></p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2>Для каких MCP-серверов это работает</h2>
+
+<table>
+  <tr>
+    <th>MCP-сервер</th>
+    <th>Что сжимаем</th>
+    <th>Метод</th>
+    <th>Экономия</th>
+    <th>Стоимость</th>
+  </tr>
+  <tr>
+    <td><strong>Playwright MCP</strong></td>
+    <td>Скриншоты (base64 PNG)</td>
+    <td>OCR → MD</td>
+    <td style="color:var(--accent2);font-weight:700">300-500x</td>
+    <td><span class="cost-badge free">$0</span></td>
+  </tr>
+  <tr>
+    <td><strong>Playwright MCP</strong></td>
+    <td>DOM snapshots (accessibility tree)</td>
+    <td>Regex cleanup</td>
+    <td style="color:var(--accent2)">5-7x</td>
+    <td><span class="cost-badge free">$0</span></td>
+  </tr>
+  <tr>
+    <td><strong>Read / Write</strong><br>(файлы)</td>
+    <td>Содержимое больших файлов</td>
+    <td>Truncate или Gemini</td>
+    <td>5-15x</td>
+    <td><span class="cost-badge free">$0</span> или <span class="cost-badge cheap">$0.001</span></td>
+  </tr>
+  <tr>
+    <td><strong>Bash</strong></td>
+    <td>Большой stdout (логи, dump)</td>
+    <td>Truncate или Gemini</td>
+    <td>5-20x</td>
+    <td><span class="cost-badge free">$0</span> или <span class="cost-badge cheap">$0.001</span></td>
+  </tr>
+  <tr>
+    <td><strong>WebFetch / WebSearch</strong></td>
+    <td>Большие HTML/JSON ответы</td>
+    <td>Gemini extract</td>
+    <td>10-50x</td>
+    <td><span class="cost-badge cheap">$0.001</span></td>
+  </tr>
+  <tr>
+    <td><strong>Grep / Glob</strong></td>
+    <td>Результаты поиска (&gt;100 matches)</td>
+    <td>Truncate + count</td>
+    <td>3-10x</td>
+    <td><span class="cost-badge free">$0</span></td>
+  </tr>
+  <tr>
+    <td><strong>Любой другой MCP</strong></td>
+    <td>Любой tool_result &gt; порога</td>
+    <td>Generic truncate</td>
+    <td>2-5x</td>
+    <td><span class="cost-badge free">$0</span></td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>Архитектура MCP-прокси: как это устроено</h2>
+
+<div class="card">
+<pre><code>
+                      ┌──────────────────────────────────┐
+                      │         Claude Code CLI          │
+                      │  (200k token context window)     │
+                      └──────────┬───────────────────────┘
+                                 │
+                    tool_call    │    tool_result (СЖАТЫЙ)
+                                 │
+                      ┌──────────▼───────────────────────┐
+                      │      Context Trash MCP           │
+                      │   (Node.js, запускается как       │
+                      │    обычный MCP-сервер)            │
+                      │                                   │
+                      │  1. Получает tool_call от Claude  │
+                      │  2. Пересылает к настоящему MCP   │
+                      │  3. Получает tool_result          │
+                      │  4. Если result > порога:         │
+                      │     - base64 image → OCR → text   │
+                      │     - DOM snapshot → regex clean   │
+                      │     - большой текст → truncate     │
+                      │     - (opt) → Gemini summarize    │
+                      │  5. Возвращает сжатый result      │
+                      └──────┬──────────────┬─────────────┘
+                             │              │
+               tool_call     │              │  tool_result (ОРИГИНАЛ)
+                             │              │
+                ┌────────────▼──┐  ┌────────▼──────────┐
+                │  Playwright   │  │   Любой другой     │
+                │  MCP Server   │  │   MCP Server       │
+                └───────────────┘  └───────────────────┘
+</code></pre>
+</div>
+
+<h3>Как подключить (для юзера)</h3>
+
+<div class="card">
+  <h4>Шаг 1: Установить</h4>
+  <pre><code>npm install -g context-trash-mcp
+# или
+npx context-trash-mcp setup</code></pre>
+</div>
+
+<div class="card">
+  <h4>Шаг 2: Настроить в ~/.claude.json</h4>
+  <p>Было (напрямую к Playwright):</p>
+  <pre><code>{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@anthropic/mcp-playwright"]
+    }
+  }
+}</code></pre>
+  <p>Стало (через Context Trash):</p>
+  <pre><code>{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["context-trash-mcp",
+               "--wrap", "npx @anthropic/mcp-playwright",
+               "--ocr", "tesseract",
+               "--max-tokens", "2000"]
+    }
+  }
+}</code></pre>
+</div>
+
+<div class="card">
+  <h4>Шаг 3 (опционально): Подключить Gemini для суммаризации текста</h4>
+  <pre><code>{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["context-trash-mcp",
+               "--wrap", "npx @anthropic/mcp-playwright",
+               "--ocr", "tesseract",
+               "--max-tokens", "2000",
+               "--gemini-key", "env:GEMINI_API_KEY",
+               "--summarize-above", "4000"]
+    }
+  }
+}</code></pre>
+  <p>Или через env переменную:</p>
+  <pre><code>export GEMINI_API_KEY=your-key-here
+# Gemini Flash: бесплатный tier = 15 запросов/мин, 1M токенов/день
+# Платный: $0.075/1M input tokens</code></pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>Экономика: сколько стоит для разных сценариев</h2>
+
+<h3>Сценарий A: Только OCR (без Gemini) — $0</h3>
+
+<div class="card free">
+  <p><strong>Юзеру не нужно ничего платить и ничего настраивать кроме установки.</strong></p>
+  <table>
+    <tr><th>Что обрабатывается</th><th>Как</th><th>Стоимость</th></tr>
+    <tr><td>Скриншоты Playwright</td><td>tesseract OCR (локально)</td><td>$0</td></tr>
+    <tr><td>DOM snapshots</td><td>regex (локально)</td><td>$0</td></tr>
+    <tr><td>Большие тексты</td><td>truncate до N символов</td><td>$0</td></tr>
+  </table>
+  <p><strong>Экономия:</strong> 80-95% токенов в Playwright-тяжёлых сессиях. Сессии длятся в 3-5x дольше.</p>
+  <p><strong>Минус:</strong> текстовые результаты просто обрезаются, не суммаризируются.</p>
+</div>
+
+<h3>Сценарий B: OCR + Gemini Flash — ~$0.02 за сессию</h3>
+
+<div class="card">
+  <p>Юзер прокидывает свой Gemini API key (бесплатный tier или платный).</p>
+  <table>
+    <tr><th>Что</th><th>Как</th><th>Стоимость за элемент</th></tr>
+    <tr><td>Скриншоты</td><td>OCR (бесплатно)</td><td>$0</td></tr>
+    <tr><td>DOM snapshots</td><td>regex (бесплатно)</td><td>$0</td></tr>
+    <tr><td>Текст &gt;4k токенов</td><td>Gemini Flash summary</td><td>~$0.0003-0.001</td></tr>
+  </table>
+  <p><strong>Типичная сессия:</strong> 30-50 больших текстовых элементов = $0.01-0.03</p>
+  <p><strong>Gemini бесплатный tier:</strong> 15 RPM, 1M tokens/day — хватит на ~4 средних сессии в день бесплатно!</p>
+</div>
+
+<h3>Сценарий C: OCR + Gemini Vision для скриншотов — ~$0.05 за сессию</h3>
+
+<div class="card">
+  <p>Максимальное качество: вместо tesseract OCR отправляем скриншот в Gemini Vision для структурированного MD.</p>
+  <table>
+    <tr><th>Что</th><th>Как</th><th>Стоимость</th></tr>
+    <tr><td>Скриншоты</td><td>Gemini Vision → structured MD</td><td>~$0.001-0.003</td></tr>
+    <tr><td>DOM snapshots</td><td>regex (бесплатно)</td><td>$0</td></tr>
+    <tr><td>Текст &gt;4k</td><td>Gemini Flash summary</td><td>~$0.0003</td></tr>
+  </table>
+  <p><strong>Плюс:</strong> Gemini Vision понимает layout, выдаёт структурированные таблицы, описания UI.</p>
+  <p><strong>Минус:</strong> Дороже (но всё ещё копейки), нужен API key, задержка 2-3 сек на скриншот.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>Нужно ли делать платный сервис?</h2>
+
+<div class="card warning">
+  <h4>Короткий ответ: нет</h4>
+  <p>90% ценности (OCR скриншотов) — бесплатно и локально. Gemini Flash дешевле пыли. Нет смысла делать hosted/платный сервис.</p>
+</div>
+
+<h3>Модель распространения</h3>
+
+<table>
+  <tr><th>Вариант</th><th>Описание</th><th>Рекомендация</th></tr>
+  <tr>
+    <td><strong>Open Source npm package</strong></td>
+    <td>Юзер ставит <code>npm install -g context-trash-mcp</code>, всё работает локально</td>
+    <td style="color:var(--accent2);font-weight:700">Рекомендовано</td>
+  </tr>
+  <tr>
+    <td>BYOK (Bring Your Own Key)</td>
+    <td>Для Gemini-фич юзер прокидывает свой <code>GEMINI_API_KEY</code></td>
+    <td style="color:var(--accent2)">Да, для premium фич</td>
+  </tr>
+  <tr>
+    <td>Hosted API</td>
+    <td>Мы хостим Gemini, юзер платит нам</td>
+    <td style="color:var(--red)">Не нужно — слишком дёшево для монетизации</td>
+  </tr>
+  <tr>
+    <td>Claude Code Plugin/Skill</td>
+    <td>Вместо MCP — как skill или hook</td>
+    <td style="color:var(--text-dim)">Пока hooks read-only (#18594)</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>Когда Claude видит картинку, а когда нет</h2>
+
+<div class="card highlight">
+  <h4>Важный нюанс: Claude умеет видеть картинки!</h4>
+  <p>Claude — мультимодальная модель. Он может анализировать изображения напрямую. Но:</p>
+  <ul>
+    <li><strong>Каждая картинка = тысячи токенов.</strong> Один скриншот Playwright — 100-400k токенов.</li>
+    <li><strong>Для большинства задач текст достаточен.</strong> Если Claude проверяет "есть ли кнопка Login на странице" — ему не нужна картинка, достаточно OCR-текста "button: Login".</li>
+    <li><strong>Context Trash сохраняет картинку на диск.</strong> Если Claude <em>действительно</em> нужно увидеть визуал (проверить цвет, layout) — он может прочитать файл.</li>
+  </ul>
+</div>
+
+<h3>Конфигурация: что сжимать, а что нет</h3>
+
+<pre><code>context-trash-mcp \
+  --wrap "npx @anthropic/mcp-playwright" \
+  --ocr tesseract \                    # OCR engine
+  --max-tokens 2000 \                  # порог для сжатия текста
+  --save-originals ~/.squeeze/images \ # куда сохранять оригиналы
+  --keep-images false \                # false = OCR, true = пропускать картинки как есть
+  --clean-snapshots true \             # чистить DOM snapshots
+  --gemini-key env:GEMINI_API_KEY \    # опционально
+  --summarize-above 4000              # суммаризировать тексты > 4k tok</code></pre>
+
+<p><strong>Режимы:</strong></p>
+<table>
+  <tr><th>Режим</th><th>Что делает</th><th>Когда использовать</th></tr>
+  <tr>
+    <td><code>--keep-images false</code></td>
+    <td>Все картинки → OCR → текст</td>
+    <td>Обычная разработка, чтение страниц</td>
+  </tr>
+  <tr>
+    <td><code>--keep-images true</code></td>
+    <td>Картинки проходят как есть</td>
+    <td>Визуальное тестирование, дизайн-ревью</td>
+  </tr>
+  <tr>
+    <td><code>--keep-images recent</code></td>
+    <td>Последний скриншот — как есть, старые → OCR</td>
+    <td>Баланс: Claude видит текущее состояние, но старые не жрут контекст</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>Полная диаграмма: кто тратит токены</h2>
+
+<div class="card">
+<pre><code>
+ЮЗЕР пишет сообщение                          → ~50 токенов (ваш prompt)
+  │
+  ▼
+CLAUDE CODE обрабатывает
+  │
+  ├─ System prompt + CLAUDE.md + tools         → ~5,000 токенов (фиксировано)
+  ├─ Предыдущая история                        → ~20,000 токенов (растёт)
+  ├─ TeamHub inject                            → ~3,000 токенов (наш, фиксировано)
+  │
+  ├─ Claude решает: "надо скриншот"
+  │   └─ tool_call: browser_take_screenshot
+  │       │
+  │       ▼
+  │   SMART SQUEEZE MCP перехватывает
+  │       │
+  │       ├─ proxy → Playwright → screenshot
+  │       │   └─ Playwright возвращает: 300KB base64
+  │       │
+  │       ├─ [СЖАТИЕ] OCR → 500 символов         ← $0, 2 сек
+  │       │   └─ Оригинал PNG сохранён на диск
+  │       │
+  │       └─ Context Trash возвращает Claude:
+  │           └─ 500 токенов текста (вместо 100k)
+  │
+  ├─ Claude решает: "надо прочитать файл"
+  │   └─ tool_call: Read file
+  │       │
+  │       ▼
+  │   SMART SQUEEZE MCP перехватывает
+  │       │
+  │       ├─ proxy → Read → 8000 токенов текста
+  │       │
+  │       ├─ [СЖАТИЕ] < порога? пропустить как есть
+  │       │   или > порога? truncate / Gemini     ← $0 или $0.001
+  │       │
+  │       └─ Context Trash возвращает Claude:
+  │           └─ 2000 токенов (вместо 8000)
+  │
+  └─ Claude генерирует ответ юзеру              → ~500 токенов output
+
+
+═══════════════════════════════════════════════════
+ИТОГО за 1 turn:
+
+БЕЗ Context Trash:  5k + 20k + 3k + 100k(!!!) + 8k = ~136k токенов
+СО Context Trash:   5k + 20k + 3k + 0.5k + 2k      = ~30.5k токенов
+
+ЭКОНОМИЯ: 78% на ОДНОМ turn-е
+За сессию из 50 turns: контекст не переполняется вообще
+</code></pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>FAQ</h2>
+
+<div class="card">
+  <h4>Нужно ли юзеру что-то платить?</h4>
+  <p><strong>Нет.</strong> Базовая функциональность (OCR + regex) полностью бесплатна и локальна. Gemini — опция, и даже она стоит 2 цента за сессию.</p>
+</div>
+
+<div class="card">
+  <h4>Нужно ли юзеру прокидывать свои ключи?</h4>
+  <p>Только если хочет Gemini-суммаризацию. По умолчанию: <code>--keep-images false --ocr tesseract</code> — ноль зависимостей кроме tesseract.</p>
+</div>
+
+<div class="card">
+  <h4>Будет ли Claude хуже работать без картинок?</h4>
+  <p>Для 95% задач — нет. OCR захватывает все тексты, кнопки, таблицы, данные. Claude не нужна картинка чтобы понять "на странице есть кнопка Login". Для visual testing (цвета, layout) — можно включить <code>--keep-images true</code>.</p>
+</div>
+
+<div class="card">
+  <h4>А если Claude нужно кликнуть на элемент?</h4>
+  <p>DOM snapshots сохраняют ref-ы! Context Trash убирает мусор но маппинг ref → element хранится. Когда Claude делает <code>browser_click(ref="e47")</code> — Context Trash пересылает как есть.</p>
+</div>
+
+<div class="card">
+  <h4>Это только для Playwright?</h4>
+  <p><strong>Нет.</strong> Context Trash — generic proxy для любого MCP. Playwright — главный use case (300x сжатие), но он также сжимает Read, Bash, WebFetch, Grep и любой другой tool с большим output.</p>
+</div>
+
+<div class="card">
+  <h4>Как это соотносится с claude-context-mode?</h4>
+  <p>claude-context-mode — похожая идея, но: (1) не делает OCR, (2) требует sandbox для каждого языка, (3) generic extraction без понимания контента. Context Trash специализирован на типах контента и использует OCR для изображений.</p>
+</div>
+
+</div>
+
+<footer>
+  Context Trash MCP — Architecture & Economics | March 2026<br>
+  Part of the Context Overload Research project
+</footer>
+
+</body>
+</html>

@@ -61,8 +61,11 @@ function getSessionTitle(session: SessionListItem): string {
   if (session.custom_name) return session.custom_name;
   if (session.generated_title) return session.generated_title;
   if (session.first_prompt) {
-    const text = session.first_prompt;
+    let text = session.first_prompt;
     if (text.startsWith("[Request interrupted")) return session.session_id.slice(0, 8) + "...";
+    // Strip <context> blocks (before or after user message) so list shows actual content
+    text = text.replace(/<context>[\s\S]*?<\/context>/gi, "").trim();
+    if (!text) return session.session_id.slice(0, 8) + "...";
     const firstLine = text.split("\n")[0].trim();
     return firstLine.length > 100 ? firstLine.slice(0, 100) + "..." : firstLine;
   }

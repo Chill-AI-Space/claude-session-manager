@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Top 5 Projects by Token Cost</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0a; color: #e5e5e5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 2rem 1rem; }
+.container { max-width: 900px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+.subtitle { color: #888; margin-bottom: 1.5rem; font-size: 0.9rem; }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem; }
+.metric { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1rem; }
+.metric .value { font-size: 1.5rem; font-weight: 700; color: #6366f1; }
+.metric .label { font-size: 0.8rem; color: #888; margin-top: 0.25rem; }
+.card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }
+.card h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+.chart-wrap { position: relative; height: 320px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2a2a2a; }
+th { color: #888; font-weight: 500; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+th.num { text-align: right; }
+tr:hover td { background: #222; }
+.bar-col { color: #6366f1; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Top 5 Projects by Token Cost</h1>
+<p class="subtitle">Estimated API cost based on published Claude pricing</p>
+
+<div class="metrics">
+  <div class="metric"><div class="value">$15559.52</div><div class="label">Total cost (all projects)</div></div>
+  <div class="metric"><div class="value">$10350.33</div><div class="label">Top 5 combined</div></div>
+  <div class="metric"><div class="value">669</div><div class="label">Total sessions</div></div>
+</div>
+
+<div class="card">
+  <h2>Cost by Project</h2>
+  <div class="chart-wrap"><canvas id="barChart"></canvas></div>
+</div>
+
+<div class="card">
+  <h2>Cost Distribution</h2>
+  <div class="chart-wrap" style="height:280px;max-width:400px;margin:0 auto;"><canvas id="pieChart"></canvas></div>
+</div>
+
+<div class="card">
+  <h2>Breakdown</h2>
+  <table>
+    <tr><th>Project</th><th class="num">Cost</th><th class="num">Sessions</th><th class="num">$/Session</th></tr>
+    <tr><td>vova</td><td class="num bar-col">$3442.42</td><td class="num">113</td><td class="num">$30.46</td></tr><tr><td>improvado-notes</td><td class="num bar-col">$2329.57</td><td class="num">55</td><td class="num">$42.36</td></tr><tr><td>candidate-routing</td><td class="num bar-col">$1850.01</td><td class="num">37</td><td class="num">$50.00</td></tr><tr><td>skillset-analytics</td><td class="num bar-col">$1574.09</td><td class="num">39</td><td class="num">$40.36</td></tr><tr><td>Documents</td><td class="num bar-col">$1154.24</td><td class="num">42</td><td class="num">$27.48</td></tr>
+  </table>
+</div>
+</div>
+
+<script>
+const colors = ["#6366f1", "#8b5cf6", "#a78bfa", "#06b6d4", "#10b981"];
+const labels = ["vova", "improvado-notes", "candidate-routing", "skillset-analytics", "Documents"];
+const costs = [3442.42, 2329.57, 1850.01, 1574.09, 1154.24];
+
+new Chart(document.getElementById('barChart'), {
+  type: 'bar',
+  data: {
+    labels: labels,
+    datasets: [{ data: costs, backgroundColor: colors, borderRadius: 4 }]
+  },
+  options: {
+    indexAxis: 'y',
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false },
+      tooltip: { callbacks: { label: ctx => '$' + ctx.parsed.x.toFixed(2) } }
+    },
+    scales: {
+      x: { grid: { color: '#2a2a2a' }, ticks: { color: '#888', callback: v => '$' + v } },
+      y: { grid: { display: false }, ticks: { color: '#e5e5e5' } }
+    }
+  }
+});
+
+const pieLabels = [...labels, 'Others'];
+const pieData = [...costs, 5209.19];
+const pieColors = [...colors, '#333'];
+new Chart(document.getElementById('pieChart'), {
+  type: 'doughnut',
+  data: { labels: pieLabels, datasets: [{ data: pieData, backgroundColor: pieColors, borderWidth: 0 }] },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'right', labels: { color: '#e5e5e5', boxWidth: 12, padding: 8, font: { size: 11 } } },
+      tooltip: { callbacks: { label: ctx => ctx.label + ': $' + ctx.parsed.toFixed(2) } }
+    }
+  }
+});
+</script>
+</body>
+</html>

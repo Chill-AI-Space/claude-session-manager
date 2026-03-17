@@ -19,6 +19,7 @@ interface MessageViewProps {
   projectPath?: string;
   onLoadEarlier?: () => void;
   loadingEarlier?: boolean;
+  children?: React.ReactNode;
 }
 
 /** Extract a short preview text from a message's content */
@@ -87,6 +88,7 @@ export function MessageView({
   projectPath,
   onLoadEarlier,
   loadingEarlier,
+  children,
 }: MessageViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -255,6 +257,7 @@ export function MessageView({
           </div>
         )}
 
+        {children}
         <div ref={bottomRef} />
       </div>
     </ScrollArea>

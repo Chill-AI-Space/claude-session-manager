@@ -1,24 +1,26 @@
 "use client";
 
 import { useState, useRef, forwardRef, useImperativeHandle, useEffect } from "react";
-import { Send, Paperclip } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface ReplyInputProps {
   sessionId: string;
   onSend: (message: string) => void;
   queueSize?: number;
   isStreaming?: boolean;
+  bgClassName?: string;
+  placeholder?: string;
 }
 
 export interface ReplyInputHandle {
   focus: () => void;
   getText: () => string;
   setText: (text: string) => void;
+  triggerAttach: () => void;
+  triggerSend: () => void;
 }
 
 export const ReplyInput = forwardRef<ReplyInputHandle, ReplyInputProps>(
-function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: ReplyInputProps, ref) {
+function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgClassName, placeholder: customPlaceholder }: ReplyInputProps, ref) {
   const draftKey = `reply_draft_${sessionId}`;
   const [message, setMessage] = useState(() => {
     if (typeof window !== "undefined") return localStorage.getItem(draftKey) ?? "";
@@ -28,10 +30,13 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const handleSendRef = useRef(() => {});
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
     getText: () => message,
     setText: (text: string) => setMessage(text),
+    triggerAttach: () => fileInputRef.current?.click(),
+    triggerSend: () => handleSendRef.current(),
   }));
   const dragCounterRef = useRef(0);
 
@@ -120,16 +125,13 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
     localStorage.removeItem(draftKey);
     textareaRef.current?.focus();
   };
+  handleSendRef.current = handleSend;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  };
-
-  const handleFileClick = () => {
-    fileInputRef.current?.click();
   };
 
   const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -148,6 +150,9 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const defaultBg = isDragging ? "border-ring border-dashed bg-muted/40" : "border-input bg-background";
+  const containerBg = isDragging ? "border-ring border-dashed bg-muted/40" : (bgClassName || defaultBg);
+
   return (
     <div
       className="flex flex-col gap-1.5"
@@ -164,7 +169,7 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
         onChange={handleFileInput}
       />
 
-      <div className={`relative rounded-lg border transition-colors ${isDragging ? "border-ring border-dashed bg-muted/40" : "border-input bg-background"}`}>
+      <div className={`relative rounded-lg border transition-colors ${containerBg}`}>
         {/* Drop overlay */}
         {isDragging && (
           <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-muted/60 pointer-events-none">
@@ -178,35 +183,15 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={
-            queueSize > 0
-              ? `${queueSize} queued — type next...`
-              : "Reply to Claude…"
+            customPlaceholder
+              ? customPlaceholder
+              : queueSize > 0
+                ? `${queueSize} queued — type next...`
+                : "Reply to Claude…"
           }
           rows={16}
-          className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-9 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+          className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
         />
-
-        {/* Bottom bar: attach + send */}
-        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between">
-          <button
-            onClick={handleFileClick}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
-            title="Attach file or drag & drop"
-            type="button"
-          >
-            <Paperclip className="h-3 w-3" />
-            <span>Attach</span>
-          </button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
-            onClick={handleSend}
-            disabled={!message.trim()}
-          >
-            <Send className="h-3.5 w-3.5" />
-          </Button>
-        </div>
       </div>
     </div>
   );

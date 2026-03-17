@@ -5,6 +5,9 @@ import { claudeProjectsDir } from "./utils";
 
 const isWin = process.platform === "win32";
 
+// macOS/Linux: lsof lives in /usr/sbin which may not be in PATH (e.g. launchd)
+const LSOF = process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof";
+
 export interface ActiveProcess {
   pid: number;
   sessionId: string | null;
@@ -116,7 +119,7 @@ function detectWindows(): ActiveProcess[] {
 /** Unix: use ps + lsof to find claude processes and their CWDs */
 function detectUnix(): ActiveProcess[] {
   const psOutput = execSync(
-    'ps axo pid,command | grep -E "(^| )claude( |$)" | grep -v grep | grep -v "claude-session-manager" | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
+    'ps axo pid,command | grep -E "(/| |^)claude( |$)" | grep -v grep | grep -v "claude-session-manager" | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
     { encoding: "utf-8", timeout: 3000 }
   ).trim();
 
@@ -143,7 +146,7 @@ function detectUnix(): ActiveProcess[] {
   if (pids.length > 0) {
     try {
       const cwdOutput = execSync(
-        `lsof -p ${pids.join(",")} -a -d cwd -Fpn 2>/dev/null || true`,
+        `${LSOF} -p ${pids.join(",")} -a -d cwd -Fpn 2>/dev/null || true`,
         { encoding: "utf-8", timeout: 3000 }
       );
 

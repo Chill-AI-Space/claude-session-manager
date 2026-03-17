@@ -1,0 +1,288 @@
+/**
+ * Universal AI completion client — pure fetch, no SDK dependencies.
+ * Routes to OpenAI, Anthropic, or Google based on model name prefix.
+ */
+import { getSetting } from "./db";
+
+// ── Provider detection ───────────────────────────────────────────────────────
+
+type Provider = "openai" | "anthropic" | "google";
+
+function detectProvider(model: string): Provider {
+  if (model.startsWith("claude-")) return "anthropic";
+  if (model.startsWith("gemini-")) return "google";
+  return "openai"; // gpt-*, o1-*, o3-*, o4-*, etc.
+}
+
+function getApiKey(provider: Provider): string {
+  const settingKey: Record<Provider, string> = {
+    openai: "openai_api_key",
+    anthropic: "anthropic_api_key",
+    google: "google_ai_api_key",
+  };
+  const envKey: Record<Provider, string> = {
+    openai: "OPENAI_API_KEY",
+    anthropic: "ANTHROPIC_API_KEY",
+    google: "GOOGLE_AI_API_KEY",
+  };
+  const key = getSetting(settingKey[provider]) || process.env[envKey[provider]];
+  if (!key) {
+    throw new Error(
+      `No API key configured for ${provider}. Set "${settingKey[provider]}" in Settings or ${envKey[provider]} env var.`
+    );
+  }
+  return key;
+}
+
+// ── Model context window limits (tokens) ─────────────────────────────────────
+
+const CONTEXT_LIMITS: Record<string, number> = {
+  // OpenAI
+  "gpt-4o": 128_000,
+  "gpt-4o-mini": 128_000,
+  "gpt-4.1": 1_000_000,
+  "gpt-4.1-mini": 1_000_000,
+  "gpt-4.1-nano": 1_000_000,
+  "o4-mini": 200_000,
+  "gpt-5": 200_000, // conservative estimate
+  // Anthropic
+  "claude-sonnet-4-5-20250514": 200_000,
+  "claude-haiku-3-5-20241022": 200_000,
+  // Google
+  "gemini-2.5-flash": 1_000_000,
+  "gemini-2.5-pro": 1_000_000,
+  "gemini-2.0-flash": 1_000_000,
+};
+
+/** Rough context limit for a model (defaults to 128K if unknown) */
+export function getContextLimit(model: string): number {
+  // Try exact match first, then prefix match
+  if (CONTEXT_LIMITS[model]) return CONTEXT_LIMITS[model];
+  for (const [prefix, limit] of Object.entries(CONTEXT_LIMITS)) {
+    if (model.startsWith(prefix)) return limit;
+  }
+  return 128_000;
+}
+
+// ── Completion ───────────────────────────────────────────────────────────────
+
+export interface CompletionOptions {
+  model: string;
+  systemPrompt?: string;
+  userPrompt: string;
+  maxTokens?: number;
+  temperature?: number;
+}
+
+export interface CompletionResult {
+  text: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  model: string;
+}
+
+/**
+ * Send a one-shot completion to any supported provider.
+ * Returns the assistant's text response.
+ */
+export async function completion(opts: CompletionOptions): Promise<CompletionResult> {
+  const { model, systemPrompt, userPrompt, maxTokens = 4096, temperature = 0.3 } = opts;
+  const provider = detectProvider(model);
+  const apiKey = getApiKey(provider);
+
+  switch (provider) {
+    case "openai":
+      return callOpenAI(apiKey, model, systemPrompt, userPrompt, maxTokens, temperature);
+    case "anthropic":
+      return callAnthropic(apiKey, model, systemPrompt, userPrompt, maxTokens, temperature);
+    case "google":
+      return callGoogle(apiKey, model, systemPrompt, userPrompt, maxTokens, temperature);
+  }
+}
+
+// ── OpenAI ───────────────────────────────────────────────────────────────────
+
+async function callOpenAI(
+  apiKey: string, model: string, system: string | undefined,
+  user: string, maxTokens: number, temperature: number
+): Promise<CompletionResult> {
+  const messages: Array<{ role: string; content: string }> = [];
+  if (system) messages.push({ role: "system", content: system });
+  messages.push({ role: "user", content: user });
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`OpenAI API error ${res.status}: ${body.slice(0, 500)}`);
+  }
+
+  const data = await res.json();
+  return {
+    text: data.choices?.[0]?.message?.content ?? "",
+    inputTokens: data.usage?.prompt_tokens,
+    outputTokens: data.usage?.completion_tokens,
+    model: data.model ?? model,
+  };
+}
+
+// ── Anthropic ────────────────────────────────────────────────────────────────
+
+async function callAnthropic(
+  apiKey: string, model: string, system: string | undefined,
+  user: string, maxTokens: number, temperature: number
+): Promise<CompletionResult> {
+  const body: Record<string, unknown> = {
+    model,
+    max_tokens: maxTokens,
+    temperature,
+    messages: [{ role: "user", content: user }],
+  };
+  if (system) body.system = system;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Anthropic API error ${res.status}: ${text.slice(0, 500)}`);
+  }
+
+  const data = await res.json();
+  const textBlock = data.content?.find((b: { type: string }) => b.type === "text");
+  return {
+    text: textBlock?.text ?? "",
+    inputTokens: data.usage?.input_tokens,
+    outputTokens: data.usage?.output_tokens,
+    model: data.model ?? model,
+  };
+}
+
+// ── Google (Gemini) ──────────────────────────────────────────────────────────
+
+async function callGoogle(
+  apiKey: string, model: string, system: string | undefined,
+  user: string, maxTokens: number, temperature: number
+): Promise<CompletionResult> {
+  const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+  if (system) {
+    contents.push({ role: "user", parts: [{ text: system }] });
+    contents.push({ role: "model", parts: [{ text: "Understood." }] });
+  }
+  contents.push({ role: "user", parts: [{ text: user }] });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents,
+      generationConfig: { maxOutputTokens: maxTokens, temperature },
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Google AI API error ${res.status}: ${text.slice(0, 500)}`);
+  }
+
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  return {
+    text,
+    inputTokens: data.usageMetadata?.promptTokenCount,
+    outputTokens: data.usageMetadata?.candidatesTokenCount,
+    model,
+  };
+}
+
+// ── Map/Reduce for long transcripts ──────────────────────────────────────────
+
+/** Rough token estimate: ~4 chars per token for English, ~2 for mixed/code */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3.5);
+}
+
+/**
+ * Summarize a long text using map/reduce if it exceeds the model's context.
+ * - If it fits → single call.
+ * - If not → split into chunks, summarize each, then combine.
+ */
+export async function summarizeWithMapReduce(opts: {
+  model: string;
+  systemPrompt: string;
+  text: string;
+  maxOutputTokens?: number;
+}): Promise<CompletionResult> {
+  const { model, systemPrompt, text, maxOutputTokens = 4096 } = opts;
+  const contextLimit = getContextLimit(model);
+  // Reserve space for system prompt + output tokens
+  const promptOverhead = estimateTokens(systemPrompt) + maxOutputTokens + 500;
+  const availableForInput = contextLimit - promptOverhead;
+  const textTokens = estimateTokens(text);
+
+  // Single call if it fits
+  if (textTokens <= availableForInput) {
+    return completion({
+      model,
+      systemPrompt,
+      userPrompt: text,
+      maxTokens: maxOutputTokens,
+    });
+  }
+
+  // Map phase: split into chunks, summarize each
+  const chunkSize = Math.floor(availableForInput * 3.5); // back to chars
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += chunkSize) {
+    chunks.push(text.slice(i, i + chunkSize));
+  }
+
+  const chunkSummaries = await Promise.all(
+    chunks.map((chunk, idx) =>
+      completion({
+        model,
+        systemPrompt: `You are summarizing part ${idx + 1} of ${chunks.length} of a session transcript. Extract key actions, decisions, and outcomes. Be concise but specific. Include file names and concrete details.`,
+        userPrompt: chunk,
+        maxTokens: 2048,
+      })
+    )
+  );
+
+  // Reduce phase: combine chunk summaries into final summary
+  const combined = chunkSummaries
+    .map((r, i) => `=== Part ${i + 1} of ${chunks.length} ===\n${r.text}`)
+    .join("\n\n");
+
+  const finalResult = await completion({
+    model,
+    systemPrompt,
+    userPrompt: combined,
+    maxTokens: maxOutputTokens,
+  });
+
+  // Sum up token usage across all calls
+  const totalInput = chunkSummaries.reduce((sum, r) => sum + (r.inputTokens ?? 0), 0) + (finalResult.inputTokens ?? 0);
+  const totalOutput = chunkSummaries.reduce((sum, r) => sum + (r.outputTokens ?? 0), 0) + (finalResult.outputTokens ?? 0);
+
+  return {
+    text: finalResult.text,
+    inputTokens: totalInput,
+    outputTokens: totalOutput,
+    model: finalResult.model,
+  };
+}

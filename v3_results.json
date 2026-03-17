@@ -1,0 +1,4742 @@
+{
+ "103834": [
+  {
+   "id": 103900,
+   "name": "Jenna Bixler, ECRE",
+   "v3": {
+    "score": 94.6,
+    "base_score": 94.1,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 19
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "USA",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "HR Manager|HR Business Partner|Senior Talent Acquisition Specialist|Senior Recruiter",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Human Resources|Business Administration|Psychology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Recruitment Analytics",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Employer Branding and Recruitment Marketing",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Team Leadership and Mentoring",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Develop and execute employer branding and talent marketing initiatives.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.|Ensure all hiring activities are compliant with U.S. labor laws and internal policies.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of progressive experiencein talent acquisition",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "Experience in the U.S. Construction or Real Estate Development sector",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "total_experience",
+     "key": "5",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 103883,
+   "name": "Christopher Guzman",
+   "v3": {
+    "score": 89.2,
+    "base_score": 88.2,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 19
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "USA",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "HR Manager|HR Business Partner|Senior Talent Acquisition Specialist|Senior Recruiter",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Human Resources|Business Administration|Psychology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Recruitment Analytics",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Employer Branding and Recruitment Marketing",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Team Leadership and Mentoring",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Develop and execute employer branding and talent marketing initiatives.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.|Ensure all hiring activities are compliant with U.S. labor laws and internal policies.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of progressive experience in talent acquisition",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "Experience in the U.S. Construction or Real Estate Development sector",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "total_experience",
+     "key": "5",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 103938,
+   "name": "Brittany Coleman",
+   "v3": {
+    "score": 87.8,
+    "base_score": 86.8,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 19
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "USA",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "HR Manager|HR Business Partner|Senior Talent Acquisition Specialist|Senior Recruiter",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Human Resources|Business Administration|Psychology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Recruitment Analytics",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Employer Branding and Recruitment Marketing",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Team Leadership and Mentoring",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Develop and execute employer branding and talent marketing initiatives.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.|Ensure all hiring activities are compliant with U.S. labor laws and internal policies.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of progressive experience in talent acquisition",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "Experience in the U.S. Construction or Real Estate Development sector",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "total_experience",
+     "key": "5",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114896,
+   "name": "Shabina Osman",
+   "v3": {
+    "score": 91.4,
+    "base_score": 90.4,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 13
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114727,
+   "name": "Imad Fares",
+   "v3": {
+    "score": 91.4,
+    "base_score": 90.4,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 13
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    }
+   ]
+  },
+  {
+   "id": 114645,
+   "name": "Varun Sharma",
+   "v3": {
+    "score": 89.7,
+    "base_score": 88.5,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 13
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    }
+   ]
+  },
+  {
+   "id": 114717,
+   "name": "Deepak Soni",
+   "v3": {
+    "score": 87.9,
+    "base_score": 86.5,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 13
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+years of team management",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    }
+   ]
+  },
+  {
+   "id": 114937,
+   "name": "Gary O'Neill",
+   "v3": {
+    "score": 89.7,
+    "base_score": 88.5,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.86,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114818,
+   "name": "Yasser Mahamood",
+   "v3": {
+    "score": 89.7,
+    "base_score": 88.5,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.86,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114716,
+   "name": "Oumaima Hajjouji",
+   "v3": {
+    "score": 89.7,
+    "base_score": 88.5,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.86,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114781,
+   "name": "Mohamed Magdy",
+   "v3": {
+    "score": 87.9,
+    "base_score": 86.5,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.86,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    }
+   ]
+  },
+  {
+   "id": 114659,
+   "name": "Ahmed Eldesouky",
+   "v3": {
+    "score": 87.9,
+    "base_score": 86.5,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.86,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114768,
+   "name": "Natia Darsavelidze",
+   "v3": {
+    "score": 82.8,
+    "base_score": 86.5,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.86,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114873,
+   "name": "Ali Mirza",
+   "v3": {
+    "score": 77.6,
+    "base_score": 80.8,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.71,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114857,
+   "name": "Brendan Mendonca, MSc",
+   "v3": {
+    "score": 84.5,
+    "base_score": 82.7,
+    "verdict": "MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.86,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114867,
+   "name": "Laila Faisl",
+   "v3": {
+    "score": 75.9,
+    "base_score": 73.1,
+    "verdict": "MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.71,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    }
+   ]
+  },
+  {
+   "id": 114765,
+   "name": "Rekha Prakash",
+   "v3": {
+    "score": 75.9,
+    "base_score": 73.1,
+    "verdict": "MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.71,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    }
+   ]
+  },
+  {
+   "id": 114720,
+   "name": "Nasim Ali Ansari",
+   "v3": {
+    "score": 74.1,
+    "base_score": 71.2,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.57,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114643,
+   "name": "Farhad Ali",
+   "v3": {
+    "score": 56.9,
+    "base_score": 57.7,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.43,
+    "total_criteria": 13
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "context_experience",
+     "key": "2+ years of team management",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    }
+   ]
+  },
+  {
+   "id": 103999,
+   "name": "Olga Greger",
+   "v3": {
+    "score": 42.9,
+    "base_score": 42.2,
+    "verdict": "NO_MATCH",
+    "false_must_haves": 3,
+    "must_have_ratio": 0.29,
+    "total_criteria": 19
+   },
+   "platform_status": "not_match",
+   "criteria": [
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Human Resources|Business Administration|Psychology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|RealEstate Development",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Recruitment Analytics",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Employer Branding and Recruitment Marketing",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Team Leadership and Mentoring",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location",
+     "key": "USA",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "previous_role",
+     "key": "HR Manager|HR Business Partner|Senior Talent Acquisition Specialist|Senior Recruiter",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Develop and execute employer branding and talent marketing initiatives.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.|Ensure all hiring activities are compliant with U.S. labor laws and internal policies.",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of progressive experience in talent acquisition",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "Experience in the U.S. Construction or Real Estate Development sector",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    }
+   ]
+  },
+  {
+   "id": 114911,
+   "name": "Sindhu Madhavan (Varghese)",
+   "v3": {
+    "score": 50.0,
+    "base_score": 50.0,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.5,
+    "total_criteria": 2
+   },
+   "platform_status": "not_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114783,
+   "name": "Rohan Salunke",
+   "v3": {
+    "score": 50.0,
+    "base_score": 50.0,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.5,
+    "total_criteria": 2
+   },
+   "platform_status": "not_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "false"
+    }
+   ]
+  },
+  {
+   "id": 114723,
+   "name": "Donna Rawson",
+   "v3": {
+    "score": 50.0,
+    "base_score": 50.0,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.5,
+    "total_criteria": 2
+   },
+   "platform_status": "not_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "false"
+    }
+   ]
+  },
+  {
+   "id": 114653,
+   "name": "Jithin Sankar",
+   "v3": {
+    "score": 50.0,
+    "base_score": 50.0,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.5,
+    "total_criteria": 2
+   },
+   "platform_status": "not_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "false"
+    }
+   ]
+  },
+  {
+   "id": 103996,
+   "name": "Nicola Spadoni",
+   "v3": {
+    "score": 22.4,
+    "base_score": 24.3,
+    "verdict": "NO_MATCH",
+    "false_must_haves": 6,
+    "must_have_ratio": 0.12,
+    "total_criteria": 20
+   },
+   "platform_status": "not_match",
+   "criteria": [
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Human Resources|Business Administration|Psychology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Construction|Real Estate Development",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Talent Acquisition Strategy Development",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Full-Cycle Recruiting (Sourcing, Screening, Interviewing, Offer Negotiation)",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Applicant Tracking Systems (ATS) and Sourcing Tools",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Recruitment Analytics",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Employer Branding and Recruitment Marketing",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Team Leadership and Mentoring",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "location",
+     "key": "USA",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "people_management_composition",
+     "key": "a team of recruiters",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Talent Acquisition Manager|Recruitment Manager|Head of Talent|Talent Acquisition Lead",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "previous_role",
+     "key": "HR Manager|HR Business Partner|Senior Talent Acquisition Specialist|Senior Recruiter",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "USA",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own and execute the talent acquisition strategy to meet business goals.|Build and manage the end-to-end recruitment process, partnering with hiring managers on workforce planning.|Lead, mentor, and develop the team of recruiters.|Implement data-driven methods to measure and improve recruitment effectiveness.|Develop and execute employer branding and talent marketing initiatives.|Ensure a healthy pipeline of qualified candidates for key roles through proactive sourcing and networking.|Ensure all hiring activities are compliant with U.S. labor laws and internal policies.",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of progressive experience in talent acquisition",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "context_experience",
+     "key": "Experience in the U.S. Construction or Real Estate Development sector",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "total_experience",
+     "key": "5",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  }
+ ],
+ "92603": [
+  {
+   "id": 115003,
+   "name": "Ammar Shahzad",
+   "v3": {
+    "score": 92.4,
+    "base_score": 91.7,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 19
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic (Intermediate)",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115000,
+   "name": "Venkata Krishnan",
+   "v3": {
+    "score": 90.9,
+    "base_score": 90.0,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 19
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic (Intermediate)",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115422,
+   "name": "Aladdin Salim",
+   "v3": {
+    "score": 83.3,
+    "base_score": 81.7,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 19
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic (Intermediate)",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115229,
+   "name": "Gowrishankar T S",
+   "v3": {
+    "score": 74.2,
+    "base_score": 76.7,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.83,
+    "total_criteria": 19
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic (Intermediate)",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115010,
+   "name": "Akila Jothirathna",
+   "v3": {
+    "score": 75.8,
+    "base_score": 73.3,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.83,
+    "total_criteria": 19
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic (Intermediate)",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115155,
+   "name": "Nikos Kritselis",
+   "v3": {
+    "score": 75.8,
+    "base_score": 73.3,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.67,
+    "total_criteria": 19
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115344,
+   "name": "Farzan S.",
+   "v3": {
+    "score": 77.3,
+    "base_score": 75.0,
+    "verdict": "MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.83,
+    "total_criteria": 19
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic (Intermediate)",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    }
+   ]
+  },
+  {
+   "id": 115245,
+   "name": "Saravanan Subbu",
+   "v3": {
+    "score": 75.8,
+    "base_score": 73.3,
+    "verdict": "MATCH",
+    "false_must_haves": 1,
+    "must_have_ratio": 0.83,
+    "total_criteria": 19
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 114999,
+   "name": "Syed Huzaifa Shahid",
+   "v3": {
+    "score": 65.2,
+    "base_score": 61.7,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.5,
+    "total_criteria": 19
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic (Intermediate)",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    }
+   ]
+  },
+  {
+   "id": 115138,
+   "name": "Ahat Pehlivanturk",
+   "v3": {
+    "score": 66.7,
+    "base_score": 68.3,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 2,
+    "must_have_ratio": 0.67,
+    "total_criteria": 19
+   },
+   "platform_status": "not_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic (Intermediate)",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    }
+   ]
+  },
+  {
+   "id": 115131,
+   "name": "Rayan T.",
+   "v3": {
+    "score": 60.6,
+    "base_score": 61.7,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 2,
+    "must_have_ratio": 0.67,
+    "total_criteria": 19
+   },
+   "platform_status": "not_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Product Manager|Card Product Manager|Product Manager, Cards|Product Owner, Cards|Senior Product Manager",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Technical Product Manager|Digital Product Manager|Product Manager, Fintech",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Visa",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Bachelor",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Business Administration|Finance|Economics|Computer Science|Technology",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "industry",
+     "key": "Financial Services|Fintech",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Technology|Digital Services",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Card Product Development (Credit, Debit, Teen)",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "BIN Management",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Roadmap Development",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Market Research and Analysis",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Performance Tracking (KPIs)",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Product Scaling",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "Arabic (Intermediate)",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "location_experience",
+     "key": "UAE|MENA",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Own the end-to-end product lifecycle for new card products, from concept and build to launch and scaling.|Develop and own the product strategy and roadmap for the company's card offerings.|Collaborate with cross-functional teams (Engineering, Design, Marketing, Legal) to ensure successful product launches.|Conduct continuous market and competitor analysis to identify new opportunities and ensure product-market fit.|Define, monitor, and analyze key performance indicators (KPIs) to drive product growth and success.|Manage key technical and operational aspects of card products, including BIN management and payment network relationships.",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "context_experience",
+     "key": "5 years of experience with card product",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    }
+   ]
+  }
+ ],
+ "91473": [
+  {
+   "id": 115067,
+   "name": "Ajo Varghese",
+   "v3": {
+    "score": 93.3,
+    "base_score": 92.6,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 1.0,
+    "total_criteria": 14
+   },
+   "platform_status": "match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Client Accountant|Senior Accountant|Audit Senior|Business Services Accountant|Financial Accountant",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "certification",
+     "key": "CPA|ACCA|CA|M Com",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "companies",
+     "key": "Deloitte|PwC|EY|KPMG|BDO|Grant Thornton|RSM|Crowe|Baker Tilly|Mazars",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Master",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Commerce|Accounting|Finance",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Consulting|Audit",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "IFRS Reporting",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "VAT and Corporate Tax Compliance",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Accounting Software (Xero, QuickBooks, Zoho)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Internal Controls and Risk Assessment",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Manage the end-to-end accounting cycle for a portfolio of clients in compliance with IFRS.|Oversee all month-end and year-end closing activities, including bank reconciliations, payroll, and fixed asset schedules.|Assess internal controls and financial risks for clients, recommending and implementing improvements.|Ensure timely and accurate preparation and filing of VAT returns and corporate tax for clients.|Serve as the primary liaison for external auditors during client audits.|Deliver expert accounting and financial reporting support to a dedicated client base. Deliver expert accounting and financial reporting support to a dedicated client base.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "at least 2 years in an accounting/audit firm",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 93862,
+   "name": "Hasib Hassan",
+   "v3": {
+    "score": 92.5,
+    "base_score": 91.9,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.9,
+    "total_criteria": 17
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "certification",
+     "key": "CPA|ACCA|CA|M Com",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Master",
+     "requirement": "must_not_have",
+     "fit": "true"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Commerce|Accounting|Finance",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Consulting|Audit",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "IFRS Reporting",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "VAT and Corporate Tax Compliance",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Accounting Software (Xero, QuickBooks, Zoho)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Financial Closing (Bank Reconciliation, Month-End)",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Internal Controls and Risk Assessment",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "MS Office (Excel, Word, PowerPoint)",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Client Accountant|Senior Accountant|Audit Senior|Business Services Accountant|Financial Accountant",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Manage the end-to-end accounting cycle for a portfolio of clients in compliance with IFRS.|Oversee all month-end and year-end closing activities, including bank reconciliations, payroll, and fixed asset schedules.|Assess internal controls and financial risks for clients, recommending and implementing improvements.|Ensure timely and accurate preparation and filing of VAT returns and corporate tax for clients.|Serve as the primary liaison for external auditors during client audits.|Deliver expert accounting and financial reporting support to a dedicated client base. Deliver expert accounting and financial reporting support to a dedicated client base.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "at least 2 years in an accounting/audit firm",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "total_experience",
+     "key": "6",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115073,
+   "name": "Hareeshma P",
+   "v3": {
+    "score": 84.8,
+    "base_score": 83.3,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.88,
+    "total_criteria": 15
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Client Accountant|Senior Accountant|Audit Senior|Business Services Accountant|Financial Accountant",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "certification",
+     "key": "CPA|ACCA|CA|M Com",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "companies",
+     "key": "Deloitte|PwC|EY|KPMG|BDO|Grant Thornton|RSM|Crowe|Baker Tilly|Mazars",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Master",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Commerce|Accounting|Finance",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Consulting|Audit",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "IFRS Reporting",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "VAT and Corporate Tax Compliance",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Accounting Software (Xero, QuickBooks, Zoho)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Internal Controls and Risk Assessment",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Manage the end-to-end accounting cycle for a portfolio of clients in compliance with IFRS.|Oversee all month-end and year-end closing activities, including bank reconciliations, payroll, and fixed asset schedules.|Assess internal controls and financial risks for clients, recommending and implementing improvements.|Ensure timely and accurate preparation and filing of VAT returns and corporate tax for clients.|Serve as the primary liaison for external auditors during client audits.|Deliver expert accounting and financial reporting support to a dedicated client base. Deliver expert accounting and financial reporting support to a dedicated client base.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "at least 2 years in an accounting/audit firm",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "total_experience",
+     "key": "6",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115092,
+   "name": "Muhammed Ethisam",
+   "v3": {
+    "score": 74.2,
+    "base_score": 76.7,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.75,
+    "total_criteria": 15
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Client Accountant|Senior Accountant|Audit Senior|Business Services Accountant|Financial Accountant",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "certification",
+     "key": "CPA|ACCA|CA|M Com",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "companies",
+     "key": "Deloitte|PwC|EY|KPMG|BDO|Grant Thornton|RSM|Crowe|Baker Tilly|Mazars",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Master",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Commerce|Accounting|Finance",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Consulting|Audit",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "IFRS Reporting",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "VAT and Corporate Tax Compliance",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Accounting Software (Xero, QuickBooks, Zoho)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Internal Controls and Risk Assessment",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Manage the end-to-end accounting cycle for a portfolio of clients in compliance with IFRS.|Oversee all month-end and year-end closing activities, including bank reconciliations, payroll, and fixed asset schedules.|Assess internal controls and financial risks for clients, recommending and implementing improvements.|Ensure timely and accurate preparation and filing of VAT returns and corporate tax for clients.|Serve as the primary liaison for external auditors during client audits.|Deliver expert accounting and financial reporting support to a dedicated client base. Deliver expert accounting and financial reporting support to a dedicated client base.",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "context_experience",
+     "key": "at least 2 years in an accounting/audit firm",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "total_experience",
+     "key": "6",
+     "requirement": "must_have",
+     "fit": "partially"
+    }
+   ]
+  },
+  {
+   "id": 115056,
+   "name": "Anil Paul",
+   "v3": {
+    "score": 72.7,
+    "base_score": 75.0,
+    "verdict": "MATCH",
+    "false_must_haves": 0,
+    "must_have_ratio": 0.75,
+    "total_criteria": 15
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Client Accountant|Senior Accountant|Audit Senior|Business Services Accountant|Financial Accountant",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "certification",
+     "key": "CPA|ACCA|CA|M Com",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "companies",
+     "key": "Deloitte|PwC|EY|KPMG|BDO|Grant Thornton|RSM|Crowe|Baker Tilly|Mazars",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Master",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Commerce|Accounting|Finance",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Consulting|Audit",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "IFRS Reporting",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "VAT and Corporate Tax Compliance",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Accounting Software (Xero, QuickBooks, Zoho)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Internal Controls and Risk Assessment",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Manage the end-to-end accounting cycle for a portfolio of clients in compliance with IFRS.|Oversee all month-end and year-end closing activities, including bank reconciliations, payroll, and fixed asset schedules.|Assess internal controls and financial risks for clients, recommending and implementing improvements.|Ensure timely and accurate preparation and filing of VAT returns and corporate tax for clients.|Serve as the primary liaison for external auditors during client audits.|Deliver expert accounting and financial reporting support to a dedicated client base. Deliver expert accounting and financial reporting support to a dedicated client base.",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "context_experience",
+     "key": "at least 2 years in an accounting/audit firm",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "total_experience",
+     "key": "6",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115076,
+   "name": "Victor Rusere ACCA",
+   "v3": {
+    "score": 72.7,
+    "base_score": 70.0,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 2,
+    "must_have_ratio": 0.75,
+    "total_criteria": 15
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Client Accountant|Senior Accountant|Audit Senior|Business Services Accountant|Financial Accountant",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "certification",
+     "key": "CPA|ACCA|CA|M Com",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Deloitte|PwC|EY|KPMG|BDO|Grant Thornton|RSM|Crowe|Baker Tilly|Mazars",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Master",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Commerce|Accounting|Finance",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Consulting|Audit",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "IFRS Reporting",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "VAT and Corporate Tax Compliance",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Accounting Software (Xero, QuickBooks, Zoho)",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Internal Controls and Risk Assessment",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Manage the end-to-end accounting cycle for a portfolio of clients in compliance with IFRS.|Oversee all month-end and year-end closing activities, including bank reconciliations, payroll, and fixed asset schedules.|Assess internal controls and financial risks for clients, recommending and implementing improvements.|Ensure timely and accurate preparation and filing of VAT returns and corporate tax for clients.|Serve as the primary liaison for external auditors during client audits.|Deliver expert accounting and financial reporting support to a dedicated client base. Deliver expert accounting and financial reporting support to a dedicated client base.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "at least 2 years in an accounting/audit firm",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "total_experience",
+     "key": "6",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115071,
+   "name": "Dave Gonzalbo",
+   "v3": {
+    "score": 68.2,
+    "base_score": 65.0,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 2,
+    "must_have_ratio": 0.62,
+    "total_criteria": 15
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Client Accountant|Senior Accountant|Audit Senior|Business Services Accountant|Financial Accountant",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "certification",
+     "key": "CPA|ACCA|CA|M Com",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "companies",
+     "key": "Deloitte|PwC|EY|KPMG|BDO|Grant Thornton|RSM|Crowe|Baker Tilly|Mazars",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Master",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Commerce|Accounting|Finance",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Consulting|Audit",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "IFRS Reporting",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "VAT and Corporate Tax Compliance",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Accounting Software (Xero, QuickBooks, Zoho)",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Internal Controls and Risk Assessment",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Manage the end-to-end accounting cycle for a portfolio of clients in compliance with IFRS.|Oversee all month-end and year-end closing activities, including bank reconciliations, payroll, and fixed asset schedules.|Assess internal controls and financial risks for clients, recommending and implementing improvements.|Ensure timely and accurate preparation and filing of VAT returns and corporate tax for clients.|Serve as the primary liaison for external auditors during client audits.|Deliver expert accounting and financial reporting support to a dedicated client base. Deliver expert accounting and financial reporting support to a dedicated client base.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "at least 2 years in an accounting/audit firm",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "total_experience",
+     "key": "6",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115185,
+   "name": "Muhammad Haseeb",
+   "v3": {
+    "score": 60.6,
+    "base_score": 56.7,
+    "verdict": "PARTIAL_MATCH",
+    "false_must_haves": 2,
+    "must_have_ratio": 0.62,
+    "total_criteria": 15
+   },
+   "platform_status": "partial_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Client Accountant|Senior Accountant|Audit Senior|Business Services Accountant|Financial Accountant",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "certification",
+     "key": "CPA|ACCA|CA|M Com",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "companies",
+     "key": "Deloitte|PwC|EY|KPMG|BDO|Grant Thornton|RSM|Crowe|Baker Tilly|Mazars",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Master",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Commerce|Accounting|Finance",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Consulting|Audit",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "IFRS Reporting",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "VAT and Corporate Tax Compliance",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Accounting Software (Xero, QuickBooks, Zoho)",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Internal Controls and Risk Assessment",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Manage the end-to-end accounting cycle for a portfolio of clients in compliance with IFRS.|Oversee all month-end and year-end closing activities, including bank reconciliations, payroll, and fixed asset schedules.|Assess internal controls and financial risks for clients, recommending and implementing improvements.|Ensure timely and accurate preparation and filing of VAT returns and corporate tax for clients.|Serve as the primary liaison for external auditors during client audits.|Deliver expert accounting and financial reporting support to a dedicated client base. Deliver expert accounting and financial reporting support to a dedicated client base.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "at least 2 years in an accounting/audit firm",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "total_experience",
+     "key": "6",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 91665,
+   "name": "Jerin Eapen",
+   "v3": {
+    "score": 67.9,
+    "base_score": 65.3,
+    "verdict": "NO_MATCH",
+    "false_must_haves": 3,
+    "must_have_ratio": 0.6,
+    "total_criteria": 17
+   },
+   "platform_status": "not_match",
+   "criteria": [
+    {
+     "segment": "certification",
+     "key": "CPA|ACCA|CA|M Com",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Master",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Commerce|Accounting|Finance",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "industry",
+     "key": "Consulting|Audit",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "IFRS Reporting",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "VAT and Corporate Tax Compliance",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Accounting Software (Xero, QuickBooks, Zoho)",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Financial Closing (Bank Reconciliation, Month-End)",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "Internal Controls and Risk Assessment",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "skill",
+     "key": "MS Office (Excel, Word, PowerPoint)",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Client Accountant|Senior Accountant|Audit Senior|Business Services Accountant|Financial Accountant",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Manage the end-to-end accounting cycle for a portfolio of clients in compliance with IFRS.|Oversee all month-end and year-end closing activities, including bank reconciliations, payroll, and fixed asset schedules.|Assess internal controls and financial risks for clients, recommending and implementing improvements.|Ensure timely and accurate preparation and filing of VAT returns and corporate tax for clients.|Serve as the primary liaison for external auditors during client audits.|Deliver expert accounting and financial reporting support to a dedicated client base.",
+     "requirement": "nice_to_have",
+     "fit": "true"
+    },
+    {
+     "segment": "work_format",
+     "key": "on-site",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "context_experience",
+     "key": "at least 2 years in an accounting/audit firm",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "total_experience",
+     "key": "6",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  },
+  {
+   "id": 115057,
+   "name": "anish sadanand",
+   "v3": {
+    "score": 45.5,
+    "base_score": 45.0,
+    "verdict": "NO_MATCH",
+    "false_must_haves": 3,
+    "must_have_ratio": 0.5,
+    "total_criteria": 15
+   },
+   "platform_status": "not_match",
+   "criteria": [
+    {
+     "segment": "location",
+     "key": "UAE",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "previous_role",
+     "key": "Client Accountant|Senior Accountant|Audit Senior|Business Services Accountant|Financial Accountant",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "certification",
+     "key": "CPA|ACCA|CA|M Com",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "companies",
+     "key": "Deloitte|PwC|EY|KPMG|BDO|Grant Thornton|RSM|Crowe|Baker Tilly|Mazars",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "education_degree",
+     "key": "Master",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "field_of_study",
+     "key": "Commerce|Accounting|Finance",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "industry",
+     "key": "Consulting|Audit",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "IFRS Reporting",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "VAT and Corporate Tax Compliance",
+     "requirement": "must_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "skill",
+     "key": "Accounting Software (Xero, QuickBooks, Zoho)",
+     "requirement": "must_have",
+     "fit": "false"
+    },
+    {
+     "segment": "skill",
+     "key": "Internal Controls and Risk Assessment",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "language",
+     "key": "English (Fluent)",
+     "requirement": "must_have",
+     "fit": "true"
+    },
+    {
+     "segment": "responsibilities",
+     "key": "Manage the end-to-end accounting cycle for a portfolio of clients in compliance with IFRS.|Oversee all month-end and year-end closing activities, including bank reconciliations, payroll, and fixed asset schedules.|Assess internal controls and financial risks for clients, recommending and implementing improvements.|Ensure timely and accurate preparation and filing of VAT returns and corporate tax for clients.|Serve as the primary liaison for external auditors during client audits.|Deliver expert accounting and financial reporting support to a dedicated client base. Deliver expert accounting and financial reporting support to a dedicated client base.",
+     "requirement": "nice_to_have",
+     "fit": "partially"
+    },
+    {
+     "segment": "context_experience",
+     "key": "at least 2 years in an accounting/audit firm",
+     "requirement": "nice_to_have",
+     "fit": "false"
+    },
+    {
+     "segment": "total_experience",
+     "key": "6",
+     "requirement": "must_have",
+     "fit": "true"
+    }
+   ]
+  }
+ ]
+}

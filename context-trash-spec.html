@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context Trash MCP — Technical Specification</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2333;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #7ee787;
+    --accent3: #d2a8ff;
+    --orange: #f0883e;
+    --red: #f85149;
+    --yellow: #d29922;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.7;
+  }
+  .hero {
+    background: linear-gradient(135deg, #0d1117 0%, #1a1e2e 50%, #0d1117 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 60px 40px 40px; text-align: center;
+  }
+  .hero h1 {
+    font-size: 2.4em; font-weight: 800;
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 12px;
+  }
+  .hero .subtitle { font-size: 1.1em; color: var(--text-dim); max-width: 700px; margin: 0 auto; }
+  .hero .version { font-size: 0.85em; color: var(--text-dim); margin-top: 8px; }
+  .container { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+  h2 {
+    font-size: 1.6em; font-weight: 700; color: var(--accent);
+    margin: 50px 0 16px; padding-bottom: 6px; border-bottom: 2px solid var(--border);
+  }
+  h3 { font-size: 1.2em; font-weight: 600; color: var(--accent3); margin: 28px 0 10px; }
+  h4 { font-size: 1.05em; font-weight: 600; color: var(--accent2); margin: 20px 0 8px; }
+  p { margin: 10px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  ul, ol { padding-left: 24px; margin: 10px 0; }
+  li { margin: 5px 0; }
+  code {
+    background: var(--surface2); padding: 2px 6px; border-radius: 4px;
+    font-size: 0.9em; color: var(--accent2);
+  }
+  pre {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; margin: 12px 0;
+  }
+  pre code { background: none; padding: 0; color: var(--text); }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin: 16px 0;
+  }
+  .card.highlight { border-color: var(--accent); background: linear-gradient(135deg, rgba(88,166,255,0.05), rgba(210,168,255,0.05)); }
+  .card.success { border-color: var(--accent2); background: rgba(126,231,135,0.05); }
+  .card.warning { border-color: var(--orange); background: rgba(240,136,62,0.05); }
+  .card.danger { border-color: var(--red); background: rgba(248,81,73,0.05); }
+  .card.phase { border-left: 4px solid var(--accent3); }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 0.92em; }
+  th, td { padding: 10px 14px; border: 1px solid var(--border); text-align: left; }
+  th { background: var(--surface2); color: var(--accent); font-weight: 600; }
+  td { background: var(--surface); }
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 12px;
+    font-size: 0.8em; font-weight: 700; margin-left: 4px;
+  }
+  .badge.p0 { background: rgba(248,81,73,0.2); color: var(--red); }
+  .badge.p1 { background: rgba(240,136,62,0.2); color: var(--orange); }
+  .badge.p2 { background: rgba(210,168,255,0.2); color: var(--accent3); }
+  .badge.free { background: rgba(126,231,135,0.2); color: var(--accent2); }
+  .toc { margin: 20px 0; }
+  .toc a { display: block; padding: 4px 0; color: var(--text-dim); }
+  .toc a:hover { color: var(--accent); }
+  .file-tree { font-family: monospace; font-size: 0.9em; line-height: 1.8; }
+  .file-tree .dir { color: var(--accent); }
+  .file-tree .file { color: var(--text); }
+  .file-tree .desc { color: var(--text-dim); font-family: -apple-system, sans-serif; font-size: 0.85em; }
+  .checklist { list-style: none; padding-left: 0; }
+  .checklist li { padding: 4px 0; }
+  .checklist li::before { content: "[ ] "; color: var(--text-dim); font-family: monospace; }
+  .checklist li.done::before { content: "[x] "; color: var(--accent2); }
+  footer {
+    text-align: center; padding: 30px; color: var(--text-dim);
+    font-size: 0.85em; border-top: 1px solid var(--border); margin-top: 40px;
+  }
+  @media (max-width: 700px) {
+    .hero h1 { font-size: 1.6em; }
+    pre { font-size: 0.78em; padding: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Context Trash MCP</h1>
+  <p class="subtitle">Technical Specification v1.0 — npm package <code>context-trash-mcp</code></p>
+  <p class="version">MCP proxy that compresses bloated tool results before they enter Claude's context window</p>
+</div>
+
+<div class="container">
+
+<!-- ============================================================ -->
+<h2>0. Table of Contents</h2>
+<div class="toc">
+  <a href="#goal">1. Goal & Scope</a>
+  <a href="#architecture">2. Architecture Overview</a>
+  <a href="#cli">3. CLI Interface</a>
+  <a href="#config">4. Configuration</a>
+  <a href="#pipeline">5. Compression Pipeline</a>
+  <a href="#compressors">6. Compressor Modules</a>
+  <a href="#structure">7. File Structure</a>
+  <a href="#phases">8. Implementation Phases</a>
+  <a href="#testing">9. Testing Plan</a>
+  <a href="#metrics">10. Success Metrics</a>
+  <a href="#risks">11. Risks & Mitigations</a>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="goal">1. Goal & Scope</h2>
+
+<div class="card highlight">
+  <h4>One-sentence goal</h4>
+  <p>Build an npm package that acts as a transparent MCP proxy — wrapping any existing MCP server and compressing its tool results before Claude sees them — to reduce context window consumption by 60-95% while preserving high context recall.</p>
+</div>
+
+<h3>In scope (v1.0)</h3>
+<ul>
+  <li>MCP proxy server using <code>stdio</code> transport (same as wrapped server)</li>
+  <li>Screenshot OCR: base64 PNG/JPEG → extracted text via Apple Vision (macOS) / tesseract (cross-platform)</li>
+  <li>DOM snapshot cleanup: strip <code>[ref=XXX]</code>, generic ARIA attributes, redundant whitespace</li>
+  <li>Large text truncation with configurable max tokens</li>
+  <li>Per-tool-name rules (e.g. "always OCR for <code>browser_take_screenshot</code>")</li>
+  <li>Passthrough mode for small results (below threshold)</li>
+  <li>CLI: <code>npx context-trash-mcp --wrap "command args"</code></li>
+  <li>Zero-config defaults that work out of the box for Playwright MCP</li>
+</ul>
+
+<h3>Out of scope (v1.0, candidates for v2)</h3>
+<ul>
+  <li>Gemini/LLM-powered summarization (Tier 3) — future add-on</li>
+  <li>HTTP/SSE transport — stdio only in v1</li>
+  <li>Custom compressor plugin API</li>
+  <li>Token counting (use byte-based heuristic: bytes / 4)</li>
+  <li>Dashboard / UI for compression stats</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="architecture">2. Architecture Overview</h2>
+
+<div class="card">
+<pre><code>┌─────────────────┐      stdio       ┌──────────────────────┐      stdio       ┌─────────────────┐
+│   Claude Code   │ ───────────────→ │   context-trash-mcp  │ ───────────────→ │  Wrapped MCP    │
+│                 │ ←─────────────── │   (proxy)            │ ←─────────────── │  Server         │
+│                 │   compressed     │                      │   raw results    │  (e.g. Playwright)│
+│                 │   results        │  ┌────────────────┐  │                  │                 │
+│                 │                  │  │ Compression    │  │                  │                 │
+│                 │                  │  │ Pipeline       │  │                  │                 │
+│                 │                  │  │  1. Detect type│  │                  │                 │
+│                 │                  │  │  2. Route      │  │                  │                 │
+│                 │                  │  │  3. Compress   │  │                  │                 │
+│                 │                  │  └────────────────┘  │                  │                 │
+└─────────────────┘                  └──────────────────────┘                  └─────────────────┘</code></pre>
+</div>
+
+<h3>Key Principles</h3>
+<ul>
+  <li><strong>Transparent proxy</strong> — Claude doesn't know the proxy exists. Tools list, tool calls, and notifications pass through unchanged. Only <code>CallToolResult</code> content gets compressed.</li>
+  <li><strong>Content-aware routing</strong> — each content block in a result is classified (image, DOM snapshot, large text, small text) and routed to the appropriate compressor.</li>
+  <li><strong>Fail-safe</strong> — if any compressor fails, the original content passes through unmodified. Never lose data due to proxy errors.</li>
+  <li><strong>Zero latency for small results</strong> — results under threshold (default: 500 tokens ≈ 2KB) pass through without processing.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="cli">3. CLI Interface</h2>
+
+<h3>Primary usage</h3>
+<pre><code># Wrap any MCP server
+npx context-trash-mcp --wrap "npx @anthropic-ai/mcp-playwright"
+
+# With custom config
+npx context-trash-mcp --config ./trash.config.json --wrap "npx @anthropic-ai/mcp-playwright"
+
+# Verbose logging (to stderr, never stdout — stdout is MCP protocol)
+npx context-trash-mcp --wrap "npx @anthropic-ai/mcp-playwright" --verbose</code></pre>
+
+<h3>Claude Code configuration (~/.claude.json)</h3>
+<pre><code>// Before (direct)
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@anthropic-ai/mcp-playwright"]
+    }
+  }
+}
+
+// After (wrapped)
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "context-trash-mcp",
+        "--wrap", "npx @anthropic-ai/mcp-playwright"
+      ]
+    }
+  }
+}</code></pre>
+
+<h3>CLI flags</h3>
+<table>
+  <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  <tr><td><code>--wrap &lt;cmd&gt;</code></td><td><em>required</em></td><td>Command to spawn the wrapped MCP server</td></tr>
+  <tr><td><code>--config &lt;path&gt;</code></td><td><code>~/.config/context-trash/config.json</code></td><td>Path to config file</td></tr>
+  <tr><td><code>--verbose</code></td><td><code>false</code></td><td>Log compression stats to stderr</td></tr>
+  <tr><td><code>--dry-run</code></td><td><code>false</code></td><td>Log what would be compressed without modifying results</td></tr>
+  <tr><td><code>--ocr-engine</code></td><td><code>auto</code></td><td><code>auto</code> | <code>vision</code> | <code>tesseract</code></td></tr>
+  <tr><td><code>--max-text-tokens</code></td><td><code>2000</code></td><td>Max tokens for text content before truncation</td></tr>
+  <tr><td><code>--threshold</code></td><td><code>500</code></td><td>Min token estimate to trigger compression</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="config">4. Configuration</h2>
+
+<h3>Config file: <code>config.json</code></h3>
+<pre><code>{
+  "threshold": 500,
+  "maxTextTokens": 2000,
+  "ocrEngine": "auto",
+  "verbose": false,
+
+  "rules": [
+    {
+      "toolName": "browser_take_screenshot",
+      "strategy": "ocr",
+      "comment": "Always OCR screenshots — 300x compression"
+    },
+    {
+      "toolName": "browser_snapshot",
+      "strategy": "dom-cleanup",
+      "comment": "Strip ref attributes and generic ARIA from accessibility tree"
+    },
+    {
+      "toolName": "Read",
+      "strategy": "truncate",
+      "maxTokens": 3000,
+      "comment": "Large file reads get truncated"
+    },
+    {
+      "toolNamePattern": ".*",
+      "strategy": "auto",
+      "comment": "Default: auto-detect content type and compress accordingly"
+    }
+  ]
+}</code></pre>
+
+<h3>Strategy types</h3>
+<table>
+  <tr><th>Strategy</th><th>When to use</th><th>What it does</th></tr>
+  <tr><td><code>ocr</code></td><td>Image content (base64)</td><td>Extract text via Vision/tesseract, replace image with text</td></tr>
+  <tr><td><code>dom-cleanup</code></td><td>Playwright accessibility snapshots</td><td>Strip [ref=N], generic ARIA, collapse whitespace</td></tr>
+  <tr><td><code>truncate</code></td><td>Large text blocks</td><td>Keep first + last N tokens, add "[truncated]" marker</td></tr>
+  <tr><td><code>auto</code></td><td>Default</td><td>Detect content type → route to appropriate strategy</td></tr>
+  <tr><td><code>passthrough</code></td><td>Exclude specific tools</td><td>No compression, pass as-is</td></tr>
+</table>
+
+<h3>Rule matching</h3>
+<p>Rules are evaluated top-to-bottom. First match wins. <code>toolName</code> is exact match, <code>toolNamePattern</code> is regex. If no rule matches, <code>auto</code> strategy is used.</p>
+
+<!-- ============================================================ -->
+<h2 id="pipeline">5. Compression Pipeline</h2>
+
+<div class="card">
+<h4>Per-request flow (on <code>tools/call</code> response)</h4>
+<pre><code>1. Receive CallToolResult from wrapped server
+2. Estimate token count (bytes / 4)
+3. If total tokens < threshold → passthrough (return as-is)
+4. Find matching rule for tool name
+5. For each content block in result:
+   a. Classify: image | dom-snapshot | text
+   b. Apply strategy from matched rule (or auto-detect)
+   c. If compressor fails → keep original block
+6. Reassemble result with compressed blocks
+7. Log stats to stderr (if verbose):
+   "[context-trash] browser_take_screenshot: 247,000 → 823 tokens (99.7% reduction)"
+8. Return compressed result to Claude</code></pre>
+</div>
+
+<h3>Content classification (auto strategy)</h3>
+<table>
+  <tr><th>Signal</th><th>Classified as</th><th>Compressor</th></tr>
+  <tr><td>Content type = <code>image</code></td><td>Image</td><td>OCR</td></tr>
+  <tr><td>Contains <code>[ref=</code> or <code>- role:</code> patterns</td><td>DOM Snapshot</td><td>dom-cleanup</td></tr>
+  <tr><td>Text content &gt; maxTextTokens</td><td>Large text</td><td>truncate</td></tr>
+  <tr><td>Text content &le; threshold</td><td>Small text</td><td>passthrough</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="compressors">6. Compressor Modules</h2>
+
+<h3>6.1. OCR Compressor <span class="badge free">$0</span> <span class="badge p0">P0</span></h3>
+
+<div class="card">
+<h4>Input</h4>
+<p>MCP content block: <code>{ type: "image", data: "base64...", mimeType: "image/png" }</code></p>
+
+<h4>Output</h4>
+<p>MCP content block: <code>{ type: "text", text: "[OCR extracted from screenshot]\n..." }</code></p>
+
+<h4>Implementation</h4>
+<ol>
+  <li>Decode base64 → write to temp file (<code>/tmp/ctx-trash-XXXX.png</code>)</li>
+  <li>Run OCR engine:
+    <ul>
+      <li><strong>macOS (default)</strong>: <code>swift</code> script using Apple Vision framework — best quality, free</li>
+      <li><strong>Fallback</strong>: <code>tesseract &lt;file&gt; stdout</code> — cross-platform, free</li>
+    </ul>
+  </li>
+  <li>Delete temp file</li>
+  <li>Return text block with <code>[OCR extracted from screenshot]</code> prefix</li>
+</ol>
+
+<h4>Apple Vision Swift script (embedded)</h4>
+<pre><code>// Bundled as src/ocr/vision.swift, compiled on first run
+import Vision
+import AppKit
+
+let url = URL(fileURLWithPath: CommandLine.arguments[1])
+let image = NSImage(contentsOf: url)!
+let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)!
+
+let request = VNRecognizeTextRequest()
+request.recognitionLevel = .accurate
+request.usesLanguageCorrection = true
+
+let handler = VNImageRequestHandler(cgImage: cgImage)
+try handler.perform([request])
+
+let results = request.results ?? []
+for observation in results {
+    if let candidate = observation.topCandidates(1).first {
+        print(candidate.string)
+    }
+}</code></pre>
+
+<h4>Expected compression</h4>
+<p>Screenshot ~250,000 tokens → OCR text ~500-2,000 tokens. <strong>99%+ reduction.</strong></p>
+</div>
+
+<h3>6.2. DOM Cleanup Compressor <span class="badge free">$0</span> <span class="badge p0">P0</span></h3>
+
+<div class="card">
+<h4>Input</h4>
+<p>Text block containing Playwright accessibility tree snapshot</p>
+
+<h4>Rules (applied sequentially)</h4>
+<ol>
+  <li><strong>Strip ref attributes</strong>: <code>[ref=123]</code> → remove (Claude doesn't need element refs after snapshot)</li>
+  <li><strong>Strip generic ARIA</strong>: remove <code>role="generic"</code>, <code>role="none"</code></li>
+  <li><strong>Collapse empty nodes</strong>: remove lines with only <code>- role: generic</code> and no children</li>
+  <li><strong>Collapse whitespace</strong>: multiple blank lines → single blank line</li>
+  <li><strong>Deduplicate navigation</strong>: if identical nav block repeats, keep first + add <code>[repeated nav block omitted]</code></li>
+</ol>
+
+<h4>Expected compression</h4>
+<p>DOM snapshot ~15,000 tokens → cleaned ~5,000-8,000 tokens. <strong>40-65% reduction.</strong></p>
+</div>
+
+<h3>6.3. Text Truncation Compressor <span class="badge free">$0</span> <span class="badge p1">P1</span></h3>
+
+<div class="card">
+<h4>Strategy</h4>
+<p>Smart truncation: keep first 70% and last 30% of the max token budget, insert a <code>[... truncated N tokens ...]</code> marker between.</p>
+
+<h4>Rationale</h4>
+<p>Start of files contains imports/structure. End often contains the relevant function or error. Middle is usually the least important.</p>
+
+<h4>Config</h4>
+<pre><code>{
+  "maxTokens": 2000,      // total token budget
+  "headRatio": 0.7,        // 70% from start
+  "tailRatio": 0.3         // 30% from end
+}</code></pre>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="structure">7. File Structure</h2>
+
+<div class="card">
+<pre class="file-tree"><code><span class="dir">context-trash-mcp/</span>
+├── <span class="file">package.json</span>          <span class="desc">// name: "context-trash-mcp", bin: "context-trash-mcp"</span>
+├── <span class="file">tsconfig.json</span>
+├── <span class="file">README.md</span>
+├── <span class="dir">src/</span>
+│   ├── <span class="file">index.ts</span>           <span class="desc">// CLI entry point: parse args, spawn proxy</span>
+│   ├── <span class="file">proxy.ts</span>           <span class="desc">// MCP proxy: stdio ↔ stdio, intercept results</span>
+│   ├── <span class="file">pipeline.ts</span>        <span class="desc">// Compression pipeline: classify → route → compress</span>
+│   ├── <span class="file">config.ts</span>          <span class="desc">// Load & validate config, apply defaults</span>
+│   ├── <span class="file">classifier.ts</span>      <span class="desc">// Content type detection (image/dom/text)</span>
+│   ├── <span class="file">logger.ts</span>          <span class="desc">// Stderr logging with stats</span>
+│   ├── <span class="dir">compressors/</span>
+│   │   ├── <span class="file">ocr.ts</span>         <span class="desc">// Screenshot → text via Vision/tesseract</span>
+│   │   ├── <span class="file">dom-cleanup.ts</span> <span class="desc">// Accessibility tree cleanup</span>
+│   │   └── <span class="file">truncate.ts</span>    <span class="desc">// Smart head+tail truncation</span>
+│   └── <span class="dir">ocr/</span>
+│       └── <span class="file">vision.swift</span>   <span class="desc">// Apple Vision OCR script (macOS)</span>
+├── <span class="dir">test/</span>
+│   ├── <span class="file">proxy.test.ts</span>      <span class="desc">// Proxy integration tests</span>
+│   ├── <span class="file">pipeline.test.ts</span>   <span class="desc">// Pipeline unit tests</span>
+│   ├── <span class="file">ocr.test.ts</span>        <span class="desc">// OCR compressor tests</span>
+│   ├── <span class="file">dom-cleanup.test.ts</span><span class="desc">// DOM cleanup tests</span>
+│   ├── <span class="file">truncate.test.ts</span>   <span class="desc">// Truncation tests</span>
+│   └── <span class="dir">fixtures/</span>
+│       ├── <span class="file">screenshot.png</span> <span class="desc">// Sample screenshot for OCR tests</span>
+│       ├── <span class="file">dom-snapshot.txt</span><span class="desc">// Sample Playwright accessibility tree</span>
+│       └── <span class="file">large-file.txt</span> <span class="desc">// 10k+ token file for truncation tests</span>
+└── <span class="dir">dist/</span>                  <span class="desc">// Compiled output (gitignored)</span></code></pre>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="phases">8. Implementation Phases</h2>
+
+<div class="card phase">
+  <h3>Phase 1: Transparent Proxy <span class="badge p0">P0 — MVP</span></h3>
+  <p><strong>Goal:</strong> Working MCP proxy that passes everything through unchanged.</p>
+  <ul>
+    <li>Parse CLI args (<code>--wrap</code>)</li>
+    <li>Spawn wrapped server as child process (stdio)</li>
+    <li>Bidirectional message forwarding: stdin → child stdin, child stdout → stdout</li>
+    <li>Handle process lifecycle (exit, signals, errors)</li>
+    <li>Verify: <code>npx context-trash-mcp --wrap "npx @anthropic-ai/mcp-playwright"</code> works identically to bare Playwright MCP</li>
+  </ul>
+  <p><strong>Test:</strong> Run with Claude Code, use Playwright tools — everything should work as before.</p>
+</div>
+
+<div class="card phase">
+  <h3>Phase 2: OCR Compressor <span class="badge p0">P0 — Core Value</span></h3>
+  <p><strong>Goal:</strong> Screenshots automatically converted to text. This alone is 80% of the value.</p>
+  <ul>
+    <li>Intercept <code>CallToolResult</code> messages</li>
+    <li>Detect <code>image</code> content blocks</li>
+    <li>Apple Vision OCR on macOS (compile Swift script on first run, cache binary)</li>
+    <li>Tesseract fallback for Linux/Windows</li>
+    <li>Replace image block with text block</li>
+    <li>Log compression stats to stderr</li>
+  </ul>
+  <p><strong>Test:</strong> <code>browser_take_screenshot</code> returns text instead of image. Claude can still "see" page content.</p>
+</div>
+
+<div class="card phase">
+  <h3>Phase 3: DOM Cleanup + Config <span class="badge p0">P0</span></h3>
+  <p><strong>Goal:</strong> Accessibility tree snapshots cleaned up. Config system in place.</p>
+  <ul>
+    <li>DOM cleanup compressor: regex-based rules</li>
+    <li>Config file loading with defaults</li>
+    <li>Rule matching system (toolName → strategy)</li>
+    <li>Content classifier (auto strategy)</li>
+    <li>Threshold-based passthrough</li>
+  </ul>
+  <p><strong>Test:</strong> <code>browser_snapshot</code> returns cleaned DOM. Config overrides work.</p>
+</div>
+
+<div class="card phase">
+  <h3>Phase 4: Text Truncation + Polish <span class="badge p1">P1</span></h3>
+  <p><strong>Goal:</strong> Handle large text results. Publish to npm.</p>
+  <ul>
+    <li>Smart truncation compressor (head + tail)</li>
+    <li><code>--dry-run</code> mode</li>
+    <li><code>--verbose</code> with structured stats</li>
+    <li>README with examples</li>
+    <li>npm publish as <code>context-trash-mcp</code></li>
+  </ul>
+</div>
+
+<div class="card phase">
+  <h3>Phase 5 (Future): LLM Summarization <span class="badge p2">P2</span></h3>
+  <ul>
+    <li>Optional Gemini Flash integration for intelligent summarization</li>
+    <li>Strategy: <code>summarize</code> — send content to Gemini with "summarize for an AI coding assistant" prompt</li>
+    <li>Requires API key in config</li>
+    <li>Budget tracking per session</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="testing">9. Testing Plan</h2>
+
+<h3>Unit Tests</h3>
+<table>
+  <tr><th>Module</th><th>Tests</th></tr>
+  <tr>
+    <td><code>classifier.ts</code></td>
+    <td>
+      <ul>
+        <li>Detect image content block</li>
+        <li>Detect DOM snapshot (contains <code>[ref=</code>)</li>
+        <li>Detect large text (&gt; threshold)</li>
+        <li>Detect small text (passthrough)</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td><code>dom-cleanup.ts</code></td>
+    <td>
+      <ul>
+        <li>Strip <code>[ref=N]</code> from real Playwright snapshot</li>
+        <li>Remove generic roles</li>
+        <li>Collapse whitespace</li>
+        <li>Preserve meaningful content</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td><code>truncate.ts</code></td>
+    <td>
+      <ul>
+        <li>Text under limit → passthrough</li>
+        <li>Text over limit → head + tail + marker</li>
+        <li>Correct token estimation (bytes/4)</li>
+        <li>Custom head/tail ratios</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td><code>ocr.ts</code></td>
+    <td>
+      <ul>
+        <li>Extract text from fixture screenshot</li>
+        <li>Handle corrupt image gracefully → return original</li>
+        <li>Engine selection: vision on macOS, tesseract elsewhere</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td><code>pipeline.ts</code></td>
+    <td>
+      <ul>
+        <li>Route image → OCR</li>
+        <li>Route DOM → cleanup</li>
+        <li>Route large text → truncate</li>
+        <li>Small result → passthrough</li>
+        <li>Rule matching priority (first match wins)</li>
+        <li>Compressor failure → passthrough</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td><code>config.ts</code></td>
+    <td>
+      <ul>
+        <li>Load from file</li>
+        <li>Apply defaults for missing fields</li>
+        <li>CLI flags override config file</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+<h3>Integration Tests</h3>
+<table>
+  <tr><th>Scenario</th><th>How</th></tr>
+  <tr>
+    <td>Full proxy passthrough</td>
+    <td>Mock MCP server → proxy → verify identical output</td>
+  </tr>
+  <tr>
+    <td>Screenshot compression</td>
+    <td>Mock MCP server returns image → verify text output with OCR text</td>
+  </tr>
+  <tr>
+    <td>Mixed result (image + text)</td>
+    <td>Mock server returns multi-block result → verify image compressed, text preserved</td>
+  </tr>
+  <tr>
+    <td>Error resilience</td>
+    <td>Mock compressor throws → verify original content returned</td>
+  </tr>
+</table>
+
+<h3>Manual Smoke Test</h3>
+<div class="card">
+<pre><code># 1. Start proxy wrapping Playwright
+# In ~/.claude.json, set playwright to use context-trash-mcp --wrap
+
+# 2. Ask Claude Code to take a screenshot
+"Take a screenshot of https://example.com"
+
+# 3. Verify in stderr logs:
+# [context-trash] browser_take_screenshot: 247,382 → 891 tokens (99.6%)
+
+# 4. Verify Claude understood the page content from OCR text
+
+# 5. Ask Claude to interact based on snapshot
+"Click the 'More information' link"
+# Verify DOM cleanup worked and Claude can still navigate</code></pre>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="metrics">10. Success Metrics</h2>
+
+<table>
+  <tr><th>Metric</th><th>Target</th><th>How to measure</th></tr>
+  <tr>
+    <td>Screenshot compression ratio</td>
+    <td>&ge; 95%</td>
+    <td>Verbose logs: before/after token count</td>
+  </tr>
+  <tr>
+    <td>DOM snapshot compression ratio</td>
+    <td>&ge; 40%</td>
+    <td>Verbose logs</td>
+  </tr>
+  <tr>
+    <td>Proxy overhead latency</td>
+    <td>&le; 50ms (excl. OCR)</td>
+    <td>Timestamp diff in logs</td>
+  </tr>
+  <tr>
+    <td>OCR latency</td>
+    <td>&le; 3 seconds</td>
+    <td>Timestamp diff in logs</td>
+  </tr>
+  <tr>
+    <td>Zero data loss on small results</td>
+    <td>100% passthrough</td>
+    <td>Diff original vs proxied for small results</td>
+  </tr>
+  <tr>
+    <td>Compressor crash resilience</td>
+    <td>100% graceful fallback</td>
+    <td>Error injection tests</td>
+  </tr>
+  <tr>
+    <td>Sessions before first compact</td>
+    <td>3x improvement</td>
+    <td>Compare compact count with/without proxy</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="risks">11. Risks & Mitigations</h2>
+
+<table>
+  <tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr>
+  <tr>
+    <td>OCR quality too low for Claude to act on</td>
+    <td>High — Claude may misunderstand page content</td>
+    <td>Apple Vision has excellent quality. Test on real screenshots. Add <code>[OCR may contain errors]</code> prefix. Allow passthrough override per tool.</td>
+  </tr>
+  <tr>
+    <td>DOM cleanup removes useful refs</td>
+    <td>Medium — Claude can't click elements</td>
+    <td>Only strip refs from <em>snapshot</em> tool, not from interaction tools. Playwright uses refs only during the same turn.</td>
+  </tr>
+  <tr>
+    <td>Proxy breaks MCP protocol</td>
+    <td>High — tools stop working</td>
+    <td>Phase 1 is pure passthrough. Validate against MCP spec. Integration tests with real servers.</td>
+  </tr>
+  <tr>
+    <td>tesseract not installed on user machine</td>
+    <td>Medium — OCR fails on Linux</td>
+    <td>Clear error message: "Install tesseract for OCR: brew install tesseract / apt install tesseract-ocr". Fallback to passthrough.</td>
+  </tr>
+  <tr>
+    <td>stdio buffering issues</td>
+    <td>Medium — messages get stuck</td>
+    <td>Use line-buffered JSON-RPC. Flush after each message. Test with large payloads.</td>
+  </tr>
+  <tr>
+    <td>Swift compilation fails</td>
+    <td>Low — macOS only</td>
+    <td>Pre-compile on first run, cache binary. Fall back to tesseract if swiftc missing.</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>12. Technical Decisions</h2>
+
+<h3>Why stdio proxy (not HTTP)?</h3>
+<ul>
+  <li>Claude Code uses stdio for local MCP servers</li>
+  <li>Simpler: just spawn child process and pipe</li>
+  <li>No port conflicts, no auth needed</li>
+  <li>Most MCP servers (Playwright, filesystem) are stdio</li>
+</ul>
+
+<h3>Why not use @modelcontextprotocol/sdk for the proxy?</h3>
+<ul>
+  <li>SDK creates a full server + client pair — overkill for a proxy</li>
+  <li>Raw JSON-RPC line protocol is simple: read line → parse → maybe transform → write line</li>
+  <li>Fewer dependencies = faster <code>npx</code> startup</li>
+  <li><strong>BUT: evaluate during Phase 1</strong> — if raw protocol is too fragile, switch to SDK</li>
+</ul>
+
+<h3>Why compile Swift on first run?</h3>
+<ul>
+  <li>Can't ship a binary in npm package (architecture-dependent)</li>
+  <li>macOS always has <code>swiftc</code> available</li>
+  <li>One-time cost: ~2 seconds to compile, then cached</li>
+  <li>Result: native Vision framework access without external dependencies</li>
+</ul>
+
+<h3>Token estimation: bytes / 4</h3>
+<ul>
+  <li>Claude uses BPE tokenizer where avg token ≈ 4 bytes for English text</li>
+  <li>For images (base64), this overestimates — but that's fine (we want to compress images aggressively)</li>
+  <li>Good enough for threshold decisions. No need for real tokenizer dependency.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>13. npm Package Config</h2>
+
+<div class="card">
+<pre><code>{
+  "name": "context-trash-mcp",
+  "version": "0.1.0",
+  "description": "MCP proxy that compresses bloated tool results before they enter Claude's context window",
+  "bin": {
+    "context-trash-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp", "claude", "context", "compression", "proxy",
+    "claude-code", "model-context-protocol", "playwright",
+    "screenshot", "ocr", "token-optimization"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4",
+    "vitest": "^1.6"
+  }
+}</code></pre>
+</div>
+
+<div class="card success">
+  <h4>Zero runtime dependencies</h4>
+  <p>The proxy uses only Node.js built-ins: <code>child_process</code>, <code>fs</code>, <code>path</code>, <code>readline</code>, <code>os</code>. No runtime npm dependencies = fast <code>npx</code>, no supply chain risk.</p>
+</div>
+
+</div>
+
+<footer>
+  Context Trash MCP — Technical Specification v1.0<br>
+  Companion docs: <a href="https://chillai.space/p/context-overload-research?password=CcgMUHeG">State of the Art Research</a> &middot;
+  <a href="https://chillai.space/p/context-trash-architecture?password=HO01VEk2">Architecture</a> &middot;
+  <a href="https://chillai.space/p/compression-comparison?password=U-MxB1lX">Empirical Comparison</a>
+</footer>
+
+</body>
+</html>
