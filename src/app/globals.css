@@ -132,3 +132,43 @@
     --muted-foreground: oklch(0.42 0 0);
   }
 }
+
+/* Markdown details/summary (Thinking, Results) */
+.markdown-body details {
+  margin: 0.5rem 0;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.markdown-body details summary {
+  cursor: pointer;
+  padding: 0.4rem 0.75rem;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--muted) 40%, transparent);
+  user-select: none;
+  list-style: none;
+}
+.markdown-body details summary::-webkit-details-marker {
+  display: none;
+}
+.markdown-body details summary::before {
+  content: "▶ ";
+  font-size: 10px;
+  margin-right: 4px;
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.markdown-body details[open] summary::before {
+  transform: rotate(90deg);
+}
+.markdown-body details > :not(summary) {
+  padding: 0 0.75rem;
+}
+.markdown-body details > pre {
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}

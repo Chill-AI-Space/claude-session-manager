@@ -200,24 +200,24 @@ function renderBlock(block: ContentBlock, maxToolResult: number): string {
 function formatToolInput(toolName: string, input: Record<string, unknown>): string {
   switch (toolName) {
     case "Read":
-      return `\`${input.file_path}\`` +
+      return `\`\`\`\n${input.file_path}\`\`\`` +
         (input.offset ? ` (lines ${input.offset}–${Number(input.offset) + Number(input.limit || 100)})` : "");
 
     case "Write":
-      return `\`${input.file_path}\`\n\`\`\`\n${truncate(String(input.content || ""), 1500)}\n\`\`\``;
+      return `\`\`\`\n${input.file_path}\n\`\`\`\n\n\`\`\`\n${truncate(String(input.content || ""), 1500)}\n\`\`\``;
 
     case "Edit": {
       const fp = String(input.file_path || "");
       const old = String(input.old_string || "");
       const nw = String(input.new_string || "");
-      return `\`${fp}\`\n\`\`\`diff\n- ${truncate(old, 500).split("\n").join("\n- ")}\n+ ${truncate(nw, 500).split("\n").join("\n+ ")}\n\`\`\``;
+      return `\`\`\`\n${fp}\n\`\`\`\n\n\`\`\`diff\n- ${truncate(old, 500).split("\n").join("\n- ")}\n+ ${truncate(nw, 500).split("\n").join("\n+ ")}\n\`\`\``;
     }
 
     case "Bash":
       return `\`\`\`bash\n${truncate(String(input.command || ""), 500)}\n\`\`\``;
 
     case "Glob":
-      return `\`${input.pattern}\`` + (input.path ? ` in \`${input.path}\`` : "");
+      return `\`\`\`\n${input.pattern}\`\`\`` + (input.path ? ` in \`${input.path}\`` : "");
 
     case "Grep":
       return `\`${input.pattern}\`` +
