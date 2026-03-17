@@ -1421,7 +1421,18 @@ export default function SessionDetailPage({
                       {summaryOpen && (
                         <div className="px-4 pb-3 border-t border-border/20">
                           {summaryError && <div className="text-[11px] text-red-500 py-2">{summaryError}</div>}
-                          {summary && <div className="pt-2"><MarkdownContent content={summary} projectPath={data?.project_path} compact /></div>}
+                          {summary && (
+                            <div className="pt-2 relative group/summary">
+                              <button
+                                onClick={() => { navigator.clipboard.writeText(summary); toast.success("Summary copied"); }}
+                                className="absolute top-2 right-0 p-1 rounded opacity-0 group-hover/summary:opacity-100 text-muted-foreground/40 hover:text-muted-foreground transition-opacity"
+                                title="Copy summary"
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                              </button>
+                              <MarkdownContent content={summary} projectPath={data?.project_path} compact />
+                            </div>
+                          )}
                           {!summary && !summaryLoading && !summaryError && <div className="text-[11px] text-muted-foreground py-2">Click to generate…</div>}
                         </div>
                       )}
@@ -1460,7 +1471,14 @@ export default function SessionDetailPage({
                             const l = learnings as Record<string, string | string[]>;
                             const entries = Object.entries(l).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : !!v));
                             return (
-                              <div className="pt-2 space-y-2">
+                              <div className="pt-2 space-y-2 relative group/learnings">
+                                <button
+                                  onClick={() => { navigator.clipboard.writeText(JSON.stringify(learnings, null, 2)); toast.success("Learnings copied"); }}
+                                  className="absolute top-2 right-0 p-1 rounded opacity-0 group-hover/learnings:opacity-100 text-muted-foreground/40 hover:text-muted-foreground transition-opacity"
+                                  title="Copy learnings"
+                                >
+                                  <Copy className="h-3.5 w-3.5" />
+                                </button>
                                 {entries.map(([key, value]) => (
                                   <div key={key}>
                                     <div className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider mb-1">{key.replace(/_/g, " ")}</div>
