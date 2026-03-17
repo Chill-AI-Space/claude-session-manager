@@ -164,7 +164,7 @@
   transform: rotate(90deg);
 }
 .markdown-body details > :not(summary) {
-  padding: 0 0.75rem;
+  padding: 0 0.75rem 0 1rem;
 }
 .markdown-body details > pre {
   margin: 0;
