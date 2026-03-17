@@ -138,7 +138,8 @@
   margin: 0.5rem 0;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
-  overflow: hidden;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .markdown-body details summary {
   cursor: pointer;
