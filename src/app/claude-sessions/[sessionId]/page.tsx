@@ -439,6 +439,13 @@ export default function SessionDetailPage({
     setMdLoadingEarlier(false);
   }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-load full history after 3s if user stays on the session
+  useEffect(() => {
+    if (!mdHasEarlier || !data?.session_id) return;
+    const timer = setTimeout(() => loadAllMdMessages(), 3000);
+    return () => clearTimeout(timer);
+  }, [mdHasEarlier, data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Pre-populate summary/learnings from DB cache (no LLM call needed)
   useEffect(() => {
     if (!data?.metadata) return;
