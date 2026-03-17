@@ -348,6 +348,7 @@ export default function SessionDetailPage({
     setHasReplied(false);
     setMdView(true);
     setMdContent(null);
+    setMdLoading(false);
     setSummary(null);
     setSummaryOpen(false);
     setSummaryError(null);
@@ -498,7 +499,7 @@ export default function SessionDetailPage({
 
   // Phase 1: Load last 30 messages as MD — show instantly
   useEffect(() => {
-    if (!data?.session_id || mdLoading) return;
+    if (!data?.session_id) return;
     const total = data.messages_total ?? 0;
     if (mdContent && total === mdFetchedForTotal.current) return;
     if (!mdContent) setMdLoading(true);
