@@ -1,10 +1,10 @@
 "use client";
 
-import { memo, useState, useMemo } from "react";
+import { memo, useState, useMemo, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import { FolderOpen, Check, Maximize2, X, ChevronUp } from "lucide-react";
+import { FolderOpen, Check, Maximize2, X, ChevronUp, Copy } from "lucide-react";
 
 interface MarkdownContentProps {
   content: string;
@@ -57,6 +57,23 @@ function FileLink({ filePath, projectPath }: { filePath: string; projectPath?: s
   );
 }
 
+function CopyButton({ getText, className = "" }: { getText: () => string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(getText());
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      className={`p-1 rounded text-muted-foreground/40 hover:text-muted-foreground transition-all ${className}`}
+      title="Copy"
+    >
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
+}
+
 function TableWrapper({ children }: { children: React.ReactNode }) {
   const [focused, setFocused] = useState(false);
 
@@ -80,14 +97,23 @@ function TableWrapper({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="not-prose overflow-x-auto my-3 rounded-lg border border-border/50 relative group/table">
-      <button
-        onClick={() => setFocused(true)}
-        className="absolute top-1.5 right-1.5 p-1 rounded bg-muted/80 hover:bg-muted text-muted-foreground/60 hover:text-foreground opacity-0 group-hover/table:opacity-100 transition-opacity z-10"
-        title="Focus mode"
-      >
-        <Maximize2 className="h-3.5 w-3.5" />
-      </button>
+    <div className="not-prose overflow-x-auto my-3 rounded-lg border border-border/50 relative group/table" ref={(el) => { if (el) (el as HTMLDivElement & { _tableRef: HTMLDivElement })._tableRef = el; }}>
+      <div className="absolute top-1.5 right-1.5 flex gap-0.5 opacity-0 group-hover/table:opacity-100 transition-opacity z-10">
+        <CopyButton
+          getText={() => {
+            const table = document.querySelector('.group\\/table:hover table') as HTMLElement | null;
+            return table?.innerText || '';
+          }}
+          className="bg-muted/80 hover:bg-muted"
+        />
+        <button
+          onClick={() => setFocused(true)}
+          className="p-1 rounded bg-muted/80 hover:bg-muted text-muted-foreground/60 hover:text-foreground transition-opacity"
+          title="Focus mode"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
       <table className="text-[13px] border-collapse">{children}</table>
     </div>
   );
@@ -120,20 +146,20 @@ function MarkdownRenderer({ content, projectPath, compact }: MarkdownContentProp
   // Compact: 12px body, GitHub-like spacing. Normal: default prose-sm.
   const compactClasses = compact ? [
     "text-[12px] leading-[1.7]",
-    // Paragraph spacing — enough breathing room
-    "prose-p:my-2.5 prose-p:text-[12px] prose-p:leading-[1.7]",
+    // Paragraph spacing
+    "prose-p:my-1.5 prose-p:text-[12px] prose-p:leading-[1.65]",
     // Headings
-    "prose-h1:text-[15px] prose-h1:mt-6 prose-h1:mb-3",
-    "prose-h2:text-[13.5px] prose-h2:mt-5 prose-h2:mb-2",
-    "prose-h3:text-[12.5px] prose-h3:mt-4 prose-h3:mb-1.5",
+    "prose-h1:text-[15px] prose-h1:mt-5 prose-h1:mb-2",
+    "prose-h2:text-[13.5px] prose-h2:mt-4 prose-h2:mb-1.5",
+    "prose-h3:text-[12.5px] prose-h3:mt-3 prose-h3:mb-1",
     // Lists
-    "prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-li:text-[12px]",
+    "prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-li:text-[12px]",
     // Tables
-    "prose-td:text-[11px] prose-th:text-[10.5px] prose-table:my-3",
+    "prose-td:text-[11px] prose-th:text-[10.5px] prose-table:my-2",
     // Code blocks
-    "prose-pre:my-3",
+    "prose-pre:my-2",
     // Blockquotes & hrs
-    "prose-blockquote:my-2.5 prose-hr:my-4",
+    "prose-blockquote:my-2 prose-hr:my-3",
   ].join(" ") : "";
 
   return (
@@ -159,13 +185,17 @@ function MarkdownRenderer({ content, projectPath, compact }: MarkdownContentProp
               );
             }
             const language = className?.replace("language-", "") || "";
+            const codeText = typeof children === "string" ? children : String(children ?? "");
             return (
-              <div className="relative group not-prose">
-                {language && (
-                  <div className="absolute top-0 right-0 px-2 py-0.5 text-[10px] text-muted-foreground/50 bg-muted rounded-bl font-mono">
-                    {language}
-                  </div>
-                )}
+              <div className="relative group/code not-prose">
+                <div className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover/code:opacity-100 transition-opacity z-10">
+                  <CopyButton getText={() => codeText.replace(/\n$/, "")} className="bg-muted/80 hover:bg-muted" />
+                  {language && (
+                    <span className="px-2 py-0.5 text-[10px] text-muted-foreground/50 bg-muted rounded-bl font-mono">
+                      {language}
+                    </span>
+                  )}
+                </div>
                 <pre className="bg-muted/40 border border-border/40 rounded-lg p-4 overflow-x-auto">
                   <code className={`${codeSize} leading-relaxed font-mono`} {...props}>
                     {children}
@@ -186,9 +216,9 @@ function MarkdownRenderer({ content, projectPath, compact }: MarkdownContentProp
           th({ children }) { return <th className="px-3 py-2.5 text-left text-[12px] font-semibold text-foreground/80 border-b border-border/50 whitespace-nowrap">{children}</th>; },
           td({ children }) { return <td className="px-3 py-2 text-[13px] border-b border-border/20 text-foreground/90">{children}</td>; },
           tr({ children }) { return <tr className="even:bg-muted/15 hover:bg-muted/30 transition-colors">{children}</tr>; },
-          h1({ children }) { return <h1 className={`font-bold first:mt-0 ${compact ? "text-[15px] mt-6 mb-3" : "text-xl mt-5 mb-3"}`}>{children}</h1>; },
-          h2({ children }) { return <h2 className={`font-semibold first:mt-0 ${compact ? "text-[13.5px] mt-5 mb-2" : "text-lg mt-4 mb-2"}`}>{children}</h2>; },
-          h3({ children }) { return <h3 className={`font-semibold first:mt-0 ${compact ? "text-[12.5px] mt-4 mb-1.5" : "text-[15px] mt-3 mb-1.5"}`}>{children}</h3>; },
+          h1({ children }) { return <h1 className={`font-bold first:mt-0 ${compact ? "text-[15px] mt-5 mb-2" : "text-xl mt-5 mb-3"}`}>{children}</h1>; },
+          h2({ children }) { return <h2 className={`font-semibold first:mt-0 ${compact ? "text-[13.5px] mt-4 mb-1.5" : "text-lg mt-4 mb-2"}`}>{children}</h2>; },
+          h3({ children }) { return <h3 className={`font-semibold first:mt-0 ${compact ? "text-[12.5px] mt-3 mb-1" : "text-[15px] mt-3 mb-1.5"}`}>{children}</h3>; },
           ul({ children }) { return <ul className="my-2 pl-5 space-y-1 list-disc marker:text-muted-foreground/50">{children}</ul>; },
           ol({ children }) { return <ol className="my-2 pl-5 space-y-1 list-decimal marker:text-muted-foreground/60">{children}</ol>; },
           li({ children }) { return <li className="pl-1">{children}</li>; },
