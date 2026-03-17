@@ -85,7 +85,15 @@ sleep 3
 
 ### 3. Post-deploy health checks (MANDATORY)
 
-Run ALL of these after every deploy. If any returns non-200 or error — the deploy is broken.
+Run the smoke test after every deploy. It verifies server, APIs, data loading, MD pagination, and content rendering — not just HTTP 200.
+
+```bash
+scripts/smoke-test.sh
+```
+
+If the smoke test fails, check error logs and fix before considering the deploy done.
+
+For individual manual checks:
 
 ```bash
 # 1. Server process is alive
@@ -172,6 +180,101 @@ curl -X PUT http://localhost:3000/api/settings \
 ```
 
 Settings are immediately available — no restart needed. The UI reads them on page load.
+
+## Session Orchestrator (`src/lib/orchestrator.ts`)
+
+Centralized session lifecycle manager. All session operations (start, resume, stop, crash retry, stall continue) go through the orchestrator. API routes are thin wrappers.
+
+### Architecture
+
+```
+  Consumers (UI routes, remote relay, CLI, GCP VM)
+       │
+       ▼
+  SessionOrchestrator (singleton via globalThis)
+       │
+       ├── start(projectPath, message) → ReadableStream (SSE)
+       ├── resume(sessionId, message, projectPath) → ReadableStream (SSE)
+       ├── stop(sessionId) → { killed, pids }
+       ├── status(sessionId) → SessionState | null
+       ├── enqueueCrashRetry(sessionId, jsonlPath)
+       ├── enqueueStallContinue(sessionId)
+       ├── enqueueIncompleteExitResume(sessionId, jsonlPath)
+       ├── enqueuePermissionEscalation(sessionId)
+       └── enqueue({ sessionId, type, message, priority, delayMs }) → taskId
+                │
+                ▼
+           TaskQueue (priority + concurrency + dedup)
+```
+
+### Key concepts
+
+- **TaskQueue** — priority queue (high/normal/low) with concurrency limit (`orchestrator_max_concurrent`, default 3). Dedup by task ID (`type:sessionId`). Tasks can have delay (replaces old `setTimeout`). Delayed tasks wait in a timer, then enter the pending queue.
+- **State machine** — per-session phases: `idle → running → completed | crashed → retrying → running | stalled → continuing → running | failed`. States are in-memory only (not persisted to DB). Scanner re-detects crashes/stalls from JSONL on restart.
+- **EventEmitter** — emits `session:started`, `session:completed`, `session:crashed`, `session:retrying`, `session:stalled`, `session:continuing`, `session:failed`, `session:stopped`, `session:resumed`, `task:queued`.
+- **Singleton** — survives Next.js hot reload via `globalThis.__sessionOrchestrator`.
+- **Shared helpers** — `buildCliArgs()` and `parseStreamLine()` eliminate duplication between start/reply routes.
+
+### API endpoints
+
+```bash
+# Get orchestrator status (queue + all session states)
+curl http://localhost:3000/api/orchestrator
+
+# Enqueue a task (e.g. resume a session remotely)
+curl -X POST http://localhost:3000/api/orchestrator \
+  -H "Content-Type: application/json" \
+  -d '{"type":"resume","sessionId":"UUID","message":"continue please"}'
+```
+
+Task types: `start`, `resume`, `crash_retry`, `stall_continue`, `incomplete_exit`, `permission_escalation`.
+
+### Settings
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `orchestrator_max_concurrent` | `3` | Max simultaneous Claude processes |
+| `orchestrator_crash_retry_delay_ms` | `30000` | Delay before auto-retry after crash |
+| `orchestrator_stall_continue_delay_ms` | `10000` | Delay before auto-continue on stall |
+| `orchestrator_max_retries` | `3` | Max crash retries per session before marking as failed |
+
+### How scanner integrates (Session Babysitter)
+
+Scanner detects crashes/stalls/incomplete exits during JSONL scan and delegates to orchestrator. Four detection modes:
+
+- **Crash** (`last_message_role === "tool_result"`, new or repeated via `file_mtime` change) → `orchestrator.enqueueCrashRetry(sessionId, jsonlPath)`. The orchestrator checks for permission loops internally and escalates to terminal if needed. Repeated crashes (same `tool_result` role, different mtime) are now detected too.
+- **Stall** (`last_message_role === "assistant"`, silent >5min, process still alive) → `orchestrator.enqueueStallContinue(sessionId)`. The orchestrator asks Haiku LLM if Claude is waiting for user input before continuing.
+- **Incomplete exit** (`last_message_role === "assistant"`, `has_result = 0`, process dead) → `orchestrator.enqueueIncompleteExitResume(sessionId, jsonlPath)`. This is the "dead zone" case: Claude said "I'll do X" then the process died before executing. The `has_result` flag (presence of `type: "result"` event in JSONL) distinguishes genuine "waiting for reply" from abnormal exit. Post-scan `detectIncompleteExits()` also catches sessions skipped by incremental scan.
+- **Permission loop** (repeated permission errors in last 30 JSONL lines) → `orchestrator.enqueuePermissionEscalation(sessionId)`. Opens a terminal session with `--dangerously-skip-permissions`.
+
+### Using from external programs
+
+Any process that can make HTTP requests can control sessions:
+
+```bash
+# Start a new session
+curl -X POST http://localhost:3000/api/sessions/start \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/path/to/project","message":"fix the bug in auth.ts"}'
+
+# Resume an existing session
+curl -X POST http://localhost:3000/api/sessions/{sessionId}/reply \
+  -H "Content-Type: application/json" \
+  -d '{"message":"now add tests"}'
+
+# Kill a session
+curl -X POST http://localhost:3000/api/sessions/{sessionId}/kill
+
+# Check orchestrator state
+curl http://localhost:3000/api/orchestrator
+
+# Enqueue a fire-and-forget task (no SSE stream back)
+curl -X POST http://localhost:3000/api/orchestrator \
+  -H "Content-Type: application/json" \
+  -d '{"type":"resume","sessionId":"UUID","message":"continue","priority":"high"}'
+```
+
+Start and reply return SSE streams (`text/event-stream`). Events: `session_id`, `text`, `status`, `done`, `error`.
 
 ## Cross-platform development rules
 

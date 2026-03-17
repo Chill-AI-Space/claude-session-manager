@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { readSessionMessages } from "@/lib/session-reader";
 import { SessionRow } from "@/lib/types";
 import { isSessionActive } from "@/lib/process-detector";
+import { hasResultEvent } from "@/lib/orchestrator";
 
 // If JSONL hasn't been touched in this many ms, session is definitely done
 const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
@@ -61,18 +62,27 @@ export async function GET(
   }
 
   let active = false;
+  let fileAgeMs = Infinity;
   try {
     active = isSessionActive(sessionId);
+    const mtime = fs.statSync(session.jsonl_path).mtimeMs;
+    fileAgeMs = Date.now() - mtime;
     // Guard against stale processes: if JSONL hasn't been written to recently,
     // the process is done regardless of what ps reports.
-    if (active) {
-      const mtime = fs.statSync(session.jsonl_path).mtimeMs;
-      if (Date.now() - mtime > STALE_THRESHOLD_MS) {
-        active = false;
-      }
+    if (active && fileAgeMs > STALE_THRESHOLD_MS) {
+      active = false;
     }
   } catch {
     // ignore
+  }
+
+  // Check for result event — if absent and last message is assistant, session exited incomplete
+  let sessionHasResult = !!((session as unknown) as Record<string, unknown>).has_result;
+  if (!sessionHasResult && liveLastMessageRole === "assistant") {
+    // Double-check JSONL (DB might not be updated yet)
+    try {
+      sessionHasResult = hasResultEvent(session.jsonl_path);
+    } catch { /* ignore */ }
   }
 
   return Response.json({
@@ -83,6 +93,8 @@ export async function GET(
     messages_total: total,
     metadata: { ...session, last_message_role: liveLastMessageRole },
     is_active: active,
+    has_result: sessionHasResult,
+    file_age_ms: fileAgeMs === Infinity ? null : Math.round(fileAgeMs),
   });
 }
 

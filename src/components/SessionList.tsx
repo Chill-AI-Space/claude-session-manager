@@ -5,16 +5,19 @@ import { SessionListItemComponent } from "./SessionListItem";
 import { GeminiResult } from "./SessionSearch";
 import { Loader2 } from "lucide-react";
 import { useParams } from "next/navigation";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 
 interface SessionListProps {
   sessions: SessionListItem[];
   loading: boolean;
   geminiResults?: GeminiResult[];
   onArchive?: (sessionId: string) => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
-export function SessionList({ sessions, loading, geminiResults, onArchive }: SessionListProps) {
+export function SessionList({ sessions, loading, geminiResults, onArchive, hasMore, loadingMore, onLoadMore }: SessionListProps) {
   const params = useParams();
   const currentSessionId = params?.sessionId as string | undefined;
 
@@ -59,6 +62,23 @@ export function SessionList({ sessions, loading, geminiResults, onArchive }: Ses
     );
   }
 
+  // IntersectionObserver for auto-loading more sessions on scroll
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const onLoadMoreRef = useRef(onLoadMore);
+  onLoadMoreRef.current = onLoadMore;
+
+  useEffect(() => {
+    if (!hasMore || !sentinelRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) onLoadMoreRef.current?.();
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, displaySessions.length]);
+
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="py-1">
@@ -83,6 +103,21 @@ export function SessionList({ sessions, loading, geminiResults, onArchive }: Ses
             </div>
           );
         })}
+        {/* Sentinel for infinite scroll */}
+        {hasMore && (
+          <div ref={sentinelRef} className="flex items-center justify-center py-3">
+            {loadingMore ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            ) : (
+              <button
+                onClick={onLoadMore}
+                className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Load more...
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

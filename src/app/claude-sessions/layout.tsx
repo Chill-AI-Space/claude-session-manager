@@ -9,9 +9,8 @@ import { SessionListItem, ProjectListItem } from "@/lib/types";
 import {
   RefreshCw, Loader2, PanelLeft, PanelLeftClose, Sparkles,
   Settings, Package, BarChart2, Archive, CircleHelp, ClipboardList,
-  Sun, Moon,
+  Sun, Moon, Plus,
 } from "lucide-react";
-import { FileBrowser } from "@/components/FileBrowser";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +43,6 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   const [geminiResults, setGeminiResults] = useState<GeminiResult[]>([]);
   const [contentSearching, setContentSearching] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("dark");
-  const [activeTab, setActiveTab] = useState<"sessions" | "files">("sessions");
   const [generatingTitles, setGeneratingTitles] = useState(false);
   const [titlesGenerated, setTitlesGenerated] = useState<number | null>(null);
   const initialLoadDone = useRef(false);
@@ -86,18 +84,42 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     setGeneratingTitles(false);
   }
 
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const SIDEBAR_PAGE_SIZE = 40;
+
   const fetchSessions = useCallback(async () => {
     const params = new URLSearchParams();
     if (selectedProject) params.set("project", selectedProject);
     if (searchQuery) params.set("search", searchQuery);
     params.set("sort", "modified");
-    params.set("limit", "200");
+    params.set("limit", String(SIDEBAR_PAGE_SIZE));
 
     const res = await fetch(`/api/sessions?${params}`);
     const data = await res.json();
     setSessions(data.sessions);
+    setHasMore(data.sessions.length < (data.total ?? 0));
     setLoading(false);
   }, [selectedProject, searchQuery]);
+
+  const loadMoreSessions = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    const params = new URLSearchParams();
+    if (selectedProject) params.set("project", selectedProject);
+    if (searchQuery) params.set("search", searchQuery);
+    params.set("sort", "modified");
+    params.set("limit", String(SIDEBAR_PAGE_SIZE));
+    params.set("offset", String(sessions.length));
+
+    try {
+      const res = await fetch(`/api/sessions?${params}`);
+      const data = await res.json();
+      setSessions(prev => [...prev, ...data.sessions]);
+      setHasMore(sessions.length + data.sessions.length < (data.total ?? 0));
+    } catch { /* ignore */ }
+    setLoadingMore(false);
+  }, [loadingMore, hasMore, selectedProject, searchQuery, sessions.length]);
 
   const fetchProjects = useCallback(async () => {
     const res = await fetch("/api/projects");
@@ -131,8 +153,46 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   useEffect(() => {
     Promise.all([fetchSessions(), fetchProjects()]).then(() => {
       initialLoadDone.current = true;
-      triggerScan("incremental");
+      triggerScan("incremental").then(() => {
+        // Background: auto-generate titles for sessions that don't have them
+        // Runs lazily after scan, doesn't block UI. Generates summaries first, then titles.
+        fetch("/api/sessions/generate-titles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ limit: 10 }),
+        })
+          .then(r => r.json())
+          .then(data => {
+            if (data.generated > 0) fetchSessions(); // refresh sidebar with new titles
+          })
+          .catch(() => {});
+      });
     });
+  }, []);
+
+  // Listen for session-started events from useSessionStart — trigger immediate refresh + track appearance
+  useEffect(() => {
+    function handleSessionStarted(e: Event) {
+      const { sessionId, correlationId } = (e as CustomEvent).detail ?? {};
+      if (!sessionId || !correlationId) return;
+
+      // Trigger scan + refresh so session appears in sidebar ASAP
+      triggerScan("incremental").then(() => {
+        const found = sessionsRef.current.some((s) => s.session_id === sessionId);
+        fetch("/api/sessions/track", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event: found ? "session_start_in_sidebar" : "session_start_missing_from_sidebar",
+            correlationId,
+            sessionId,
+            meta: { sessionsCount: sessionsRef.current.length },
+          }),
+        }).catch(() => {});
+      });
+    }
+    window.addEventListener("session-started", handleSessionStarted);
+    return () => window.removeEventListener("session-started", handleSessionStarted);
   }, []);
 
   sessionsRef.current = sessions;
@@ -247,89 +307,55 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
         <div className="flex flex-col h-full min-h-0 min-w-[320px]">
           {/* Sidebar header */}
           <div className="p-3 border-b border-sidebar-border">
-            {/* Tab switcher */}
-            <div className="flex gap-1 mb-2 bg-muted/40 rounded-md p-0.5">
-              <button
-                onClick={() => setActiveTab("sessions")}
-                className={cn(
-                  "flex-1 text-xs py-1 rounded transition-colors",
-                  activeTab === "sessions"
-                    ? "bg-background text-foreground shadow-sm font-medium"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Sessions
-              </button>
-              <button
-                onClick={() => setActiveTab("files")}
-                className={cn(
-                  "flex-1 text-xs py-1 rounded transition-colors",
-                  activeTab === "files"
-                    ? "bg-background text-foreground shadow-sm font-medium"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Files
-              </button>
-            </div>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-semibold text-foreground tracking-tight">
-                {activeTab === "sessions" ? "Sessions" : "Files"}
-              </span>
-              <div className="flex items-center gap-0.5">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={generateTitles}
-                  disabled={generatingTitles}
-                  title={titlesGenerated !== null ? `Generated ${titlesGenerated} titles` : "Generate AI titles"}
-                >
-                  {generatingTitles ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className={cn("h-3.5 w-3.5", titlesGenerated !== null && titlesGenerated > 0 && "text-yellow-500")} />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => triggerScan("incremental")}
-                  disabled={scanning}
-                  title="Refresh sessions"
-                >
-                  {scanning ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => setSidebarOpen(false)}
-                  title="Hide sidebar"
-                >
-                  <PanelLeftClose className="h-3.5 w-3.5" />
-                </Button>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-semibold text-foreground tracking-tight">
+                  Sessions
+                </span>
+                <Link href="/claude-sessions">
+                  <Button
+                    size="sm"
+                    className="h-5 px-1.5 text-[11px] border border-emerald-600 text-emerald-600 hover:bg-emerald-600/10 bg-transparent rounded"
+                  >
+                    <Plus className="h-3 w-3 mr-0.5" />
+                    New
+                  </Button>
+                </Link>
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setSidebarOpen(false)}
+                title="Hide sidebar"
+              >
+                <PanelLeftClose className="h-3.5 w-3.5" />
+              </Button>
             </div>
-            {activeTab === "sessions" && (
-              <SessionSearch
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
-                onGeminiResults={handleGeminiResults}
-              />
-            )}
+            <div className="flex items-center gap-1">
+              <div className="flex-1 min-w-0">
+                <SessionSearch
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  onGeminiResults={handleGeminiResults}
+                />
+              </div>
+              <button
+                onClick={() => triggerScan("incremental")}
+                disabled={scanning}
+                title="Refresh sessions"
+                className="flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40 shrink-0"
+              >
+                {scanning ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
           </div>
 
-          {activeTab === "sessions" ? (
-            <SessionList sessions={sessions} loading={loading || contentSearching} geminiResults={geminiResults} onArchive={archiveSession} />
-          ) : (
-            <FileBrowser projects={projects} />
-          )}
+          <SessionList sessions={sessions} loading={loading || contentSearching} geminiResults={geminiResults} onArchive={archiveSession} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={loadMoreSessions} />
         </div>
       </div>
 
@@ -351,9 +377,8 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
           {children}
         </div>
 
-        {/* Right nav strip — visible on utility pages (not session detail) */}
-        {!/^\/claude-sessions\/[a-f0-9-]{8,}/.test(pathname) && (
-          <div className="w-11 shrink-0 border-l border-sidebar-border flex flex-col items-center py-3 gap-0.5 bg-sidebar">
+        {/* Right nav strip — always visible */}
+        <div className="w-11 shrink-0 border-l border-sidebar-border flex flex-col items-center py-3 gap-0.5 bg-sidebar">
             {([
               { href: "/claude-sessions/settings", icon: Settings, label: "Settings" },
               { href: "/claude-sessions/store", icon: Package, label: "Store" },
@@ -378,6 +403,30 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
             ))}
             <div className="flex-1" />
             <button
+              onClick={generateTitles}
+              disabled={generatingTitles}
+              title={titlesGenerated !== null ? `Generated ${titlesGenerated} titles` : "Generate AI titles"}
+              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40"
+            >
+              {generatingTitles ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className={cn("h-4 w-4", titlesGenerated !== null && titlesGenerated > 0 && "text-yellow-500")} />
+              )}
+            </button>
+            <button
+              onClick={() => triggerScan("incremental")}
+              disabled={scanning}
+              title="Refresh sessions"
+              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40"
+            >
+              {scanning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+            </button>
+            <button
               onClick={() => {
                 const next = theme === "dark" ? "light" : "dark";
                 setTheme(next);
@@ -390,7 +439,6 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
           </div>
-        )}
       </div>
     </div>
   );

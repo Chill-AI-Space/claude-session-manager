@@ -22,6 +22,9 @@ export interface SessionRow {
   archived: number;
   last_scanned_at: string;
   last_message_role?: string | null;
+  has_result?: number;
+  summary?: string | null;
+  learnings?: string | null;
 }
 
 export interface ProjectRow {

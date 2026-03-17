@@ -131,6 +131,41 @@ function initTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_autodetect_log_created ON autodetect_log(created_at DESC);
   `);
 
+  // ── Workers + Worker Tasks ──────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workers (
+      worker_id TEXT PRIMARY KEY,
+      project_domain TEXT NOT NULL,
+      phase TEXT NOT NULL DEFAULT 'offline',
+      registered_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_heartbeat_at TEXT,
+      heartbeat_interval_ms INTEGER NOT NULL DEFAULT 30000,
+      missed_heartbeats INTEGER DEFAULT 0,
+      meta TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_workers_domain ON workers(project_domain);
+    CREATE INDEX IF NOT EXISTS idx_workers_phase ON workers(phase);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS worker_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      worker_id TEXT NOT NULL,
+      task_id TEXT NOT NULL UNIQUE,
+      project_domain TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      task_prompt TEXT,
+      dispatched_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT,
+      fallback_used TEXT,
+      result_summary TEXT,
+      contact_email TEXT,
+      FOREIGN KEY (worker_id) REFERENCES workers(worker_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_tasks_worker ON worker_tasks(worker_id, status);
+    CREATE INDEX IF NOT EXISTS idx_worker_tasks_domain ON worker_tasks(project_domain, status);
+  `);
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS context_source_groups (
       id TEXT PRIMARY KEY,
@@ -173,6 +208,15 @@ function initTables(db: Database.Database) {
   }
   if (!colNames.has("titled_at_count")) {
     db.exec("ALTER TABLE sessions ADD COLUMN titled_at_count INTEGER DEFAULT 0");
+  }
+  if (!colNames.has("has_result")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN has_result INTEGER DEFAULT 0");
+  }
+  if (!colNames.has("summary")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN summary TEXT");
+  }
+  if (!colNames.has("learnings")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN learnings TEXT");
   }
   // actions_log migrations
   const actionCols = db.prepare("PRAGMA table_info(actions_log)").all() as { name: string }[];
@@ -371,6 +415,31 @@ const SETTING_DEFAULTS: Record<string, string> = {
   relay_server_url: "wss://csm-relay.chillai.workers.dev",
   // Remote nodes registry (JSON array)
   remote_nodes: "[]",
+  // Title generation (uses summary as input)
+  title_model: "gpt-4o-mini",
+  // Summary & learnings generation (direct API, no CLI sessions spawned)
+  summary_model: "gpt-4o-mini",
+  summary_incremental_model: "gemini-2.5-flash",
+  learnings_model: "gpt-4o-mini",
+  auto_generate_summary: "true",
+  auto_generate_learnings: "true",
+  openai_api_key: "",
+  anthropic_api_key: "",
+  google_ai_api_key: "",
+  // Worker integration
+  worker_heartbeat_timeout_ms: "300000",
+  worker_fallback_enabled: "true",
+  worker_fallback_model: "claude-sonnet-4-5-20250514",
+  worker_fallback_use_vertex: "false",
+  worker_fallback_vertex_project: "",
+  worker_fallback_vertex_region: "us-east5",
+  worker_notify_smtp_host: "",
+  worker_notify_smtp_port: "587",
+  worker_notify_smtp_user: "",
+  worker_notify_smtp_pass: "",
+  worker_notify_from: "",
+  worker_notify_to: "",
+  worker_notify_webhook_url: "",
 };
 
 // Settings cache — avoids reading JSON file on every getSetting() call
