@@ -3,6 +3,7 @@
 import { memo, useState, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { FolderOpen, Check, Maximize2, X, ChevronUp } from "lucide-react";
 
 interface MarkdownContentProps {
@@ -113,14 +114,15 @@ function splitSections(content: string): string[] {
 const INITIAL_VISIBLE = 15;
 
 function MarkdownRenderer({ content, projectPath, compact }: MarkdownContentProps) {
-  const textSize = compact ? "prose-sm" : "prose-base";
-  const codeSize = compact ? "text-[11.5px]" : "text-[12.5px]";
-  const inlineCodeSize = compact ? "text-[12px]" : "text-[13px]";
+  const textSize = compact ? "prose-xs" : "prose-base";
+  const codeSize = compact ? "text-[11px]" : "text-[12.5px]";
+  const inlineCodeSize = compact ? "text-[11px]" : "text-[13px]";
 
   return (
     <div className={`markdown-body prose ${textSize} dark:prose-invert max-w-none prose-p:my-2 prose-headings:my-3 prose-headings:first:mt-0 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-3 prose-code:before:content-none prose-code:after:content-none prose-hr:my-4 prose-blockquote:my-2 prose-blockquote:pl-4 prose-blockquote:border-l-2 prose-blockquote:border-muted-foreground/30 prose-table:my-3`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw]}
         components={{
           code({ className, children, ...props }) {
             const isInline = !className;
