@@ -354,6 +354,7 @@ export default function SessionDetailPage({
     queueRef.current = [];
     processingRef.current = false;
     prevTotalRef.current = 0;
+    prevMdTotalRef.current = 0;
 
     // Stale-while-revalidate: show cached data instantly, fetch fresh in background
     const cached = getCachedSession(sessionId);
@@ -445,6 +446,34 @@ export default function SessionDetailPage({
     const timer = setTimeout(() => loadAllMdMessages(), 3000);
     return () => clearTimeout(timer);
   }, [mdHasEarlier, data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-refresh MD content when new messages arrive (active terminal sessions)
+  const prevMdTotalRef = useRef(0);
+  useEffect(() => {
+    if (!data?.session_id) return;
+    const newTotal = data.messages_total ?? 0;
+    // On first load, just record the count
+    if (prevMdTotalRef.current === 0) {
+      prevMdTotalRef.current = newTotal;
+      return;
+    }
+    // Only refresh when message count actually increased and MD is loaded
+    if (newTotal > prevMdTotalRef.current && mdContent && mdView) {
+      prevMdTotalRef.current = newTotal;
+      fetch(`/api/sessions/${data.session_id}/md?limit=0`)
+        .then(r => r.json())
+        .then(json => {
+          if (json.markdown) {
+            setMdContent(json.markdown);
+            setMdHasEarlier(false);
+            setMdRenderStart(json.render_start ?? 0);
+          }
+        })
+        .catch(() => {});
+    } else {
+      prevMdTotalRef.current = newTotal;
+    }
+  }, [data?.messages_total, data?.session_id, mdView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-populate summary/learnings from DB cache (no LLM call needed)
   useEffect(() => {
@@ -1650,7 +1679,7 @@ export default function SessionDetailPage({
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="flex items-center gap-1">
                   <Hash className="h-3 w-3" />
-                  {data.metadata.message_count} messages
+                  {data.messages_total ?? data.metadata.message_count} messages
                 </span>
                 {data.metadata.model && (
                   <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
@@ -1814,45 +1843,6 @@ export default function SessionDetailPage({
               <span><kbd className="font-mono">⌘L</kbd> input</span>
             </div>
 
-            {/* Navigation — 2 columns */}
-            <div className="pt-1 border-t border-border/30 grid grid-cols-2 gap-x-1 gap-y-0.5">
-              <Link href="/claude-sessions/settings" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <Settings className="h-4 w-4 shrink-0" />
-                Settings
-              </Link>
-              <Link href="/claude-sessions/actions" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <ClipboardList className="h-4 w-4 shrink-0" />
-                Actions log
-              </Link>
-              <Link href="/claude-sessions/analytics" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <BarChart2 className="h-4 w-4 shrink-0" />
-                Analytics
-              </Link>
-              <Link href="/claude-sessions/archive" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <Archive className="h-4 w-4 shrink-0" />
-                Archive
-              </Link>
-              <Link href="/claude-sessions/store" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <Package className="h-4 w-4 shrink-0" />
-                Store
-              </Link>
-              <Link href="/claude-sessions/help" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <CircleHelp className="h-4 w-4 shrink-0" />
-                Help
-              </Link>
-              <button
-                onClick={() => {
-                  const next = theme === "dark" ? "light" : "dark";
-                  setTheme(next);
-                  document.documentElement.className = next === "light" ? "" : "dark";
-                  localStorage.setItem("theme", next);
-                }}
-                className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
-              >
-                {theme === "dark" ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
-                Theme
-              </button>
-            </div>
           </div>
 
           {/* Sent message confirmation */}

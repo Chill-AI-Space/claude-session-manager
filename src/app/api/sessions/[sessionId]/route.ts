@@ -6,8 +6,10 @@ import { SessionRow } from "@/lib/types";
 import { isSessionActive } from "@/lib/process-detector";
 import { hasResultEvent } from "@/lib/orchestrator";
 
-// If JSONL hasn't been touched in this many ms, session is definitely done
-const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+// If JSONL hasn't been touched in this many ms AND process is running,
+// still consider inactive (catches zombie processes). 60 min is generous
+// enough to cover long idle periods where user is thinking.
+const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 60 minutes
 
 export const dynamic = "force-dynamic";
 
