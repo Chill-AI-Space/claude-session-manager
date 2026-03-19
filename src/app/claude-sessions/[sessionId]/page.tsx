@@ -429,12 +429,22 @@ export default function SessionDetailPage({
   const loadAllMdMessages = useCallback(async () => {
     if (!data?.session_id || mdLoadingEarlier) return;
     setMdLoadingEarlier(true);
+    // Save scroll state — earlier messages are prepended, shifting content down
+    const scrollEl = mdScrollRef.current;
+    const savedScrollTop = scrollEl?.scrollTop ?? 0;
+    const savedScrollHeight = scrollEl?.scrollHeight ?? 0;
     try {
       const res = await fetch(`/api/sessions/${data.session_id}/md?limit=0`);
       const json = await res.json();
       if (json.markdown) {
         setMdContent(json.markdown);
         setMdHasEarlier(false);
+        // Compensate for prepended content so user stays at the same spot
+        requestAnimationFrame(() => {
+          const el = mdScrollRef.current;
+          if (!el) return;
+          el.scrollTop = savedScrollTop + (el.scrollHeight - savedScrollHeight);
+        });
       }
     } catch { /* ignore */ }
     setMdLoadingEarlier(false);
@@ -448,7 +458,10 @@ export default function SessionDetailPage({
   }, [mdHasEarlier, data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh MD content when new messages arrive (active terminal sessions)
+  // Debounced: waits 1s after last message-count change before re-fetching
+  // to avoid rapid full re-renders during bursts of tool calls.
   const prevMdTotalRef = useRef(0);
+  const mdRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!data?.session_id) return;
     const newTotal = data.messages_total ?? 0;
@@ -460,19 +473,29 @@ export default function SessionDetailPage({
     // Only refresh when message count actually increased and MD is loaded
     if (newTotal > prevMdTotalRef.current && mdContent && mdView) {
       prevMdTotalRef.current = newTotal;
-      fetch(`/api/sessions/${data.session_id}/md?limit=0`)
-        .then(r => r.json())
-        .then(json => {
-          if (json.markdown) {
-            setMdContent(json.markdown);
-            setMdHasEarlier(false);
-            setMdRenderStart(json.render_start ?? 0);
-          }
-        })
-        .catch(() => {});
+      // Debounce: clear previous timer, wait 1s for burst to settle
+      if (mdRefreshTimerRef.current) clearTimeout(mdRefreshTimerRef.current);
+      mdRefreshTimerRef.current = setTimeout(() => {
+        fetch(`/api/sessions/${data.session_id}/md?limit=0`)
+          .then(r => r.json())
+          .then(json => {
+            if (json.markdown) {
+              setMdContent(json.markdown);
+              setMdHasEarlier(false);
+              setMdRenderStart(json.render_start ?? 0);
+              // No scroll restore needed: MarkdownContent renders each section
+              // with a stable key, so React only appends new DOM nodes at the
+              // bottom without touching existing ones → scroll stays put.
+            }
+          })
+          .catch(() => {});
+      }, 1000);
     } else {
       prevMdTotalRef.current = newTotal;
     }
+    return () => {
+      if (mdRefreshTimerRef.current) clearTimeout(mdRefreshTimerRef.current);
+    };
   }, [data?.messages_total, data?.session_id, mdView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-populate summary/learnings from DB cache (no LLM call needed)
@@ -1424,7 +1447,7 @@ export default function SessionDetailPage({
                       </button>
                     </div>
                   )}
-                  <MarkdownContent content={mdContent} projectPath={data.project_path} compact />
+                  <MarkdownContent content={mdContent} projectPath={data.project_path} compact folded={folded} />
 
                   {/* ── Live activity indicator ── */}
                   {data.is_active && (

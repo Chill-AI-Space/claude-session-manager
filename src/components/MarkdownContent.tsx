@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, useMemo, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { FolderOpen, Check, Maximize2, X, ChevronUp, Copy } from "lucide-react";
@@ -11,6 +11,20 @@ interface MarkdownContentProps {
   projectPath?: string;
   /** Smaller font sizes for full-page views like MD session view */
   compact?: boolean;
+  /** Collapse messages: user shows first few lines, claude shows header + preview */
+  folded?: boolean;
+}
+
+/** Extract plain text from React children (for detecting User/Claude in h3) */
+function extractText(node: React.ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractText).join('');
+  if (typeof node === 'object' && 'props' in node) {
+    return extractText((node as React.ReactElement<{ children?: React.ReactNode }>).props?.children);
+  }
+  return '';
 }
 
 // Detect file/directory path strings that are worth making clickable.
@@ -119,115 +133,229 @@ function TableWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Split markdown into sections by message headers (### User #N / ### Claude #N). */
-function splitSections(content: string): string[] {
+/** Split markdown into sections by message headers (### User #N / ### Claude #N).
+ *  Returns array of { key, content } for stable React reconciliation. */
+interface Section {
+  key: string;
+  content: string;
+}
+
+function splitSections(content: string): Section[] {
   const lines = content.split("\n");
-  const sections: string[] = [];
+  const sections: Section[] = [];
   let current: string[] = [];
+  let currentKey = "header";
 
   for (const line of lines) {
-    if (/^### (?:User|Claude) #\d+/.test(line) && current.length > 0) {
-      sections.push(current.join("\n"));
+    const match = line.match(/^### (User|Claude) #(\d+)/);
+    if (match && current.length > 0) {
+      sections.push({ key: currentKey, content: current.join("\n") });
       current = [];
+      currentKey = `${match[1].toLowerCase()}-${match[2]}`;
     }
     current.push(line);
   }
-  if (current.length > 0) sections.push(current.join("\n"));
+  if (current.length > 0) sections.push({ key: currentKey, content: current.join("\n") });
   return sections;
 }
 
 /** Number of sections rendered immediately from the end (plus header) */
 const INITIAL_VISIBLE = 15;
 
-function MarkdownRenderer({ content, projectPath, compact }: MarkdownContentProps) {
-  const codeSize = compact ? "text-[10.5px]" : "text-[12.5px]";
-  const inlineCodeSize = compact ? "text-[11px]" : "text-[13px]";
+/** Build the shared ReactMarkdown components config (stable reference via useMemo). */
+function useMarkdownComponents(projectPath?: string, compact?: boolean): Components {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return useMemo((): Components => {
+    const codeSize = compact ? "text-[10.5px]" : "text-[12.5px]";
+    const inlineCodeSize = compact ? "text-[11px]" : "text-[13px]";
+    return {
+      code({ className, children, ...props }) {
+        const isInline = !className;
+        if (isInline) {
+          const text = typeof children === "string" ? children : String(children ?? "");
+          if (isFilePath(text)) {
+            return <FileLink filePath={text} projectPath={projectPath} />;
+          }
+          return (
+            <code className={`bg-muted px-1.5 py-0.5 rounded ${inlineCodeSize} font-mono`} {...props}>
+              {children}
+            </code>
+          );
+        }
+        const language = className?.replace("language-", "") || "";
+        const codeText = typeof children === "string" ? children : String(children ?? "");
+        return (
+          <div className="relative group/code not-prose">
+            <div className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover/code:opacity-100 transition-opacity z-10">
+              <CopyButton getText={() => codeText.replace(/\n$/, "")} className="bg-muted/80 hover:bg-muted" />
+              {language && (
+                <span className="px-2 py-0.5 text-[10px] text-muted-foreground/50 bg-muted rounded-bl font-mono">
+                  {language}
+                </span>
+              )}
+            </div>
+            <pre className="bg-muted/40 border border-border/40 rounded-lg p-4 overflow-x-auto">
+              <code className={`${codeSize} leading-relaxed font-mono`} {...props}>
+                {children}
+              </code>
+            </pre>
+          </div>
+        );
+      },
+      a({ href, children }) {
+        return (
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+            {children}
+          </a>
+        );
+      },
+      table({ children }) { return <TableWrapper>{children}</TableWrapper>; },
+      thead({ children }) { return <thead className="bg-muted/60 dark:bg-muted/30">{children}</thead>; },
+      th({ children }) { return <th className="px-3 py-2.5 text-left text-[12px] font-semibold text-foreground/80 border-b border-border/50 whitespace-nowrap">{children}</th>; },
+      td({ children }) { return <td className="px-3 py-2 text-[13px] border-b border-border/20 text-foreground/90">{children}</td>; },
+      tr({ children }) { return <tr className="even:bg-muted/15 hover:bg-muted/30 transition-colors">{children}</tr>; },
+      h1({ children }) { return <h1 className={`font-bold first:mt-0 ${compact ? "text-[15px] mt-5 mb-2" : "text-xl mt-5 mb-3"}`}>{children}</h1>; },
+      h2({ children }) { return <h2 className={`font-semibold first:mt-0 ${compact ? "text-[13.5px] mt-4 mb-1.5" : "text-lg mt-4 mb-2"}`}>{children}</h2>; },
+      h3({ children }) {
+        const text = extractText(children);
+        let color = '';
+        if (/^User\s+#\d/.test(text)) color = 'text-blue-600/80 dark:text-blue-400/80';
+        else if (/^Claude\s+#\d/.test(text)) color = 'text-amber-600/60 dark:text-amber-400/60';
+        return <h3 className={`font-semibold first:mt-0 ${compact ? "text-[12.5px] mt-3 mb-1" : "text-[15px] mt-3 mb-1.5"} ${color}`}>{children}</h3>;
+      },
+      ul({ children }) { return <ul className="my-2 pl-5 space-y-1 list-disc marker:text-muted-foreground/50">{children}</ul>; },
+      ol({ children }) { return <ol className="my-2 pl-5 space-y-1 list-decimal marker:text-muted-foreground/60">{children}</ol>; },
+      li({ children }) { return <li className="pl-1">{children}</li>; },
+      blockquote({ children }) { return <blockquote className="my-2 pl-4 border-l-2 border-muted-foreground/30 text-muted-foreground italic">{children}</blockquote>; },
+      hr() { return <hr className="my-4 border-border/50" />; },
+    };
+  }, [projectPath, compact]);
+}
 
-  // Compact: 12px body, GitHub-like spacing. Normal: default prose-sm.
-  const compactClasses = compact ? [
-    "text-[12px] leading-[1.7]",
-    // Paragraph spacing
-    "prose-p:my-1.5 prose-p:text-[12px] prose-p:leading-[1.65]",
-    // Headings
-    "prose-h1:text-[15px] prose-h1:mt-5 prose-h1:mb-2",
-    "prose-h2:text-[13.5px] prose-h2:mt-4 prose-h2:mb-1.5",
-    "prose-h3:text-[12.5px] prose-h3:mt-3 prose-h3:mb-1",
-    // Lists
-    "prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-li:text-[12px]",
-    // Tables
-    "prose-td:text-[11px] prose-th:text-[10.5px] prose-table:my-2",
-    // Code blocks
-    "prose-pre:my-2",
-    // Blockquotes & hrs
-    "prose-blockquote:my-2 prose-hr:my-3",
-  ].join(" ") : "";
-
+/** Single section rendered as memoized markdown. Skips re-render when content is unchanged. */
+const MemoSection = memo(function MemoSection({
+  content,
+  components,
+  className,
+}: {
+  content: string;
+  projectPath?: string;
+  compact?: boolean;
+  components: Components;
+  className: string;
+}) {
   return (
-    <div className={`markdown-body prose prose-sm dark:prose-invert max-w-none prose-code:before:content-none prose-code:after:content-none prose-headings:first:mt-0 prose-blockquote:pl-3 prose-blockquote:border-l-2 prose-blockquote:border-muted-foreground/30 ${compactClasses}`}>
+    <div className={className}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
-        components={{
-          code({ className, children, ...props }) {
-            const isInline = !className;
-            if (isInline) {
-              const text = typeof children === "string" ? children : String(children ?? "");
-              if (isFilePath(text)) {
-                return <FileLink filePath={text} projectPath={projectPath} />;
-              }
-              return (
-                <code
-                  className={`bg-muted px-1.5 py-0.5 rounded ${inlineCodeSize} font-mono`}
-                  {...props}
-                >
-                  {children}
-                </code>
-              );
-            }
-            const language = className?.replace("language-", "") || "";
-            const codeText = typeof children === "string" ? children : String(children ?? "");
-            return (
-              <div className="relative group/code not-prose">
-                <div className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover/code:opacity-100 transition-opacity z-10">
-                  <CopyButton getText={() => codeText.replace(/\n$/, "")} className="bg-muted/80 hover:bg-muted" />
-                  {language && (
-                    <span className="px-2 py-0.5 text-[10px] text-muted-foreground/50 bg-muted rounded-bl font-mono">
-                      {language}
-                    </span>
-                  )}
-                </div>
-                <pre className="bg-muted/40 border border-border/40 rounded-lg p-4 overflow-x-auto">
-                  <code className={`${codeSize} leading-relaxed font-mono`} {...props}>
-                    {children}
-                  </code>
-                </pre>
-              </div>
-            );
-          },
-          a({ href, children }) {
-            return (
-              <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                {children}
-              </a>
-            );
-          },
-          table({ children }) { return <TableWrapper>{children}</TableWrapper>; },
-          thead({ children }) { return <thead className="bg-muted/60 dark:bg-muted/30">{children}</thead>; },
-          th({ children }) { return <th className="px-3 py-2.5 text-left text-[12px] font-semibold text-foreground/80 border-b border-border/50 whitespace-nowrap">{children}</th>; },
-          td({ children }) { return <td className="px-3 py-2 text-[13px] border-b border-border/20 text-foreground/90">{children}</td>; },
-          tr({ children }) { return <tr className="even:bg-muted/15 hover:bg-muted/30 transition-colors">{children}</tr>; },
-          h1({ children }) { return <h1 className={`font-bold first:mt-0 ${compact ? "text-[15px] mt-5 mb-2" : "text-xl mt-5 mb-3"}`}>{children}</h1>; },
-          h2({ children }) { return <h2 className={`font-semibold first:mt-0 ${compact ? "text-[13.5px] mt-4 mb-1.5" : "text-lg mt-4 mb-2"}`}>{children}</h2>; },
-          h3({ children }) { return <h3 className={`font-semibold first:mt-0 ${compact ? "text-[12.5px] mt-3 mb-1" : "text-[15px] mt-3 mb-1.5"}`}>{children}</h3>; },
-          ul({ children }) { return <ul className="my-2 pl-5 space-y-1 list-disc marker:text-muted-foreground/50">{children}</ul>; },
-          ol({ children }) { return <ol className="my-2 pl-5 space-y-1 list-decimal marker:text-muted-foreground/60">{children}</ol>; },
-          li({ children }) { return <li className="pl-1">{children}</li>; },
-          blockquote({ children }) { return <blockquote className="my-2 pl-4 border-l-2 border-muted-foreground/30 text-muted-foreground italic">{children}</blockquote>; },
-          hr() { return <hr className="my-4 border-border/50" />; },
-        }}
+        components={components}
       >
         {content}
       </ReactMarkdown>
+    </div>
+  );
+});
+
+/** Render full markdown as a single block (used for non-session content like summaries). */
+function MarkdownRenderer({ content, projectPath, compact }: MarkdownContentProps) {
+  const compactClasses = compact ? [
+    "text-[12px] leading-[1.7]",
+    "prose-p:my-1.5 prose-p:text-[12px] prose-p:leading-[1.65]",
+    "prose-h1:text-[15px] prose-h1:mt-5 prose-h1:mb-2",
+    "prose-h2:text-[13.5px] prose-h2:mt-4 prose-h2:mb-1.5",
+    "prose-h3:text-[12.5px] prose-h3:mt-3 prose-h3:mb-1",
+    "prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-li:text-[12px]",
+    "prose-td:text-[11px] prose-th:text-[10.5px] prose-table:my-2",
+    "prose-pre:my-2",
+    "prose-blockquote:my-2 prose-hr:my-3",
+  ].join(" ") : "";
+
+  const components = useMarkdownComponents(projectPath, compact);
+  const className = `markdown-body prose prose-sm dark:prose-invert max-w-none prose-code:before:content-none prose-code:after:content-none prose-headings:first:mt-0 prose-blockquote:pl-3 prose-blockquote:border-l-2 prose-blockquote:border-muted-foreground/30 ${compactClasses}`;
+
+  return (
+    <div className={className}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw]}
+        components={components}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+/** Truncate a section's markdown for folded display */
+function truncateForFold(section: Section): string {
+  const lines = section.content.split('\n');
+  const header = lines[0];
+
+  if (section.key.startsWith('user-')) {
+    // User: header + first 3 meaningful body lines
+    const body = lines.slice(1);
+    const out: string[] = [header, ''];
+    let count = 0;
+    for (const line of body) {
+      if (count >= 3) break;
+      out.push(line);
+      if (line.trim()) count++;
+    }
+    if (body.filter(l => l.trim()).length > 3) out.push('', '*…*');
+    return out.join('\n');
+  }
+
+  // Claude: header + first text line as preview
+  const body = lines.slice(1);
+  for (const line of body) {
+    const t = line.trim();
+    if (!t || t.startsWith('**🔧') || t.startsWith('<details') || t.startsWith('*empty') || t.startsWith('---') || t.startsWith('💭')) continue;
+    const clean = t.replace(/[*_`#]/g, '').slice(0, 100);
+    if (clean) return header + '\n\n' + `*${clean}…*`;
+  }
+  // Fallback: tool names
+  const tools = body.map(l => l.match(/\*\*🔧 (\w+)\*\*/)?.[1]).filter(Boolean);
+  if (tools.length > 0) return header + '\n\n' + `*${tools.join(' → ')}*`;
+  return header;
+}
+
+/** Section that can be expanded/collapsed in folded mode */
+function FoldableSection({
+  section,
+  components,
+  className,
+}: {
+  section: Section;
+  components: Components;
+  className: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isUser = section.key.startsWith('user-');
+  const isClaude = section.key.startsWith('claude-');
+
+  // Non-message sections (header, hr, etc.) render normally
+  if (!isUser && !isClaude) {
+    return <MemoSection content={section.content} components={components} className={className} />;
+  }
+
+  if (expanded) {
+    return (
+      <div className="cursor-pointer" onClick={() => setExpanded(false)} title="Click to collapse">
+        <MemoSection content={section.content} components={components} className={className} />
+      </div>
+    );
+  }
+
+  // Collapsed
+  const truncated = truncateForFold(section);
+  return (
+    <div
+      className={`cursor-pointer ${isClaude ? 'opacity-50 hover:opacity-80' : 'hover:opacity-80'} transition-opacity`}
+      onClick={() => setExpanded(true)}
+      title="Click to expand"
+    >
+      <MemoSection content={truncated} components={components} className={className} />
     </div>
   );
 }
@@ -236,27 +364,40 @@ export const MarkdownContent = memo(function MarkdownContent({
   content,
   projectPath,
   compact,
+  folded,
 }: MarkdownContentProps) {
   if (!content.trim()) return null;
 
   const sections = useMemo(() => splitSections(content), [content]);
   const [showAll, setShowAll] = useState(false);
 
-  // Small content — render everything
-  if (sections.length <= INITIAL_VISIBLE) {
-    return <MarkdownRenderer content={content} projectPath={projectPath} compact={compact} />;
-  }
+  const needsTruncation = sections.length > INITIAL_VISIBLE;
+  const hiddenCount = needsTruncation ? sections.length - INITIAL_VISIBLE : 0;
 
-  // Large content — show header + last INITIAL_VISIBLE sections, button to expand
-  const hiddenCount = sections.length - INITIAL_VISIBLE;
-  const header = sections[0]; // Session metadata
-  const visibleSections = showAll
-    ? sections
-    : [header, ...sections.slice(sections.length - INITIAL_VISIBLE + 1)];
+  const visibleSections = useMemo(() => {
+    if (!needsTruncation || showAll) return sections;
+    // Header + last N sections
+    return [sections[0], ...sections.slice(sections.length - INITIAL_VISIBLE + 1)];
+  }, [needsTruncation, showAll, sections]);
+
+  const compactClasses = compact ? [
+    "text-[12px] leading-[1.7]",
+    "prose-p:my-1.5 prose-p:text-[12px] prose-p:leading-[1.65]",
+    "prose-h1:text-[15px] prose-h1:mt-5 prose-h1:mb-2",
+    "prose-h2:text-[13.5px] prose-h2:mt-4 prose-h2:mb-1.5",
+    "prose-h3:text-[12.5px] prose-h3:mt-3 prose-h3:mb-1",
+    "prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-li:text-[12px]",
+    "prose-td:text-[11px] prose-th:text-[10.5px] prose-table:my-2",
+    "prose-pre:my-2",
+    "prose-blockquote:my-2 prose-hr:my-3",
+  ].join(" ") : "";
+
+  const components = useMarkdownComponents(projectPath, compact);
+  const sectionClassName = `markdown-body prose prose-sm dark:prose-invert max-w-none prose-code:before:content-none prose-code:after:content-none prose-headings:first:mt-0 prose-blockquote:pl-3 prose-blockquote:border-l-2 prose-blockquote:border-muted-foreground/30 ${compactClasses}`;
 
   return (
     <div>
-      {!showAll && (
+      {needsTruncation && !showAll && (
         <div className="flex items-center justify-center py-2 mb-3 border-b border-dashed border-muted-foreground/20">
           <button
             onClick={() => setShowAll(true)}
@@ -267,11 +408,25 @@ export const MarkdownContent = memo(function MarkdownContent({
           </button>
         </div>
       )}
-      <MarkdownRenderer
-        content={visibleSections.join("\n")}
-        projectPath={projectPath}
-        compact={compact}
-      />
+      {visibleSections.map((section) =>
+        folded ? (
+          <FoldableSection
+            key={section.key}
+            section={section}
+            components={components}
+            className={sectionClassName}
+          />
+        ) : (
+          <MemoSection
+            key={section.key}
+            content={section.content}
+            projectPath={projectPath}
+            compact={compact}
+            components={components}
+            className={sectionClassName}
+          />
+        )
+      )}
     </div>
   );
 });
