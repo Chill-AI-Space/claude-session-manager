@@ -186,6 +186,8 @@ export default function SessionDetailPage({
   const [mdContent, setMdContent] = useState<string | null>(null);
   const [mdLoading, setMdLoading] = useState(false);
   const mdScrollRef = useRef<HTMLDivElement>(null);
+  const mdIsNearBottomRef = useRef(true);
+  const mdInitialLoadRef = useRef<string | null>(null); // tracks sessionId of initial load
   const [mdSearch, setMdSearch] = useState(false);
   const [mdSearchQuery, setMdSearchQuery] = useState("");
   const mdSearchInputRef = useRef<HTMLInputElement>(null);
@@ -407,6 +409,44 @@ export default function SessionDetailPage({
     return () => window.removeEventListener("sessions-scanned", handler);
   }, [fetchSession]);
 
+  // Track whether user is near bottom in MD view.
+  // Key insight: wheel/touchmove events are ONLY fired by user interaction,
+  // never by programmatic scrollTo(). This lets us reliably detect when the
+  // user scrolls away and avoid fighting them with auto-scroll.
+  const mdUserDetachedRef = useRef(false);
+  useEffect(() => {
+    const el = mdScrollRef.current;
+    if (!el) return;
+    const THRESHOLD = 150;
+    const onScroll = () => {
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < THRESHOLD;
+      mdIsNearBottomRef.current = nearBottom;
+      // If user scrolled back to bottom, re-attach
+      if (nearBottom) mdUserDetachedRef.current = false;
+    };
+    // wheel/touch = definitively user-initiated (programmatic scrollTo never fires these)
+    const onUserInteraction = () => {
+      if (!mdIsNearBottomRef.current) {
+        mdUserDetachedRef.current = true;
+      }
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("wheel", onUserInteraction, { passive: true });
+    el.addEventListener("touchmove", onUserInteraction, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onUserInteraction);
+      el.removeEventListener("touchmove", onUserInteraction);
+    };
+  }, [data?.session_id, mdView]);
+
+  // Reset MD scroll tracking on session switch
+  useEffect(() => {
+    mdIsNearBottomRef.current = true;
+    mdUserDetachedRef.current = false;
+    mdInitialLoadRef.current = null;
+  }, [sessionId]);
+
   // Auto-load MD view when data arrives (MD is the default display mode)
   // Server returns last 30 messages by default for fast initial load
   useEffect(() => {
@@ -510,14 +550,24 @@ export default function SessionDetailPage({
     }
   }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Scroll to bottom when MD content loads
+  // Scroll to bottom on initial MD load, or on content update when user hasn't scrolled away.
+  // Uses mdUserDetachedRef (set by wheel/touch) instead of just isNearBottom,
+  // because smooth scrollTo generates scroll events that pollute isNearBottom.
   useEffect(() => {
-    if (mdContent && mdScrollRef.current) {
+    if (!mdContent || !mdScrollRef.current) return;
+    const isInitial = mdInitialLoadRef.current !== data?.session_id;
+    if (isInitial) {
+      mdInitialLoadRef.current = data?.session_id ?? null;
+      mdUserDetachedRef.current = false;
       requestAnimationFrame(() => {
-        mdScrollRef.current?.scrollTo({ top: mdScrollRef.current.scrollHeight });
+        mdScrollRef.current?.scrollTo({ top: mdScrollRef.current!.scrollHeight });
+      });
+    } else if (!mdUserDetachedRef.current) {
+      requestAnimationFrame(() => {
+        mdScrollRef.current?.scrollTo({ top: mdScrollRef.current!.scrollHeight, behavior: "smooth" });
       });
     }
-  }, [mdContent]);
+  }, [mdContent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cmd+F search in MD view
   useEffect(() => {

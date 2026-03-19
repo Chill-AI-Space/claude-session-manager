@@ -96,8 +96,11 @@ export function MessageView({
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const isNearBottomRef = useRef(true);
+  const userDetachedRef = useRef(false);
 
-  // Track whether user is scrolled near the bottom of the viewport
+  // Track whether user is scrolled near the bottom of the viewport.
+  // Uses wheel/touchmove to detect user-initiated scrolls (programmatic scrollTo
+  // never fires these), preventing smooth-scroll from fighting the user.
   useEffect(() => {
     const root = scrollAreaRef.current;
     if (!root) return;
@@ -107,10 +110,23 @@ export function MessageView({
     const THRESHOLD = 150; // px from bottom
     const onScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = viewport;
-      isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < THRESHOLD;
+      const nearBottom = scrollHeight - scrollTop - clientHeight < THRESHOLD;
+      isNearBottomRef.current = nearBottom;
+      if (nearBottom) userDetachedRef.current = false;
+    };
+    const onUserInteraction = () => {
+      if (!isNearBottomRef.current) {
+        userDetachedRef.current = true;
+      }
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
-    return () => viewport.removeEventListener("scroll", onScroll);
+    viewport.addEventListener("wheel", onUserInteraction, { passive: true });
+    viewport.addEventListener("touchmove", onUserInteraction, { passive: true });
+    return () => {
+      viewport.removeEventListener("scroll", onScroll);
+      viewport.removeEventListener("wheel", onUserInteraction);
+      viewport.removeEventListener("touchmove", onUserInteraction);
+    };
   }, [sessionId]);
 
   // Auto-load earlier messages when scrolling to the top
@@ -139,15 +155,19 @@ export function MessageView({
   // Scroll to bottom on session switch (always)
   useEffect(() => {
     isNearBottomRef.current = true;
+    userDetachedRef.current = false;
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
   }, [sessionId]);
 
-  // Scroll to bottom when streaming or when new messages arrive — only if user is near bottom
+  // Scroll to bottom when streaming or when new messages arrive — only if user hasn't scrolled away.
+  // Uses userDetachedRef (set by wheel/touch) instead of just isNearBottom,
+  // because smooth scrollTo generates scroll events that pollute isNearBottom.
   const prevCountRef = useRef(messages.length);
   useEffect(() => {
     const grew = messages.length > prevCountRef.current;
     prevCountRef.current = messages.length;
-    if (!isNearBottomRef.current) return;
+
+    if (userDetachedRef.current) return;
     if (streamingText || isStreaming || grew) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
