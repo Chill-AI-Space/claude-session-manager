@@ -135,7 +135,7 @@ export default function SessionsEmptyState() {
               if (autodetect.suggestions.length > 0) autodetect.clearSuggestions();
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 folderPath ? handleStart() : handleAutodetect();
               }

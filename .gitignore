@@ -46,6 +46,9 @@ next-env.d.ts
 /data/*.db-wal
 /data/*.db-shm
 
+# generated project icons
+/data/project-icons/
+
 # playwright artifacts
 .playwright-mcp/
 compact_impact_data.json

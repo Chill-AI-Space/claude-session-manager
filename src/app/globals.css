@@ -177,11 +177,13 @@
 /* Code blocks: wrap long lines instead of horizontal scroll */
 .markdown-body pre {
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 .markdown-body pre code {
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 /* Gap between consecutive code blocks (e.g. file path + diff) */

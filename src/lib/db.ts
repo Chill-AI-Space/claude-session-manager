@@ -409,6 +409,13 @@ const SETTING_DEFAULTS: Record<string, string> = {
   orchestrator_crash_retry_delay_ms: "30000",
   orchestrator_stall_continue_delay_ms: "10000",
   orchestrator_max_retries: "3",
+  // Permission wait detection — auto kill+resume when Claude is stuck on tool approval
+  auto_escalate_permissions: "true",
+  permission_wait_threshold_ms: "120000",
+  // Interval (ms) for periodic permission-wait checker (0 = disabled)
+  permission_check_interval_ms: "180000",
+  // Test word: if set and found in last assistant text, triggers permission escalation (for testing)
+  permission_escalation_test_word: "",
   // Remote relay settings
   relay_enabled: "false",
   relay_node_id: "",

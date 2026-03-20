@@ -55,7 +55,8 @@ export type TaskType =
   | "crash_retry"
   | "stall_continue"
   | "incomplete_exit"
-  | "permission_escalation";
+  | "permission_escalation"
+  | "permission_wait";
 
 export type TaskPriority = "high" | "normal" | "low";
 
@@ -235,21 +236,34 @@ export function buildCliArgs(opts: {
 export function parseStreamLine(
   obj: Record<string, unknown>,
   send: (data: Record<string, unknown>) => void,
-  callbacks?: { onSessionId?: (id: string) => void }
+  callbacks?: { onSessionId?: (id: string) => void; verbose?: boolean }
 ): void {
   const sid = (obj.session_id ?? obj.sessionId) as string | undefined;
   if (sid) callbacks?.onSessionId?.(sid);
+  const verbose = callbacks?.verbose ?? false;
 
   if (obj.type === "assistant" && obj.message) {
-    const msg = obj.message as { content?: Array<{ type: string; text?: string; name?: string }> };
+    const msg = obj.message as {
+      model?: string;
+      content?: Array<{ type: string; text?: string; name?: string; thinking?: string; input?: Record<string, unknown> }>;
+      usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
+    };
     if (msg.content) {
       for (const block of msg.content) {
         if (block.type === "text" && block.text) {
           send({ type: "text", text: block.text });
         } else if (block.type === "tool_use") {
           send({ type: "status", text: `Using tool: ${block.name}` });
+          if (verbose && block.input) {
+            send({ type: "debug", subtype: "tool_input", tool: block.name, input: block.input });
+          }
+        } else if (verbose && block.type === "thinking" && block.thinking) {
+          send({ type: "debug", subtype: "thinking", text: block.thinking });
         }
       }
+    }
+    if (verbose && msg.usage) {
+      send({ type: "debug", subtype: "usage", usage: msg.usage, model: msg.model });
     }
   } else if (obj.type === "result") {
     send({
@@ -258,12 +272,15 @@ export function parseStreamLine(
       is_error: obj.is_error,
       cost: obj.total_cost_usd,
     });
+  } else if (verbose && obj.type === "system") {
+    send({ type: "debug", subtype: "system", event: obj });
   }
 }
 
 // ── Stall / crash helpers ───────────────────────────────────────────────────
 
 export const STALL_THRESHOLD_MS = 5 * 60 * 1000;
+export const PERMISSION_WAIT_THRESHOLD_MS = 2 * 60 * 1000; // 2 min — shorter than stall
 
 /** Check if the JSONL ends with a result event (Claude exited normally). */
 export function hasResultEvent(jsonlPath: string): boolean {
@@ -449,12 +466,102 @@ export function detectPermissionLoop(jsonlPath: string): boolean {
   }
 }
 
+/**
+ * Detect if a session is stuck waiting for tool permission approval.
+ * Pattern: last JSONL event is assistant with tool_use, no subsequent tool_result.
+ * This means Claude proposed a tool but the process is blocked on stdin
+ * waiting for the user to approve/deny.
+ */
+export function detectPermissionWait(jsonlPath: string): boolean {
+  try {
+    const stat = fs.statSync(jsonlPath);
+    const TAIL_BYTES = 64 * 1024;
+    const start = Math.max(0, stat.size - TAIL_BYTES);
+    const fd = fs.openSync(jsonlPath, "r");
+    const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+
+    const lines = buf.toString("utf-8").split(/\r?\n/).filter(Boolean);
+    if (start > 0) lines.shift(); // partial first line
+
+    // Walk backwards to find the last meaningful event
+    let lastIsToolUse = false;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const obj = JSON.parse(lines[i]);
+
+        // If we hit a tool_result first, Claude already got past approval
+        if (obj.type === "user" && Array.isArray(obj.message?.content)) {
+          if (obj.message.content.some((b: { type: string }) => b.type === "tool_result")) {
+            return false;
+          }
+        }
+
+        // If we hit a result event, session completed normally
+        if (obj.type === "result") return false;
+
+        // Check if the last assistant message has tool_use blocks
+        if (obj.type === "assistant" && Array.isArray(obj.message?.content)) {
+          lastIsToolUse = obj.message.content.some(
+            (b: { type: string }) => b.type === "tool_use"
+          );
+          break; // found the last assistant message
+        }
+      } catch { /* skip malformed */ }
+    }
+
+    return lastIsToolUse;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if the last assistant message contains a specific test word.
+ * Used to manually trigger permission escalation for testing.
+ */
+export function detectTestWordInLastAssistant(jsonlPath: string, testWord: string): boolean {
+  try {
+    const stat = fs.statSync(jsonlPath);
+    const TAIL_BYTES = 64 * 1024;
+    const start = Math.max(0, stat.size - TAIL_BYTES);
+    const fd = fs.openSync(jsonlPath, "r");
+    const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+
+    const lines = buf.toString("utf-8").split(/\r?\n/).filter(Boolean);
+    if (start > 0) lines.shift();
+
+    // Walk backwards to find the last assistant message
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const obj = JSON.parse(lines[i]);
+        if (obj.type === "assistant" && obj.message?.content) {
+          const content = obj.message.content;
+          const text = typeof content === "string"
+            ? content
+            : Array.isArray(content)
+              ? content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join(" ")
+              : "";
+          return text.includes(testWord);
+        }
+      } catch { /* skip */ }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // ── SessionOrchestrator ──────────────────────────────────────────────────────
 
 class SessionOrchestrator extends EventEmitter {
   private states = new Map<string, SessionState>();
   private queue: TaskQueue;
   private cleanupTimer: NodeJS.Timeout | null = null;
+  private permissionCheckTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     super();
@@ -464,6 +571,13 @@ class SessionOrchestrator extends EventEmitter {
 
     // Periodic cleanup of stale states (every 10 min)
     this.cleanupTimer = setInterval(() => this.cleanupStaleStates(), 10 * 60 * 1000);
+
+    // Periodic permission-wait check — catches sessions stuck on
+    // tool approval that the scan misses (scan skips frozen-mtime files)
+    const permCheckMs = parseInt(getSetting("permission_check_interval_ms") || "180000", 10);
+    if (permCheckMs > 0) {
+      this.permissionCheckTimer = setInterval(() => this.periodicPermissionCheck(), permCheckMs);
+    }
   }
 
   // ── Public API: start ─────────────────────────────────────────────────────
@@ -471,8 +585,9 @@ class SessionOrchestrator extends EventEmitter {
   /**
    * Start a new Claude session. Returns SSE stream.
    * @param correlationId — optional client-generated ID for end-to-end tracking
+   * @param verbose — when true, emit extra debug events (tool inputs, tokens, thinking)
    */
-  start(projectPath: string, message: string, correlationId?: string): ReadableStream {
+  start(projectPath: string, message: string, correlationId?: string, verbose = false): ReadableStream {
     let sessionId: string | null = null;
     const args = buildCliArgs({ message });
     const spawnedAt = Date.now();
@@ -486,6 +601,7 @@ class SessionOrchestrator extends EventEmitter {
       cwd: projectPath,
       onLine: (obj, send) => {
         parseStreamLine(obj, send, {
+          verbose,
           onSessionId: (id) => {
             if (!sessionId) {
               sessionId = id;
@@ -542,8 +658,9 @@ class SessionOrchestrator extends EventEmitter {
 
   /**
    * Resume an existing session with a new message. Returns SSE stream.
+   * @param verbose — when true, emit extra debug events (tool inputs, tokens, thinking)
    */
-  resume(sessionId: string, message: string, projectPath: string): ReadableStream {
+  resume(sessionId: string, message: string, projectPath: string, verbose = false): ReadableStream {
     const args = buildCliArgs({ sessionId, message, includeMaxTurns: true });
 
     this.states.set(sessionId, {
@@ -560,7 +677,7 @@ class SessionOrchestrator extends EventEmitter {
       args,
       cwd: projectPath,
       onLine: (obj, send) => {
-        parseStreamLine(obj, send);
+        parseStreamLine(obj, send, { verbose });
         const state = this.states.get(sessionId);
         if (state) state.lastActivity = Date.now();
       },
@@ -684,6 +801,20 @@ class SessionOrchestrator extends EventEmitter {
     });
   }
 
+  // ── Enqueue: permission wait (session blocked on stdin for tool approval) ──
+
+  enqueuePermissionWait(sessionId: string): boolean {
+    return this.queue.add({
+      id: `permission_wait:${sessionId}`,
+      sessionId,
+      type: "permission_escalation",
+      priority: "high",
+      delayMs: 5_000, // short delay — we already waited 2+ min for detection
+      scheduledAt: Date.now(),
+      execute: () => this.executePermissionWait(sessionId),
+    });
+  }
+
   // ── Generic enqueue (for API endpoint) ────────────────────────────────────
 
   enqueue(params: {
@@ -766,6 +897,9 @@ class SessionOrchestrator extends EventEmitter {
       case "permission_escalation":
         this.enqueuePermissionEscalation(sessionId);
         break;
+      case "permission_wait":
+        this.enqueuePermissionWait(sessionId);
+        break;
     }
 
     this.emit("task:queued", { taskId, type, priority, sessionId });
@@ -801,9 +935,10 @@ class SessionOrchestrator extends EventEmitter {
       : "";
     const retryPrompt = `You crashed mid-tool-execution. I noticed and auto-resumed you. Please check what you were doing, pick up where you left off, and continue the task.${context}`;
 
+    const args = buildCliArgs({ sessionId, message: retryPrompt, includeMaxTurns: true });
     const proc = spawn(
       getClaudePath(),
-      ["--resume", sessionId, "-p", retryPrompt, "--output-format", "stream-json", "--verbose"],
+      args,
       { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"] }
     );
     proc.stdout?.resume();
@@ -858,9 +993,10 @@ class SessionOrchestrator extends EventEmitter {
       : "";
     const stallPrompt = `You appear to have stalled — no output for over 5 minutes. I noticed and auto-resumed you. Please check what you were doing and continue the task.${context}`;
 
+    const args = buildCliArgs({ sessionId, message: stallPrompt, includeMaxTurns: true });
     const proc = spawn(
       getClaudePath(),
-      ["--resume", sessionId, "-p", stallPrompt, "--output-format", "stream-json", "--verbose"],
+      args,
       { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"] }
     );
     proc.stdout?.resume();
@@ -922,9 +1058,10 @@ class SessionOrchestrator extends EventEmitter {
       : "";
     const resumePrompt = `Your process exited unexpectedly after your last response. You were about to take action but the process died before you could execute. Please review what you said last and continue where you left off.${context}`;
 
+    const args = buildCliArgs({ sessionId, message: resumePrompt, includeMaxTurns: true });
     const proc = spawn(
       getClaudePath(),
-      ["--resume", sessionId, "-p", resumePrompt, "--output-format", "stream-json", "--verbose"],
+      args,
       { cwd: session.project_path, env: getCleanEnv(), stdio: ["ignore", "pipe", "pipe"] }
     );
     proc.stdout?.resume();
@@ -942,6 +1079,49 @@ class SessionOrchestrator extends EventEmitter {
         resolve();
       });
     });
+  }
+
+  private async executePermissionWait(sessionId: string): Promise<void> {
+    const db = getDb();
+    const session = db
+      .prepare("SELECT project_path, jsonl_path, last_message FROM sessions WHERE session_id = ?")
+      .get(sessionId) as { project_path: string; jsonl_path: string; last_message: string | null } | undefined;
+
+    if (!session) return;
+    if (getSetting("auto_escalate_permissions") === "false") return;
+
+    // Re-check: still looks like a permission wait? (skip re-check for test word triggers)
+    const testWord = getSetting("permission_escalation_test_word");
+    const isTestTrigger = testWord && testWord.length > 3 && detectTestWordInLastAssistant(session.jsonl_path, testWord);
+    if (!isTestTrigger && !detectPermissionWait(session.jsonl_path)) {
+      dlog.info("orchestrator", `permission_wait for ${sessionId}: no longer waiting, skipping`);
+      return;
+    }
+
+    // Still alive? Kill the stuck process
+    if (isSessionActive(sessionId)) {
+      logAction("service", "permission_wait_killing", `session stuck on tool approval`, sessionId);
+      killSessionProcesses(sessionId);
+      // Wait for process to die and release locks
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+
+    this.transition(sessionId, "retrying");
+    this.emit("session:retrying", { sessionId, reason: "permission_wait" });
+    logAction("service", "permission_wait_fired", "kill+open in terminal with skip-permissions", sessionId);
+
+    // Open in terminal — visible to user, reliable
+    const claudePath = getClaudePath();
+    const shellCmd = `cd ${JSON.stringify(session.project_path)} && ${claudePath} --resume ${sessionId} --dangerously-skip-permissions -p "You were waiting for tool permission approval but nobody was there to approve. I've restarted you with full permissions. Continue your task where you left off."`;
+
+    try {
+      const { terminal } = await openInTerminal(shellCmd);
+      logAction("service", "permission_wait_done", `terminal:${terminal}`, sessionId);
+      this.transition(sessionId, "running");
+    } catch (err) {
+      logAction("service", "permission_wait_failed", `${err}`, sessionId);
+      this.transition(sessionId, "crashed");
+    }
   }
 
   private async executePermissionEscalation(sessionId: string): Promise<void> {
@@ -982,6 +1162,62 @@ class SessionOrchestrator extends EventEmitter {
     }
   }
 
+  /**
+   * Periodic check for sessions stuck waiting for tool permission approval.
+   * Runs independently of scan — fixes the gap where scan skips frozen-mtime files.
+   * Queries DB for candidates, checks process liveness + JSONL content.
+   */
+  private periodicPermissionCheck(): void {
+    try {
+      if (getSetting("auto_escalate_permissions") === "false") return;
+
+      const db = getDb();
+      const permWaitMs = parseInt(
+        getSetting("permission_wait_threshold_ms") || String(PERMISSION_WAIT_THRESHOLD_MS),
+        10
+      );
+      const cutoff = Date.now() - permWaitMs;
+      const maxAge = Date.now() - 30 * 60 * 1000; // ignore sessions older than 30 min
+
+      // Find sessions where: assistant spoke last, no result, file is frozen > threshold
+      const candidates = db.prepare(`
+        SELECT session_id, jsonl_path, file_mtime
+        FROM sessions
+        WHERE last_message_role = 'assistant'
+          AND has_result = 0
+          AND file_mtime < ?
+          AND file_mtime > ?
+      `).all(cutoff, maxAge) as Array<{
+        session_id: string;
+        jsonl_path: string;
+        file_mtime: number;
+      }>;
+
+      for (const session of candidates) {
+        // Skip if orchestrator already handling this session
+        const state = this.status(session.session_id);
+        if (state && !["idle", "completed", "failed"].includes(state.phase)) continue;
+
+        // Must be alive (stuck on stdin) — dead processes are handled by detectIncompleteExits
+        if (!isSessionActive(session.session_id)) continue;
+
+        // Check JSONL: last assistant message must have tool_use with no subsequent tool_result
+        const testWord = getSetting("permission_escalation_test_word");
+        const isTestTrigger = testWord && testWord.length > 3 &&
+          detectTestWordInLastAssistant(session.jsonl_path, testWord);
+
+        if (!detectPermissionWait(session.jsonl_path) && !isTestTrigger) continue;
+
+        const silentMin = Math.round((Date.now() - session.file_mtime) / 60_000);
+        dlog.info("orchestrator", `periodic permission check: ${session.session_id} stuck ${silentMin}min`);
+        logAction("service", "permission_wait_detected", `periodic check, silent:${silentMin}min`, session.session_id);
+        this.enqueuePermissionWait(session.session_id);
+      }
+    } catch (err) {
+      dlog.error("orchestrator", `periodic permission check failed: ${err}`);
+    }
+  }
+
   private cleanupStaleStates(): void {
     const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour for completed/failed/idle
     const runningCutoff = Date.now() - 2 * 60 * 60 * 1000; // 2 hours for running
@@ -1008,6 +1244,10 @@ class SessionOrchestrator extends EventEmitter {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
+    }
+    if (this.permissionCheckTimer) {
+      clearInterval(this.permissionCheckTimer);
+      this.permissionCheckTimer = null;
     }
   }
 }

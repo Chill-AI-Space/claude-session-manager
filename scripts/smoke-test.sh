@@ -28,7 +28,8 @@ echo ""
 
 # 1. Server alive
 echo "1. Server"
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$BASE/claude-sessions" 2>/dev/null || echo "000")
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$BASE/claude-sessions" 2>/dev/null)
+STATUS="${STATUS:-000}"
 check "Main page responds" "$STATUS" "200"
 
 # 2. Sessions API returns data
@@ -74,16 +75,19 @@ print(t[:80] if t else 'EMPTY')
 
   # 6. Summary/learnings endpoints respond (cached or not — just not error)
   echo "6. Summary & learnings"
-  SUM_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 -X POST "$BASE/api/sessions/$TOP_SESSION/summary" 2>/dev/null || echo "000")
+  SUM_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 -X POST "$BASE/api/sessions/$TOP_SESSION/summary" 2>/dev/null)
+  SUM_STATUS="${SUM_STATUS:-000}"
   check "Summary endpoint responds ($SUM_STATUS)" "$SUM_STATUS" "200"
 
-  LEARN_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 -X POST "$BASE/api/sessions/$TOP_SESSION/learnings" 2>/dev/null || echo "000")
-  # 200 = cached, timeout is OK for uncached (LLM call), 400 = meta session (also OK)
+  LEARN_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X POST "$BASE/api/sessions/$TOP_SESSION/learnings" 2>/dev/null)
+  LEARN_STATUS="${LEARN_STATUS:-000}"
+  # 200 = cached or freshly generated, 400 = meta session (also OK)
   check "Learnings endpoint responds ($LEARN_STATUS)" "$LEARN_STATUS" "^[24]0[0]$"
 
   # 7. Settings API
   echo "7. Settings"
-  SETTINGS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BASE/api/settings" 2>/dev/null || echo "000")
+  SETTINGS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BASE/api/settings" 2>/dev/null)
+  SETTINGS_STATUS="${SETTINGS_STATUS:-000}"
   check "Settings API responds ($SETTINGS_STATUS)" "$SETTINGS_STATUS" "200"
 
   # 8. HTML page contains session data (not just empty shell)

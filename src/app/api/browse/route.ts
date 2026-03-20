@@ -89,8 +89,7 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    const startPath = resolveStartPath();
-    const parentPath = resolved === homedir || resolved === startPath
+    const parentPath = resolved === homedir
       ? null
       : path.dirname(resolved);
 

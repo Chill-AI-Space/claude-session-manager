@@ -14,6 +14,7 @@ export async function POST(
   const { sessionId } = await params;
   const body = await request.json();
   const message = body.message;
+  const verbose = body.verbose === true;
 
   if (!message || typeof message !== "string") {
     return Response.json({ error: "Message is required" }, { status: 400 });
@@ -37,6 +38,6 @@ export async function POST(
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  const stream = getOrchestrator().resume(sessionId, message, session.project_path);
+  const stream = getOrchestrator().resume(sessionId, message, session.project_path, verbose);
   return sseResponse(stream);
 }

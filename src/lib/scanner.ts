@@ -1,9 +1,9 @@
-import { getDb, indexSessionContent, logAction } from "./db";
+import { getDb, getSetting, indexSessionContent, logAction } from "./db";
 import { glob } from "glob";
 import fs from "fs";
 import path from "path";
 import { claudeProjectsDir, UUID_RE } from "./utils";
-import { getOrchestrator, STALL_THRESHOLD_MS } from "./orchestrator";
+import { getOrchestrator, STALL_THRESHOLD_MS, PERMISSION_WAIT_THRESHOLD_MS, detectPermissionWait, detectTestWordInLastAssistant } from "./orchestrator";
 
 const CLAUDE_DIR = claudeProjectsDir();
 
@@ -350,12 +350,26 @@ export async function scanSessions(
       // Note: incomplete_exit (process dead) is handled by detectIncompleteExits() post-scan
       if (metadata.lastMessageRole === "assistant") {
         const silentMs = Date.now() - stat.mtimeMs;
-        if (silentMs > STALL_THRESHOLD_MS) {
+
+        // Permission wait: shorter threshold (2 min default) — Claude proposed tool_use but
+        // nobody approved it. Kill the stuck process and resume with skip-permissions.
+        const permWaitMs = parseInt(getSetting("permission_wait_threshold_ms") || String(PERMISSION_WAIT_THRESHOLD_MS), 10);
+        if (silentMs > permWaitMs) {
           const capturedSessionId = sessionId;
+          const capturedPath = filePath;
           const capturedSilentMs = silentMs;
           postTxActions.push(() => {
             const { isSessionActive } = require("./process-detector");
-            if (isSessionActive(capturedSessionId)) {
+            // Check for permission wait (tool_use pending) OR test word trigger
+            const testWord = getSetting("permission_escalation_test_word");
+            const isTestTrigger = testWord && testWord.length > 3 && detectTestWordInLastAssistant(capturedPath, testWord);
+            if (isSessionActive(capturedSessionId) && (detectPermissionWait(capturedPath) || isTestTrigger)) {
+              logAction("service", "permission_wait_detected", `silent:${Math.round(capturedSilentMs / 60_000)}min, ${isTestTrigger ? "test_word_trigger" : "tool_use pending"}`, capturedSessionId);
+              getOrchestrator().enqueuePermissionWait(capturedSessionId);
+              return; // don't also enqueue stall_continue
+            }
+            // Regular stall detection (5 min threshold)
+            if (capturedSilentMs > STALL_THRESHOLD_MS && isSessionActive(capturedSessionId)) {
               logAction("service", "stall_detected", `silent:${Math.round(capturedSilentMs / 60_000)}min`, capturedSessionId);
               getOrchestrator().enqueueStallContinue(capturedSessionId);
             }

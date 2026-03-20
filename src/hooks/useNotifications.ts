@@ -32,15 +32,21 @@ function playBeep() {
 }
 
 let tabBadgeCount = 0;
-const originalTitle = typeof document !== "undefined" ? document.title : "";
+
+/** Strip any existing badge prefix to get the base page title */
+function getBaseTitle(): string {
+  if (typeof document === "undefined") return "";
+  return document.title.replace(/^\(\d+\) Claude is waiting — /, "");
+}
 
 function setTabBadge(count: number) {
   tabBadgeCount = count;
   if (typeof document === "undefined") return;
+  const base = getBaseTitle();
   if (count > 0) {
-    document.title = `(${count}) Claude is waiting — ${originalTitle.replace(/^\(\d+\) Claude is waiting — /, "")}`;
+    document.title = `(${count}) Claude is waiting — ${base}`;
   } else {
-    document.title = originalTitle.replace(/^\(\d+\) Claude is waiting — /, "");
+    document.title = base;
   }
 }
 

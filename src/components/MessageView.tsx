@@ -129,6 +129,42 @@ export function MessageView({
     };
   }, [sessionId]);
 
+  // Preserve scroll position when earlier messages are prepended
+  const prevFirstUuidRef = useRef<string | null>(null);
+  const prevScrollHeightRef = useRef<number>(0);
+  const prevScrollTopRef = useRef<number>(0);
+
+  // Snapshot scroll state before DOM update (called in render via ref tracking)
+  useEffect(() => {
+    const root = scrollAreaRef.current;
+    if (!root) return;
+    const viewport = root.querySelector<HTMLElement>("[data-slot='scroll-area-viewport']");
+    if (!viewport) return;
+
+    const firstUuid = messages[0]?.uuid ?? null;
+    // If first message changed (earlier messages prepended), restore scroll
+    if (prevFirstUuidRef.current && firstUuid !== prevFirstUuidRef.current && prevScrollHeightRef.current > 0) {
+      const heightDelta = viewport.scrollHeight - prevScrollHeightRef.current;
+      viewport.scrollTop = prevScrollTopRef.current + heightDelta;
+    }
+    prevFirstUuidRef.current = firstUuid;
+  }, [messages]);
+
+  // Continuously track scroll height so we have it before next render
+  useEffect(() => {
+    const root = scrollAreaRef.current;
+    if (!root) return;
+    const viewport = root.querySelector<HTMLElement>("[data-slot='scroll-area-viewport']");
+    if (!viewport) return;
+    const save = () => {
+      prevScrollHeightRef.current = viewport.scrollHeight;
+      prevScrollTopRef.current = viewport.scrollTop;
+    };
+    save();
+    viewport.addEventListener("scroll", save, { passive: true });
+    return () => viewport.removeEventListener("scroll", save);
+  }, [sessionId]);
+
   // Auto-load earlier messages when scrolling to the top
   const onLoadEarlierRef = useRef(onLoadEarlier);
   onLoadEarlierRef.current = onLoadEarlier;

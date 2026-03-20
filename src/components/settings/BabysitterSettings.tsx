@@ -52,6 +52,73 @@ export function BabysitterSettings({ settings, onUpdate }: SettingsComponentProp
         </p>
       </div>
 
+      {/* Permission wait auto-escalation */}
+      <div className="space-y-1">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={settings.auto_escalate_permissions !== "false"}
+            onChange={() => {
+              const val = settings.auto_escalate_permissions === "false" ? "true" : "false";
+              onUpdate("auto_escalate_permissions", val);
+            }}
+            className="rounded border-input accent-primary"
+          />
+          <span className="text-sm font-medium">Auto-escalate permission waits</span>
+        </label>
+        <p className="text-xs text-muted-foreground ml-5">
+          When Claude is stuck waiting for tool permission approval (process alive, last message is <code>tool_use</code>,
+          no output for &gt;2 min), automatically kill the stuck process and resume with <code>--dangerously-skip-permissions</code>.
+        </p>
+      </div>
+
+      {/* Permission wait threshold */}
+      {settings.auto_escalate_permissions !== "false" && (
+        <div className="space-y-1">
+          <div className="text-sm font-medium">Permission wait threshold</div>
+          <p className="text-xs text-muted-foreground">
+            How long to wait before escalating a permission-stuck session (ms).
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={settings.permission_wait_threshold_ms || "120000"}
+              onChange={(e) => onUpdate("permission_wait_threshold_ms", e.target.value)}
+              onBlur={(e) => onUpdate("permission_wait_threshold_ms", e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              className="w-32 px-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <span className="text-xs text-muted-foreground">
+              ({Math.round(parseInt(settings.permission_wait_threshold_ms || "120000") / 1000)}s)
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Permission check interval */}
+      {settings.auto_escalate_permissions !== "false" && (
+        <div className="space-y-1">
+          <div className="text-sm font-medium">Permission check interval</div>
+          <p className="text-xs text-muted-foreground">
+            How often to scan for permission-stuck sessions (ms). Set to 0 to disable periodic checks.
+            Requires server restart to take effect.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={settings.permission_check_interval_ms || "180000"}
+              onChange={(e) => onUpdate("permission_check_interval_ms", e.target.value)}
+              onBlur={(e) => onUpdate("permission_check_interval_ms", e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              className="w-32 px-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <span className="text-xs text-muted-foreground">
+              ({Math.round(parseInt(settings.permission_check_interval_ms || "180000") / 1000)}s)
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Crash retry delay */}
       {settings.auto_retry_on_crash !== "false" && (
         <div className="space-y-1">
@@ -157,6 +224,13 @@ export function BabysitterSettings({ settings, onUpdate }: SettingsComponentProp
             <div>
               <span className="font-medium">Stall</span>
               <span className="text-muted-foreground"> — process alive but no output for &gt;5 min. Checks if Claude is asking a question before nudging.</span>
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="w-2 h-2 rounded-full bg-purple-500 shrink-0 mt-1" />
+            <div>
+              <span className="font-medium">Permission wait</span>
+              <span className="text-muted-foreground"> — last message is <code>tool_use</code>, process alive but stuck on stdin for &gt;2 min. Kills process and resumes with <code>--dangerously-skip-permissions</code>.</span>
             </div>
           </div>
           <div className="flex items-start gap-2">

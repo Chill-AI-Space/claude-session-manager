@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Search } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -20,6 +20,7 @@ import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
+import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 
 const CTX_MAX = 200_000;
 
@@ -188,9 +189,6 @@ export default function SessionDetailPage({
   const mdScrollRef = useRef<HTMLDivElement>(null);
   const mdIsNearBottomRef = useRef(true);
   const mdInitialLoadRef = useRef<string | null>(null); // tracks sessionId of initial load
-  const [mdSearch, setMdSearch] = useState(false);
-  const [mdSearchQuery, setMdSearchQuery] = useState("");
-  const mdSearchInputRef = useRef<HTMLInputElement>(null);
   const [mdHasEarlier, setMdHasEarlier] = useState(false);
   const [mdRenderStart, setMdRenderStart] = useState(0);
   const [mdLoadingEarlier, setMdLoadingEarlier] = useState(false);
@@ -447,18 +445,17 @@ export default function SessionDetailPage({
     mdInitialLoadRef.current = null;
   }, [sessionId]);
 
-  // Auto-load MD view when data arrives (MD is the default display mode)
-  // Server returns last 30 messages by default for fast initial load
+  // Auto-load MD view when data arrives — load all messages at once (limit=0)
   useEffect(() => {
     if (!data?.session_id || mdContent || mdLoading) return;
     setMdLoading(true);
-    fetch(`/api/sessions/${data.session_id}/md`)
+    fetch(`/api/sessions/${data.session_id}/md?limit=0`)
       .then(r => r.json())
       .then(json => {
         if (json.markdown) {
           setMdContent(json.markdown);
-          setMdHasEarlier(json.has_earlier ?? false);
-          setMdRenderStart(json.render_start ?? 0);
+          setMdHasEarlier(false);
+          setMdRenderStart(0);
         }
       })
       .catch(() => {})
@@ -490,12 +487,6 @@ export default function SessionDetailPage({
     setMdLoadingEarlier(false);
   }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-load full history after 3s if user stays on the session
-  useEffect(() => {
-    if (!mdHasEarlier || !data?.session_id) return;
-    const timer = setTimeout(() => loadAllMdMessages(), 3000);
-    return () => clearTimeout(timer);
-  }, [mdHasEarlier, data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh MD content when new messages arrive (active terminal sessions)
   // Debounced: waits 1s after last message-count change before re-fetching
@@ -569,22 +560,6 @@ export default function SessionDetailPage({
     }
   }, [mdContent]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cmd+F search in MD view
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "f" && mdView) {
-        e.preventDefault();
-        setMdSearch(prev => !prev);
-        setTimeout(() => mdSearchInputRef.current?.focus(), 50);
-      }
-      if (e.key === "Escape" && mdSearch) {
-        setMdSearch(false);
-        setMdSearchQuery("");
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [mdView, mdSearch]);
 
   // Watchdog: detect dead streams and clean up
   useEffect(() => {
@@ -644,6 +619,20 @@ export default function SessionDetailPage({
   useEffect(() => {
     clearTabBadge();
   }, [sessionId]);
+
+  // Dynamic browser tab title — show session name instead of generic "Claude Sessions"
+  useEffect(() => {
+    if (!data) return;
+    const title = data.metadata.custom_name
+      ?? data.metadata.generated_title
+      ?? data.metadata.first_prompt?.slice(0, 60)
+      ?? "Session";
+    document.title = title;
+    return () => { document.title = "Claude Sessions"; };
+  }, [data?.session_id, data?.metadata?.custom_name, data?.metadata?.generated_title, data?.metadata?.first_prompt]);
+
+  // Dynamic favicon — per-project icon (GitHub avatar or AI-generated)
+  useDynamicFavicon(data?.project_path);
 
   // Notify when web streaming finishes + start backoff to catch follow-up messages
   const prevStreamingRef = useRef(false);
@@ -880,6 +869,30 @@ export default function SessionDetailPage({
       loadEarlierMessages();
     }
   }, [highlightQuery, data, earlierMessages, extraMessages, earliestLoaded, loadingEarlier, loadEarlierMessages]);
+
+  // Scroll to first search highlight in MD view (MarkdownContent inserts <mark> tags, we scroll the container)
+  const didScrollToMdHighlight = useRef<string | null>(null);
+  useEffect(() => {
+    if (!highlightQuery || !mdContent || !mdView) return;
+    if (didScrollToMdHighlight.current === highlightQuery) return;
+
+    // Wait for MarkdownContent to insert <mark> elements (it uses a 100ms setTimeout)
+    const timer = setTimeout(() => {
+      const container = mdScrollRef.current;
+      if (!container) return;
+      const mark = container.querySelector("mark[data-search-highlight]");
+      if (mark) {
+        // Calculate mark's position relative to scroll container
+        const markRect = mark.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        const scrollOffset = markRect.top - containerRect.top + container.scrollTop - container.clientHeight / 2;
+        container.scrollTo({ top: Math.max(0, scrollOffset), behavior: "smooth" });
+        didScrollToMdHighlight.current = highlightQuery;
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [highlightQuery, mdContent, mdView]);
 
   const handleSendDirect = useCallback((message: string) => {
     setContextGuardError(null);
@@ -1453,31 +1466,6 @@ export default function SessionDetailPage({
           {/* MD view (default) or bubble messages */}
           {mdView ? (
             <div className="flex-1 min-h-0 overflow-y-auto relative" ref={mdScrollRef}>
-              {/* Search bar (Cmd+F) */}
-              {mdSearch && (
-                <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b px-4 py-2 flex items-center gap-2">
-                  <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <input
-                    ref={mdSearchInputRef}
-                    type="text"
-                    value={mdSearchQuery}
-                    onChange={e => setMdSearchQuery(e.target.value)}
-                    placeholder="Search in session…"
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                    onKeyDown={e => {
-                      if (e.key === "Escape") { setMdSearch(false); setMdSearchQuery(""); }
-                      if (e.key === "Enter" && mdSearchQuery && mdScrollRef.current) {
-                        // Use browser find — highlight next match
-                        const w = window as unknown as { find: (s: string) => boolean };
-                        if (w.find) w.find(mdSearchQuery);
-                      }
-                    }}
-                  />
-                  <button onClick={() => { setMdSearch(false); setMdSearchQuery(""); }} className="text-muted-foreground hover:text-foreground">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
               {mdLoading ? (
                 <div className="flex items-center justify-center h-full gap-2 text-muted-foreground">
                   <Loader2 className="h-5 w-5 animate-spin" />
@@ -1485,22 +1473,10 @@ export default function SessionDetailPage({
                 </div>
               ) : mdContent ? (
                 <div className="max-w-4xl mx-auto px-6 py-6">
-                  {mdHasEarlier && (
-                    <div className="flex items-center justify-center py-3 mb-4 border-b border-dashed border-muted-foreground/20">
-                      <button
-                        onClick={loadAllMdMessages}
-                        disabled={mdLoadingEarlier}
-                        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5"
-                      >
-                        {mdLoadingEarlier && <Loader2 className="h-3 w-3 animate-spin" />}
-                        Load {mdRenderStart} earlier messages
-                      </button>
-                    </div>
-                  )}
-                  <MarkdownContent content={mdContent} projectPath={data.project_path} compact folded={folded} />
+                  <MarkdownContent content={mdContent} projectPath={data.project_path} compact folded={folded} highlightQuery={highlightQuery ?? undefined} />
 
                   {/* ── Live activity indicator ── */}
-                  {data.is_active && (
+                  {data.is_active && (data.metadata.last_message_role !== "assistant" || (data.file_age_ms != null && data.file_age_ms < 30_000)) && (
                     <div className="my-4 flex items-center gap-2 text-[12px] text-green-600 dark:text-green-400 animate-pulse">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       <span className="font-medium">Claude is working…</span>

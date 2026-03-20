@@ -1,10 +1,10 @@
 "use client";
 
-import { memo, useState, useMemo, useCallback } from "react";
+import { memo, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import { FolderOpen, Check, Maximize2, X, ChevronUp, Copy } from "lucide-react";
+import { FolderOpen, Check, Maximize2, X, Copy } from "lucide-react";
 
 interface MarkdownContentProps {
   content: string;
@@ -13,6 +13,8 @@ interface MarkdownContentProps {
   compact?: boolean;
   /** Collapse messages: user shows first few lines, claude shows header + preview */
   folded?: boolean;
+  /** Search query — auto-expands all sections and scrolls to + highlights first match */
+  highlightQuery?: string;
 }
 
 /** Extract plain text from React children (for detecting User/Claude in h3) */
@@ -160,7 +162,6 @@ function splitSections(content: string): Section[] {
 }
 
 /** Number of sections rendered immediately from the end (plus header) */
-const INITIAL_VISIBLE = 15;
 
 /** Build the shared ReactMarkdown components config (stable reference via useMemo). */
 function useMarkdownComponents(projectPath?: string, compact?: boolean): Components {
@@ -365,20 +366,77 @@ export const MarkdownContent = memo(function MarkdownContent({
   projectPath,
   compact,
   folded,
+  highlightQuery,
 }: MarkdownContentProps) {
   if (!content.trim()) return null;
 
+  const containerRef = useRef<HTMLDivElement>(null);
+  const didHighlight = useRef<string | null>(null);
+
   const sections = useMemo(() => splitSections(content), [content]);
-  const [showAll, setShowAll] = useState(false);
 
-  const needsTruncation = sections.length > INITIAL_VISIBLE;
-  const hiddenCount = needsTruncation ? sections.length - INITIAL_VISIBLE : 0;
+  // All sections are always visible — no truncation needed since we load all messages at once
+  const visibleSections = sections;
 
-  const visibleSections = useMemo(() => {
-    if (!needsTruncation || showAll) return sections;
-    // Header + last N sections
-    return [sections[0], ...sections.slice(sections.length - INITIAL_VISIBLE + 1)];
-  }, [needsTruncation, showAll, sections]);
+  // After render, find matching text in DOM and highlight it (scroll handled by parent)
+  useEffect(() => {
+    if (!highlightQuery || !containerRef.current) return;
+    if (didHighlight.current === highlightQuery) return;
+
+    // Small delay to let sections render
+    const timer = setTimeout(() => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      // Clear previous highlights
+      container.querySelectorAll("mark[data-search-highlight]").forEach((el) => {
+        const parent = el.parentNode;
+        if (parent) {
+          parent.replaceChild(document.createTextNode(el.textContent || ""), el);
+          parent.normalize();
+        }
+      });
+
+      // Walk text nodes to find the query
+      const query = highlightQuery.toLowerCase();
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+
+      const nodesToHighlight: { node: Text; startIdx: number; length: number }[] = [];
+      while (walker.nextNode()) {
+        const textNode = walker.currentNode as Text;
+        const text = textNode.textContent || "";
+        const idx = text.toLowerCase().indexOf(query);
+        if (idx !== -1) {
+          nodesToHighlight.push({ node: textNode, startIdx: idx, length: highlightQuery.length });
+          // Only highlight first few matches to avoid performance issues
+          if (nodesToHighlight.length >= 5) break;
+        }
+      }
+
+      for (const { node, startIdx, length } of nodesToHighlight) {
+        const range = document.createRange();
+        range.setStart(node, startIdx);
+        range.setEnd(node, startIdx + length);
+        const mark = document.createElement("mark");
+        mark.setAttribute("data-search-highlight", "true");
+        mark.style.backgroundColor = "rgba(251, 191, 36, 0.4)";
+        mark.style.borderRadius = "2px";
+        mark.style.padding = "1px 0";
+        range.surroundContents(mark);
+      }
+
+      if (nodesToHighlight.length > 0) {
+        didHighlight.current = highlightQuery;
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [highlightQuery, visibleSections]);
+
+  // Reset highlight tracking when query changes
+  useEffect(() => {
+    if (!highlightQuery) didHighlight.current = null;
+  }, [highlightQuery]);
 
   const compactClasses = compact ? [
     "text-[12px] leading-[1.7]",
@@ -396,18 +454,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   const sectionClassName = `markdown-body prose prose-sm dark:prose-invert max-w-none prose-code:before:content-none prose-code:after:content-none prose-headings:first:mt-0 prose-blockquote:pl-3 prose-blockquote:border-l-2 prose-blockquote:border-muted-foreground/30 ${compactClasses}`;
 
   return (
-    <div>
-      {needsTruncation && !showAll && (
-        <div className="flex items-center justify-center py-2 mb-3 border-b border-dashed border-muted-foreground/20">
-          <button
-            onClick={() => setShowAll(true)}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-          >
-            <ChevronUp className="h-3 w-3" />
-            Show {hiddenCount} earlier messages
-          </button>
-        </div>
-      )}
+    <div ref={containerRef}>
       {visibleSections.map((section) =>
         folded ? (
           <FoldableSection
