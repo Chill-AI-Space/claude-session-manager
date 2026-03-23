@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getDb } from "@/lib/db";
 import { SessionRow } from "@/lib/types";
 import { sessionToMarkdownPaginated } from "@/lib/jsonl-to-md";
+import { resolveNode, proxyJSON } from "@/lib/remote-compute";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,24 @@ export async function GET(
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   const { sessionId } = await params;
+
+  // Check if this is a remote session
+  const nodeId = req.nextUrl.searchParams.get("node");
+  const node = resolveNode(nodeId);
+
+  if (node) {
+    try {
+      const remoteParams = new URLSearchParams(req.nextUrl.searchParams);
+      remoteParams.delete("node");
+      const qs = remoteParams.toString();
+      const res = await proxyJSON(node, `/api/sessions/${sessionId}/md${qs ? `?${qs}` : ""}`);
+      const data = await res.json();
+      return Response.json(data, { status: res.status });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return Response.json({ error: `Remote MD fetch failed: ${msg}` }, { status: 502 });
+    }
+  }
 
   const db = getDb();
   const session = db

@@ -76,7 +76,7 @@ export const PLUGINS: PluginData[] = [
     icon: <Server className="h-5 w-5" />,
     status: "installed",
     settingsComponent: RemoteNodesSettings as React.ComponentType<any>,
-    settingsKeys: ["remote_nodes"],
+    settingsKeys: ["remote_nodes", "default_compute_node"],
   },
   {
     id: "summary-ai",

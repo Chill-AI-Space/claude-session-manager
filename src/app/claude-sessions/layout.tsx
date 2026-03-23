@@ -94,12 +94,41 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     if (searchQuery) params.set("search", searchQuery);
     params.set("sort", "modified");
     params.set("limit", String(SIDEBAR_PAGE_SIZE));
+    // Skip remote nodes for instant sidebar load; fetch them lazily below
+    params.set("include_remote", "false");
 
     const res = await fetch(`/api/sessions?${params}`);
     const data = await res.json();
     setSessions(data.sessions);
     setHasMore(data.sessions.length < (data.total ?? 0));
     setLoading(false);
+
+    // Lazy-load remote sessions in background (non-blocking)
+    fetch(`/api/sessions?sort=modified&limit=50&include_remote=true`)
+      .then(r => r.json())
+      .then(remoteData => {
+        const remoteSessions = (remoteData.sessions || []).filter(
+          (s: Record<string, unknown>) => s._remote
+        );
+        if (remoteSessions.length > 0) {
+          setSessions(prev => {
+            const localIds = new Set(prev.map((s) => s.session_id));
+            const newRemote = remoteSessions.filter(
+              (s: SessionListItem) => !localIds.has(s.session_id)
+            );
+            if (newRemote.length === 0) return prev;
+            // Merge and sort by modified_at descending
+            const merged = [...prev, ...newRemote];
+            merged.sort((a, b) => {
+              const aTime = String(a.modified_at || "");
+              const bTime = String(b.modified_at || "");
+              return bTime.localeCompare(aTime);
+            });
+            return merged;
+          });
+        }
+      })
+      .catch(() => {}); // remote unavailable — no problem
   }, [selectedProject, searchQuery]);
 
   const loadMoreSessions = useCallback(async () => {
@@ -111,6 +140,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     params.set("sort", "modified");
     params.set("limit", String(SIDEBAR_PAGE_SIZE));
     params.set("offset", String(sessions.length));
+    params.set("include_remote", "false");
 
     try {
       const res = await fetch(`/api/sessions?${params}`);

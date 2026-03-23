@@ -3,7 +3,8 @@ import { getDb, getSetting, logAction } from "@/lib/db";
 import type { SessionRow } from "@/lib/types";
 import { killSessionProcesses } from "@/lib/process-detector";
 import { getOrchestrator } from "@/lib/orchestrator";
-import { sseResponse } from "@/lib/claude-runner";
+import { sseResponse, SSE_HEADERS } from "@/lib/claude-runner";
+import { resolveNode, proxySSE } from "@/lib/remote-compute";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,26 @@ export async function POST(
     return Response.json({ error: "Message is required" }, { status: 400 });
   }
 
+  // Check if this is a remote session
+  const nodeId = request.nextUrl.searchParams.get("node");
+  const node = resolveNode(nodeId);
+
+  if (node) {
+    // Route to remote VM
+    logAction("service", "remote_reply", `node:${node.name} msg_len:${message.length}`, sessionId);
+    try {
+      const stream = await proxySSE(node, `/api/sessions/${sessionId}/reply`, {
+        message,
+        verbose,
+      });
+      return new Response(stream, { headers: SSE_HEADERS });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return Response.json({ error: `Remote reply failed: ${msg}` }, { status: 502 });
+    }
+  }
+
+  // Local execution
   const db = getDb();
   const session = db
     .prepare("SELECT * FROM sessions WHERE session_id = ?")

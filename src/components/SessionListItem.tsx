@@ -6,7 +6,7 @@ import { SessionListItem } from "@/lib/types";
 import { StatusBadge } from "./StatusBadge";
 import { cn, formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
-import { GitBranch, Archive } from "lucide-react";
+import { GitBranch, Archive, Cloud } from "lucide-react";
 
 interface SessionListItemProps {
   session: SessionListItem;
@@ -92,13 +92,15 @@ export const SessionListItemComponent = memo(
     const lastMessagePreview = truncatePreview(session.last_message, 120);
     const totalTokens = session.total_input_tokens + session.total_output_tokens;
 
-    const href = highlightQuery
-      ? `/claude-sessions/${session.session_id}?q=${encodeURIComponent(highlightQuery)}`
-      : `/claude-sessions/${session.session_id}`;
+    const nodeParam = session._remote && session._nodeId ? `node=${session._nodeId}` : "";
+    const qParam = highlightQuery ? `q=${encodeURIComponent(highlightQuery)}` : "";
+    const queryString = [nodeParam, qParam].filter(Boolean).join("&");
+    const href = `/claude-sessions/${session.session_id}${queryString ? `?${queryString}` : ""}`;
 
     return (
       <Link
         href={href}
+        prefetch={false}
         className={cn(
           "group/item block py-2.5 mx-1 rounded cursor-pointer transition-colors relative",
           selected
@@ -119,6 +121,11 @@ export const SessionListItemComponent = memo(
           <StatusBadge status={activityStatus} className="mt-1" />
           <div className="flex-1 min-w-0">
             <div className="flex items-baseline gap-1.5 min-w-0">
+              {session._remote && (
+                <span title={session._nodeName || "Remote"}>
+                  <Cloud className="h-3 w-3 text-sky-500 shrink-0 relative top-[1px]" />
+                </span>
+              )}
               <span className="text-[13px] font-medium min-w-0 flex-1 leading-snug line-clamp-2">
                 {title}
               </span>
@@ -186,6 +193,7 @@ export const SessionListItemComponent = memo(
       prev.session.message_count === next.session.message_count &&
       prev.session.is_active === next.session.is_active &&
       prev.session.last_message_role === next.session.last_message_role &&
+      prev.session._remote === next.session._remote &&
       prev.selected === next.selected &&
       prev.snippet === next.snippet &&
       prev.highlightQuery === next.highlightQuery &&

@@ -58,6 +58,10 @@ export interface SessionListItem {
   total_output_tokens: number;
   is_active?: boolean;
   last_message_role?: string | null;
+  // Remote executor fields (set when session comes from a remote node)
+  _remote?: boolean;
+  _nodeId?: string;
+  _nodeName?: string;
 }
 
 export interface ProjectListItem {

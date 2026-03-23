@@ -1,13 +1,4 @@
 {
-  "reported_issues": [
-    "2026-03-16:repeat-crash:b5eebb6c-c247-42e4-8790-8dc8cf68c929",
-    "2026-03-16:repeat-crash:0e97d6ba-99cd-4162-b56b-849a5c2984ae",
-    "2026-03-16:frequent-restarts:global",
-    "2026-03-16:repeat-crash:7ab129a9-13a2-43d5-86a6-6c90f232e30f",
-    "2026-03-16:repeat-crash:6f76b5be-46ce-47de-bc58-d0925199de9a",
-    "2026-03-16:repeat-crash:4d797705-203b-4900-9050-b65a8b390950",
-    "2026-03-16:repeat-crash:f80073e7-305a-40a9-a30b-09d2fd6356d5",
-    "2026-03-17:repeat-crash:398f8b2b-692e-403c-b5d2-03180c6c2490"
-  ],
-  "last_run": "2026-03-17T14:20:10.798Z"
+  "reported_issues": [],
+  "last_run": "2026-03-23T06:55:47.119Z"
 }

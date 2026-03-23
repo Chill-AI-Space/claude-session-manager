@@ -19,6 +19,7 @@ export function RemoteNodesSettings() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ name: "", tailscale: "", relayNodeId: "", preferred: "tailscale" as "tailscale" | "relay" });
   const [editId, setEditId] = useState<string | null>(null);
+  const [defaultComputeNode, setDefaultComputeNode] = useState<string>("");
 
   function load(ping = false) {
     setLoading(true);
@@ -29,7 +30,14 @@ export function RemoteNodesSettings() {
       .finally(() => { setLoading(false); setPinging(false); });
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Load default compute node setting
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((s) => setDefaultComputeNode(s.default_compute_node || ""))
+      .catch(() => {});
+  }, []);
 
   async function handleAdd() {
     if (!form.name || (!form.tailscale && !form.relayNodeId)) return;
@@ -59,6 +67,15 @@ export function RemoteNodesSettings() {
     });
     setEditId(null);
     load();
+  }
+
+  async function handleSetComputeNode(nodeId: string) {
+    setDefaultComputeNode(nodeId);
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ default_compute_node: nodeId }),
+    });
   }
 
   async function handlePing(nodeId: string) {
@@ -93,6 +110,40 @@ export function RemoteNodesSettings() {
         Register other machines running Session Manager. Commands are sent via
         Tailscale (direct P2P) or Cloudflare Relay (via internet), with automatic fallback.
       </div>
+
+      {/* Default Compute Node selector */}
+      {nodes.length > 0 && (
+        <div className="border border-border rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs font-medium">Default Compute Node</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                New sessions will run on this remote VM instead of locally
+              </div>
+            </div>
+            <select
+              value={defaultComputeNode}
+              onChange={(e) => handleSetComputeNode(e.target.value)}
+              className="px-2 py-1 text-xs bg-muted rounded border border-border min-w-[160px]"
+            >
+              <option value="">Local (this machine)</option>
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name} {n.online ? "" : "(offline)"}
+                </option>
+              ))}
+            </select>
+          </div>
+          {defaultComputeNode && (
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <div className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+              <span className="text-blue-400">
+                Remote compute active — sessions run on {nodes.find(n => n.id === defaultComputeNode)?.name || "remote VM"}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Node list */}
       {nodes.length > 0 && (

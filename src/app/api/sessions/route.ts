@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getActiveSessionIds } from "@/lib/process-detector";
 import { SessionRow, SessionListItem } from "@/lib/types";
+import { fetchAllRemoteSessions } from "@/lib/remote-compute";
 
 export const dynamic = "force-dynamic";
 
@@ -107,10 +108,39 @@ export async function GET(request: NextRequest) {
     .prepare(`SELECT COUNT(*) as count FROM sessions ${whereClause}`)
     .get(filterParams) as { count: number };
 
+  // Merge remote sessions if requested (default: true when no project filter)
+  const includeRemote = searchParams.get("include_remote") !== "false";
+  let allSessions: (SessionListItem | Record<string, unknown>)[] = sessions;
+  let remoteMeta: { nodeId: string; nodeName: string; count: number; error?: string }[] = [];
+
+  if (includeRemote && offset === 0) {
+    try {
+      const remoteResults = await fetchAllRemoteSessions({ limit: 50, search: search || undefined });
+      for (const result of remoteResults) {
+        remoteMeta.push({
+          nodeId: result.nodeId,
+          nodeName: result.nodeName,
+          count: result.sessions.length,
+          error: result.error,
+        });
+        allSessions = [...allSessions, ...result.sessions];
+      }
+      // Sort merged list by modified_at descending
+      allSessions.sort((a, b) => {
+        const aTime = String((a as Record<string, unknown>).modified_at || "");
+        const bTime = String((b as Record<string, unknown>).modified_at || "");
+        return bTime.localeCompare(aTime);
+      });
+    } catch {
+      // Remote fetch failed — return local-only
+    }
+  }
+
   return NextResponse.json({
-    sessions,
+    sessions: allSessions,
     total: totalCount.count,
     limit,
     offset,
+    remote: remoteMeta.length > 0 ? remoteMeta : undefined,
   });
 }

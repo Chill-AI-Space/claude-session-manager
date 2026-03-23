@@ -4,10 +4,11 @@ import { useState, useRef } from "react";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { FolderOpen, Send, Loader2, Sparkles, FolderPlus, ShieldOff, Paperclip } from "lucide-react";
+import { FolderOpen, Send, Loader2, Sparkles, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud } from "lucide-react";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { useSessionStart } from "@/hooks/useSessionStart";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
+import { useComputeNode } from "@/hooks/useComputeNode";
 
 export default function SessionsEmptyState() {
   const [message, setMessage] = useState("");
@@ -19,6 +20,7 @@ export default function SessionsEmptyState() {
   const dragCounterRef = useRef(0);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
+  const compute = useComputeNode();
   const autodetect = useAutodetect();
   const session = useSessionStart();
 
@@ -196,6 +198,22 @@ export default function SessionsEmptyState() {
                 {skipPerms.value ? "on" : "off"}
               </span>
             </button>
+            {compute.nodes.length > 0 && (
+              <button
+                onClick={compute.toggle}
+                className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
+                  compute.isLocal
+                    ? "text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10"
+                    : "text-sky-500 hover:text-sky-400 hover:bg-sky-500/10"
+                }`}
+                title={compute.isLocal ? "Running locally — click to switch to VM" : `Running on ${compute.currentNode?.name} — click to switch`}
+              >
+                {compute.isLocal ? <Monitor className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
+                <span className="font-medium">
+                  {compute.isLocal ? "local" : compute.currentNode?.name ?? "vm"}
+                </span>
+              </button>
+            )}
             <div className="flex-1" />
             <Button
               size="icon"

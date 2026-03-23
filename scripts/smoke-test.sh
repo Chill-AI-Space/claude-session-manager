@@ -34,7 +34,7 @@ check "Main page responds" "$STATUS" "200"
 
 # 2. Sessions API returns data
 echo "2. Sessions API"
-SESSIONS_JSON=$(curl -s --max-time 10 "$BASE/api/sessions?limit=3" 2>/dev/null || echo '{}')
+SESSIONS_JSON=$(curl -s --max-time 10 "$BASE/api/sessions?limit=3&include_remote=false" 2>/dev/null || echo '{}')
 SESSION_COUNT=$(echo "$SESSIONS_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('sessions',[])))" 2>/dev/null || echo "0")
 TOTAL=$(echo "$SESSIONS_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('total',0))" 2>/dev/null || echo "0")
 check "Sessions returned ($SESSION_COUNT)" "$SESSION_COUNT" "^[1-9]"

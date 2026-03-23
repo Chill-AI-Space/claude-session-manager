@@ -422,6 +422,8 @@ const SETTING_DEFAULTS: Record<string, string> = {
   relay_server_url: "wss://csm-relay.chillai.workers.dev",
   // Remote nodes registry (JSON array)
   remote_nodes: "[]",
+  // Default compute node — if set, new sessions run on this remote node
+  default_compute_node: "",
   // Title generation (uses summary as input)
   title_model: "gpt-4o-mini",
   // Summary & learnings generation (direct API, no CLI sessions spawned)

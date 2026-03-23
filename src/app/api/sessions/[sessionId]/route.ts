@@ -5,6 +5,7 @@ import { readSessionMessages } from "@/lib/session-reader";
 import { SessionRow } from "@/lib/types";
 import { isSessionActive } from "@/lib/process-detector";
 import { hasResultEvent } from "@/lib/orchestrator";
+import { resolveNode, proxyJSON } from "@/lib/remote-compute";
 
 // If JSONL hasn't been touched in this many ms AND process is running,
 // still consider inactive (catches zombie processes). 60 min is generous
@@ -18,6 +19,33 @@ export async function GET(
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   const { sessionId } = await params;
+
+  // Check if this is a remote session
+  const nodeId = request.nextUrl.searchParams.get("node");
+  const node = resolveNode(nodeId);
+
+  if (node) {
+    try {
+      // Forward query params (except node) to remote
+      const remoteParams = new URLSearchParams(request.nextUrl.searchParams);
+      remoteParams.delete("node");
+      const qs = remoteParams.toString();
+      const res = await proxyJSON(node, `/api/sessions/${sessionId}${qs ? `?${qs}` : ""}`);
+      const data = await res.json();
+      // Tag the response so the UI knows it's remote
+      if (typeof data === "object" && data !== null) {
+        (data as Record<string, unknown>)._remote = true;
+        (data as Record<string, unknown>)._nodeId = node.id;
+        (data as Record<string, unknown>)._nodeName = node.name;
+      }
+      return Response.json(data, { status: res.status });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return Response.json({ error: `Remote fetch failed: ${msg}` }, { status: 502 });
+    }
+  }
+
+  // Local execution
   const db = getDb();
 
   const session = db
@@ -106,8 +134,24 @@ export async function PATCH(
 ) {
   const { sessionId } = await params;
   const body = await request.json();
-  const db = getDb();
 
+  // Check if this is a remote session
+  const nodeId = request.nextUrl.searchParams.get("node");
+  const node = resolveNode(nodeId);
+
+  if (node) {
+    try {
+      const res = await proxyJSON(node, `/api/sessions/${sessionId}`, "PATCH", body);
+      const data = await res.json();
+      return Response.json(data, { status: res.status });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return Response.json({ error: `Remote patch failed: ${msg}` }, { status: 502 });
+    }
+  }
+
+  // Local execution
+  const db = getDb();
   const session = db
     .prepare("SELECT * FROM sessions WHERE session_id = ?")
     .get(sessionId) as SessionRow | undefined;

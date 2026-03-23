@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -21,6 +21,7 @@ import { useAutodetect } from "@/hooks/useAutodetect";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
+import { useComputeNode } from "@/hooks/useComputeNode";
 
 const CTX_MAX = 200_000;
 
@@ -118,6 +119,15 @@ export default function SessionDetailPage({
   const router = useRouter();
   const searchParams = useSearchParams();
   const highlightQuery = searchParams.get("q") || null;
+  const remoteNodeId = searchParams.get("node") || null;
+
+  /** Build API URL, appending ?node= for remote sessions */
+  const apiUrl = useCallback((path: string, extraParams?: Record<string, string>) => {
+    const params = new URLSearchParams(extraParams);
+    if (remoteNodeId) params.set("node", remoteNodeId);
+    const qs = params.toString();
+    return `${path}${qs ? `?${qs}` : ""}`;
+  }, [remoteNodeId]);
   const [data, setData] = useState<SessionDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -213,6 +223,7 @@ export default function SessionDetailPage({
   const newDragCounterRef = useRef(0);
   const newAutodetect = useAutodetect();
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
+  const compute = useComputeNode();
 
   // Issue submission
   const [issueCategory, setIssueCategory] = useState<string | null>(null);
@@ -277,7 +288,7 @@ export default function SessionDetailPage({
   const fetchSession = useCallback(async ({ clearExtras = false } = {}) => {
     const gen = ++fetchGenRef.current;
     try {
-      const res = await fetch(`/api/sessions/${sessionId}`);
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}`));
       if (gen !== fetchGenRef.current) return; // stale
       if (!res.ok) {
         setError("Session not found");
@@ -303,7 +314,7 @@ export default function SessionDetailPage({
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [sessionId, apiUrl]);
 
   // Backoff polling trigger — incremented to start a new backoff cycle
   const [backoffTrigger, setBackoffTrigger] = useState(0);
@@ -314,7 +325,7 @@ export default function SessionDetailPage({
     if (earliestLoaded === null || earliestLoaded === 0) return;
     setLoadingEarlier(true);
     try {
-      const res = await fetch(`/api/sessions/${sessionId}?before=${earliestLoaded}`);
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}`, { before: String(earliestLoaded) }));
       if (!res.ok) return;
       const json = await res.json();
       if (!Array.isArray(json.messages)) return;
@@ -325,7 +336,7 @@ export default function SessionDetailPage({
     } finally {
       setLoadingEarlier(false);
     }
-  }, [sessionId, earliestLoaded]);
+  }, [sessionId, earliestLoaded, apiUrl]);
 
   useEffect(() => {
     // Abort any in-flight streaming request from previous session
@@ -449,7 +460,7 @@ export default function SessionDetailPage({
   useEffect(() => {
     if (!data?.session_id || mdContent || mdLoading) return;
     setMdLoading(true);
-    fetch(`/api/sessions/${data.session_id}/md?limit=0`)
+    fetch(apiUrl(`/api/sessions/${data.session_id}/md`, { limit: "0" }))
       .then(r => r.json())
       .then(json => {
         if (json.markdown) {
@@ -471,7 +482,7 @@ export default function SessionDetailPage({
     const savedScrollTop = scrollEl?.scrollTop ?? 0;
     const savedScrollHeight = scrollEl?.scrollHeight ?? 0;
     try {
-      const res = await fetch(`/api/sessions/${data.session_id}/md?limit=0`);
+      const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/md`, { limit: "0" }));
       const json = await res.json();
       if (json.markdown) {
         setMdContent(json.markdown);
@@ -507,7 +518,7 @@ export default function SessionDetailPage({
       // Debounce: clear previous timer, wait 1s for burst to settle
       if (mdRefreshTimerRef.current) clearTimeout(mdRefreshTimerRef.current);
       mdRefreshTimerRef.current = setTimeout(() => {
-        fetch(`/api/sessions/${data.session_id}/md?limit=0`)
+        fetch(apiUrl(`/api/sessions/${data.session_id}/md`, { limit: "0" }))
           .then(r => r.json())
           .then(json => {
             if (json.markdown) {
@@ -742,7 +753,7 @@ export default function SessionDetailPage({
     abortRef.current = controller;
 
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/reply`, {
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/reply`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
@@ -1058,7 +1069,7 @@ export default function SessionDetailPage({
       // Optionally prepend smart context from previous session
       if (includeSummary) {
         try {
-          const ctxRes = await fetch(`/api/sessions/${sessionId}/context`, {
+          const ctxRes = await fetch(apiUrl(`/api/sessions/${sessionId}/context`), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ question: msg }),
@@ -1072,7 +1083,10 @@ export default function SessionDetailPage({
         } catch { /* non-critical — send without context */ }
       }
 
-      const res = await fetch("/api/sessions/start", {
+      const startUrl = compute.nodeId
+        ? `/api/sessions/start?node=${encodeURIComponent(compute.nodeId)}`
+        : "/api/sessions/start";
+      const res = await fetch(startUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: newSessionPath, message: fullMessage }),
@@ -1185,7 +1199,7 @@ export default function SessionDetailPage({
 
   const killTerminal = async () => {
     try {
-      await fetch(`/api/sessions/${sessionId}/kill`, { method: "POST" });
+      await fetch(apiUrl(`/api/sessions/${sessionId}/kill`), { method: "POST" });
       setTerminalKilled(true);
     } catch {
       // ignore
@@ -1195,7 +1209,7 @@ export default function SessionDetailPage({
   const handleShare = async () => {
     setShareState("loading");
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/share`, { method: "POST" });
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/share`), { method: "POST" });
       const json = await res.json();
       if (json.url) {
         setShareUrl(json.url);
@@ -1218,7 +1232,7 @@ export default function SessionDetailPage({
 
   const openInTerminal = async () => {
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/open`, {
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/open`), {
         method: "POST",
       });
       if (!res.ok) {
@@ -1234,7 +1248,7 @@ export default function SessionDetailPage({
     setFocusError(null);
     setFocusOk(false);
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/focus`, { method: "POST" });
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/focus`), { method: "POST" });
       if (!res.ok) {
         const err = await res.json();
         setFocusError(err.error ?? "Failed to focus terminal");
@@ -1318,7 +1332,7 @@ export default function SessionDetailPage({
                   setSummaryLoading(true);
                   setSummaryError(null);
                   try {
-                    const res = await fetch(`/api/sessions/${data.session_id}/summary`, { method: "POST" });
+                    const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/summary`), { method: "POST" });
                     const json = await res.json();
                     if (json.error) setSummaryError(json.error);
                     else setSummary(json.summary);
@@ -1348,7 +1362,7 @@ export default function SessionDetailPage({
                   setLearningsLoading(true);
                   setLearningsError(null);
                   try {
-                    const res = await fetch(`/api/sessions/${data.session_id}/learnings`, { method: "POST" });
+                    const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/learnings`), { method: "POST" });
                     const json = await res.json();
                     if (json.error) setLearningsError(json.error);
                     else setLearnings(json.learnings);
@@ -1500,7 +1514,7 @@ export default function SessionDetailPage({
                           setSummaryLoading(true);
                           setSummaryError(null);
                           try {
-                            const res = await fetch(`/api/sessions/${data.session_id}/summary`, { method: "POST" });
+                            const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/summary`), { method: "POST" });
                             const json = await res.json();
                             if (json.error) setSummaryError(json.error);
                             else setSummary(json.summary);
@@ -1546,7 +1560,7 @@ export default function SessionDetailPage({
                           setLearningsLoading(true);
                           setLearningsError(null);
                           try {
-                            const res = await fetch(`/api/sessions/${data.session_id}/learnings`, { method: "POST" });
+                            const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/learnings`), { method: "POST" });
                             const json = await res.json();
                             if (json.error) setLearningsError(json.error);
                             else setLearnings(json.learnings);
@@ -2121,6 +2135,22 @@ export default function SessionDetailPage({
                     {skipPerms.value ? "on" : "off"}
                   </span>
                 </button>
+                {compute.nodes.length > 0 && (
+                  <button
+                    onClick={compute.toggle}
+                    className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
+                      compute.isLocal
+                        ? "text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10"
+                        : "text-sky-500 hover:text-sky-400 hover:bg-sky-500/10"
+                    }`}
+                    title={compute.isLocal ? "Running locally — click to switch to VM" : `Running on ${compute.currentNode?.name} — click to switch`}
+                  >
+                    {compute.isLocal ? <Monitor className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
+                    <span className="font-medium">
+                      {compute.isLocal ? "local" : compute.currentNode?.name ?? "vm"}
+                    </span>
+                  </button>
+                )}
                 <label
                   className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground cursor-pointer select-none px-1 py-0.5 rounded hover:bg-muted/50"
                   title={
