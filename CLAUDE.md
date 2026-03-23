@@ -26,11 +26,14 @@ Prerequisites: **Node.js 18+** (20+ recommended), **Git**.
 git clone https://github.com/Chill-AI-Space/claude-session-manager.git
 cd claude-session-manager
 npm install
-npm run build
-npm run start
+scripts/install-mac.sh
 ```
 
-Open http://localhost:3000/claude-sessions in a browser.
+`install-mac.sh` does everything: builds the project, creates a launchd service (auto-starts on login), and verifies the server + menu bar icon are running.
+
+After install: white spiral icon appears in the menu bar (Open Session Manager / Babysitter ON-OFF / Quit).
+
+**Uninstall:** `scripts/install-mac.sh --uninstall`
 
 Optional extras:
 - **Claude CLI** (`npm i -g @anthropic-ai/claude-code`) — needed to start/reply to sessions from the UI

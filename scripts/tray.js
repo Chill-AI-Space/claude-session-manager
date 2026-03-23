@@ -59,29 +59,116 @@ try {
   logErr(`Could not load icon: ${e.message}`);
 }
 
+// --- Port management ---
+function getPortPid() {
+  if (isWin) return null;
+  try {
+    const out = execSync(`lsof -ti:${PORT} -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf8' }).trim();
+    return out ? parseInt(out.split('\n')[0], 10) : null;
+  } catch { return null; }
+}
+
+function freePort() {
+  const pid = getPortPid();
+  if (!pid) return;
+  // Don't kill our own children
+  try {
+    const cmdLine = execSync(`ps -p ${pid} -o command=`, { encoding: 'utf8' }).trim();
+    if (cmdLine.includes('next') && cmdLine.includes('claude-session-manager')) {
+      log(`Port ${PORT} held by our stale Next.js (PID ${pid}), killing`);
+    } else {
+      log(`Port ${PORT} held by foreign process (PID ${pid}): ${cmdLine.slice(0, 80)}`);
+    }
+    process.kill(pid, 'SIGTERM');
+    // Give it a moment to die
+    execSync('sleep 1');
+    // Check if still alive
+    try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); } catch {}
+    log(`Freed port ${PORT}`);
+  } catch (e) {
+    logErr(`Could not free port ${PORT}: ${e.message}`);
+  }
+}
+
+// Free port before starting
+freePort();
+
 // --- Start Next.js server ---
 const nextBin = isWin
   ? join(ROOT, 'node_modules', '.bin', 'next.cmd')
   : join(ROOT, 'node_modules', '.bin', 'next');
-const server = spawn(
-  isWin ? nextBin : process.execPath,
-  isWin ? ['start'] : [nextBin, 'start'],
-  {
-    cwd: ROOT,
-    env: { ...process.env, NODE_ENV: 'production' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-    shell: isWin, // .cmd files need shell on Windows
+
+let server = null;
+
+function spawnServer() {
+  const proc = spawn(
+    isWin ? nextBin : process.execPath,
+    isWin ? ['start'] : [nextBin, 'start'],
+    {
+      cwd: ROOT,
+      env: { ...process.env, NODE_ENV: 'production' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: isWin,
+    }
+  );
+
+  proc.stdout.on('data', (d) => process.stdout.write(d));
+  proc.stderr.on('data', (d) => process.stderr.write(d));
+
+  proc.on('exit', (code) => {
+    logErr(`Server exited with code ${code}`);
+    // Don't exit the tray — we'll restart the server on next "Open"
+    server = null;
+  });
+
+  return proc;
+}
+
+server = spawnServer();
+
+// --- Server health check & restart ---
+function checkServerHealth() {
+  return new Promise((resolve) => {
+    const req = http.get(`http://localhost:${PORT}/api/settings`, { timeout: 3000 }, (res) => {
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+
+async function ensureServerRunning() {
+  const healthy = await checkServerHealth();
+  if (healthy) return true;
+
+  log('Server not responding, restarting...');
+
+  // Kill old process if still hanging
+  if (server) {
+    try { server.kill('SIGKILL'); } catch {}
+    server = null;
   }
-);
 
-server.stdout.on('data', (d) => process.stdout.write(d));
-server.stderr.on('data', (d) => process.stderr.write(d));
+  // Free port in case something else grabbed it
+  freePort();
 
-server.on('exit', (code) => {
-  logErr(`Server exited with code ${code}`);
-  process.exit(code ?? 0);
-});
+  // Spawn new server
+  server = spawnServer();
+
+  // Wait for it to become ready (up to 15s)
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    const ok = await checkServerHealth();
+    if (ok) {
+      log('Server restarted successfully');
+      return true;
+    }
+  }
+
+  logErr('Server failed to start after 15s');
+  return false;
+}
 
 // --- Settings helpers (read/write via localhost API) ---
 const API_BASE = `http://localhost:${PORT}`;
@@ -133,73 +220,118 @@ const MENU_OPEN = 0;
 const MENU_BABYSITTER = 1;
 const MENU_QUIT = 3;
 
-try {
-  const Systray = require('systray2').default;
+let trayAttempts = 0;
+const MAX_TRAY_ATTEMPTS = 5;
 
-  tray = new Systray({
-    menu: {
-      icon,
-      title: '',
-      tooltip: 'Claude Session Manager',
-      items: [
-        { title: 'Open Session Manager', tooltip: 'Open in browser', checked: false, enabled: true },
-        { title: babysitterLabel(true), tooltip: 'Toggle auto-retry & auto-continue', checked: true, enabled: true },
-        Systray.separator,
-        { title: 'Quit', tooltip: 'Stop server and quit', checked: false, enabled: true },
-      ],
-    },
-    debug: false,
-    copyDir: true,
-  });
+function startTray() {
+  trayAttempts++;
+  try {
+    const Systray = require('systray2').default;
 
-  tray.onClick(async (action) => {
-    if (action.seq_id === MENU_OPEN) {
+    tray = new Systray({
+      menu: {
+        icon,
+        title: '',
+        tooltip: 'Claude Session Manager',
+        items: [
+          { title: 'Open Session Manager', tooltip: 'Open in browser', checked: false, enabled: true },
+          { title: babysitterLabel(true), tooltip: 'Toggle auto-retry & auto-continue', checked: true, enabled: true },
+          Systray.separator,
+          { title: 'Quit', tooltip: 'Stop server and quit', checked: false, enabled: true },
+        ],
+      },
+      debug: false,
+      copyDir: true,
+    });
+
+    tray.onClick(async (action) => {
+      if (action.seq_id === MENU_OPEN) {
+        try {
+          const ready = await ensureServerRunning();
+          if (!ready) {
+            logErr('Cannot open Session Manager — server failed to start');
+            return;
+          }
+          const openCmd = isWin ? `start "" "${OPEN_URL}"` : `open "${OPEN_URL}"`;
+          execSync(openCmd);
+        } catch (e) {
+          logErr(`Open failed: ${e.message}`);
+        }
+      } else if (action.seq_id === MENU_BABYSITTER) {
+        try {
+          const newState = await toggleBabysitter();
+          tray.sendAction({
+            type: 'update-item',
+            item: { title: babysitterLabel(newState), tooltip: 'Toggle auto-retry & auto-continue', checked: newState, enabled: true },
+            seq_id: MENU_BABYSITTER,
+          });
+          log(`Babysitter toggled → ${newState ? 'ON' : 'OFF'}`);
+        } catch (e) {
+          logErr(`Failed to toggle babysitter: ${e.message}`);
+        }
+      } else if (action.seq_id === MENU_QUIT) {
+        quit();
+      }
+    });
+
+    // Update babysitter label from actual settings once server is ready
+    setTimeout(async () => {
       try {
-        const openCmd = isWin ? `start "" "${OPEN_URL}"` : `open "${OPEN_URL}"`;
-        execSync(openCmd);
-      } catch {}
-    } else if (action.seq_id === MENU_BABYSITTER) {
-      try {
-        const newState = await toggleBabysitter();
+        const state = await getBabysitterState();
+        const on = state.retry || state.stall;
         tray.sendAction({
           type: 'update-item',
-          item: { title: babysitterLabel(newState), tooltip: 'Toggle auto-retry & auto-continue', checked: newState, enabled: true },
+          item: { title: babysitterLabel(on), tooltip: 'Toggle auto-retry & auto-continue', checked: on, enabled: true },
           seq_id: MENU_BABYSITTER,
         });
-        log(`Babysitter toggled → ${newState ? 'ON' : 'OFF'}`);
-      } catch (e) {
-        logErr(`Failed to toggle babysitter: ${e.message}`);
-      }
-    } else if (action.seq_id === MENU_QUIT) {
-      quit();
+      } catch {}
+    }, 5000);
+
+    log('Menu bar icon active');
+  } catch (e) {
+    tray = null;
+    logErr(`Could not start tray (attempt ${trayAttempts}): ${e.message}`);
+    if (trayAttempts < MAX_TRAY_ATTEMPTS) {
+      const delayS = trayAttempts * 5;
+      log(`Retrying tray in ${delayS}s (WindowServer may not be ready yet)...`);
+      setTimeout(startTray, delayS * 1000);
+    } else {
+      logErr('Tray failed after all attempts — running as background server without menu bar icon');
     }
-  });
-
-  // Update babysitter label from actual settings once server is ready
-  setTimeout(async () => {
-    try {
-      const state = await getBabysitterState();
-      const on = state.retry || state.stall;
-      tray.sendAction({
-        type: 'update-item',
-        item: { title: babysitterLabel(on), tooltip: 'Toggle auto-retry & auto-continue', checked: on, enabled: true },
-        seq_id: MENU_BABYSITTER,
-      });
-    } catch {}
-  }, 5000);
-
-  log('Menu bar icon active');
-} catch (e) {
-  logErr(`Could not start tray (no GUI?), running as background server: ${e.message}`);
+  }
 }
 
+// Watchdog: check every 30s if tray_darwin binary is still alive, restart if not
+function startTrayWatchdog() {
+  if (isWin) return;
+  setInterval(() => {
+    if (!tray) return; // tray never started or gave up
+    try {
+      const pgrep = execSync('pgrep -f tray_darwin 2>/dev/null', { encoding: 'utf8' }).trim();
+      if (!pgrep) throw new Error('not running');
+    } catch {
+      log('Tray icon process died — restarting...');
+      try { tray.kill(false); } catch {}
+      tray = null;
+      trayAttempts = 0;
+      startTray();
+    }
+  }, 30_000);
+}
+
+// Delay first tray start slightly to let WindowServer initialize after login
+setTimeout(() => {
+  startTray();
+  startTrayWatchdog();
+}, isWin ? 0 : 3000);
+
 // --- Initial scan ---
-log('Initial scan triggered, background scanner started');
+log('Server started, background scanner active');
 
 function quit() {
   log('Shutting down...');
   try { if (tray) tray.kill(); } catch {}
-  try { server.kill(); } catch {}
+  try { if (server) server.kill(); } catch {}
   process.exit(0);
 }
 
