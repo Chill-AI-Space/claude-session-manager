@@ -72,7 +72,7 @@ export async function GET() {
         label: "Gemini API Key",
         ok: geminiOk,
         required: false,
-        fix: geminiOk ? null : "Add GEMINI_API_KEY=... to .env.local for AI-powered session search",
+        fix: geminiOk ? null : "Get a free key at https://aistudio.google.com/apikey then add GEMINI_API_KEY=your_key to .env.local",
       },
       {
         id: "ripgrep",

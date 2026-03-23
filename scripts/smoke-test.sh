@@ -1,11 +1,13 @@
 #!/bin/bash
 # Post-deploy smoke test for Claude Session Manager
 # Verifies that the UI actually works end-to-end, not just HTTP 200.
+# Works on both fresh installs (empty DB) and populated instances.
 # Usage: scripts/smoke-test.sh [base_url]
 
 BASE="${1:-http://localhost:3000}"
 PASS=0
 FAIL=0
+SKIP=0
 ERRORS=""
 
 check() {
@@ -23,6 +25,13 @@ check() {
   fi
 }
 
+skip() {
+  local name="$1"
+  local reason="$2"
+  echo "  ○ $name — skipped ($reason)"
+  SKIP=$((SKIP + 1))
+}
+
 echo "Smoke test: $BASE"
 echo ""
 
@@ -32,20 +41,26 @@ STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$BASE/claude-sess
 STATUS="${STATUS:-000}"
 check "Main page responds" "$STATUS" "200"
 
-# 2. Sessions API returns data
+# 2. Sessions API returns valid response (may be empty on fresh install)
 echo "2. Sessions API"
 SESSIONS_JSON=$(curl -s --max-time 10 "$BASE/api/sessions?limit=3&include_remote=false" 2>/dev/null || echo '{}')
-SESSION_COUNT=$(echo "$SESSIONS_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('sessions',[])))" 2>/dev/null || echo "0")
-TOTAL=$(echo "$SESSIONS_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('total',0))" 2>/dev/null || echo "0")
-check "Sessions returned ($SESSION_COUNT)" "$SESSION_COUNT" "^[1-9]"
-check "Total count > 0 ($TOTAL)" "$TOTAL" "^[1-9]"
+SESSION_COUNT=$(echo "$SESSIONS_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('sessions',[])))" 2>/dev/null || echo "ERR")
+TOTAL=$(echo "$SESSIONS_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('total',0))" 2>/dev/null || echo "ERR")
+# API must return valid JSON with sessions array — count can be 0
+check "Sessions API responds ($SESSION_COUNT sessions, $TOTAL total)" "$SESSION_COUNT" "^[0-9]"
 
-# 3. Pick top session — verify detail loads with messages
+# 3. Pick top session — verify detail loads with messages (skip if empty)
 echo "3. Session detail"
-TOP_SESSION=$(echo "$SESSIONS_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['sessions'][0]['session_id'])" 2>/dev/null || echo "")
+TOP_SESSION=$(echo "$SESSIONS_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); ss=d.get('sessions',[]); print(ss[0]['session_id'] if ss else '')" 2>/dev/null || echo "")
 if [ -z "$TOP_SESSION" ]; then
-  echo "  ✗ No session to test"
-  ((FAIL++))
+  skip "Session detail" "no sessions yet (clean install)"
+  skip "MD content" "no sessions"
+  skip "MD total_messages" "no sessions"
+  skip "MD has_earlier" "no sessions"
+  skip "Session title" "no sessions"
+  skip "Summary endpoint" "no sessions"
+  skip "Learnings endpoint" "no sessions"
+  skip "Session page HTML" "no sessions"
 else
   DETAIL_JSON=$(curl -s --max-time 10 "$BASE/api/sessions/$TOP_SESSION" 2>/dev/null || echo '{}')
   MSG_TOTAL=$(echo "$DETAIL_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('messages_total',0))" 2>/dev/null || echo "0")
@@ -84,22 +99,29 @@ print(t[:80] if t else 'EMPTY')
   # 200 = cached or freshly generated, 400 = meta session (also OK)
   check "Learnings endpoint responds ($LEARN_STATUS)" "$LEARN_STATUS" "^[24]0[0]$"
 
-  # 7. Settings API
-  echo "7. Settings"
-  SETTINGS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BASE/api/settings" 2>/dev/null)
-  SETTINGS_STATUS="${SETTINGS_STATUS:-000}"
-  check "Settings API responds ($SETTINGS_STATUS)" "$SETTINGS_STATUS" "200"
-
-  # 8. HTML page contains session data (not just empty shell)
-  echo "8. HTML content check"
+  # 7. HTML page contains session data (not just empty shell)
+  echo "7. Session page HTML"
   HTML=$(curl -s --max-time 10 "$BASE/claude-sessions/$TOP_SESSION" 2>/dev/null || echo "")
   HTML_SIZE=${#HTML}
   check "Session page HTML has content ($HTML_SIZE bytes)" "$HTML_SIZE" "^[1-9]"
+fi
 
-  # 9. Client-side JS smoke test (catches React hydration errors like #310)
-  echo "9. Client JS check"
-  if command -v node >/dev/null 2>&1; then
-    JS_ERRORS=$(node -e "
+# 8. Settings API (always works, even on fresh install)
+echo "8. Settings"
+SETTINGS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BASE/api/settings" 2>/dev/null)
+SETTINGS_STATUS="${SETTINGS_STATUS:-000}"
+check "Settings API responds ($SETTINGS_STATUS)" "$SETTINGS_STATUS" "200"
+
+# 9. Health API
+echo "9. Health"
+HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BASE/api/health" 2>/dev/null)
+HEALTH_STATUS="${HEALTH_STATUS:-000}"
+check "Health API responds ($HEALTH_STATUS)" "$HEALTH_STATUS" "200"
+
+# 10. Client-side JS smoke test (catches React hydration errors)
+echo "10. Client JS check"
+if command -v node >/dev/null 2>&1; then
+  JS_ERRORS=$(node -e "
 const http = require('http');
 const url = '$BASE/claude-sessions';
 // Fetch all JS chunks referenced in the page
@@ -117,20 +139,23 @@ http.get(url, res => {
   });
 });
 " 2>/dev/null || echo "NODE_FAILED")
-    check "No error boundary in HTML, JS chunks present ($JS_ERRORS)" "$JS_ERRORS" "^OK:"
-  else
-    echo "  - skipped (node not found)"
-  fi
+  check "No error boundary in HTML, JS chunks present ($JS_ERRORS)" "$JS_ERRORS" "^OK:"
+else
+  skip "Client JS check" "node not found"
 fi
 
 # Summary
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 if [ "$FAIL" -eq 0 ]; then
-  echo "✓ All $PASS checks passed"
+  if [ "$SKIP" -gt 0 ]; then
+    echo "✓ All $PASS checks passed, $SKIP skipped (clean install)"
+  else
+    echo "✓ All $PASS checks passed"
+  fi
   exit 0
 else
-  echo "✗ $FAIL failed, $PASS passed"
+  echo "✗ $FAIL failed, $PASS passed, $SKIP skipped"
   echo -e "\nFailed checks:\n$ERRORS"
   exit 1
 fi

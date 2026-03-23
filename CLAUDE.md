@@ -18,6 +18,35 @@ npm run build        # production build
 npm run start        # production server (http://localhost:3000)
 ```
 
+## macOS quick start
+
+Prerequisites: **Node.js 18+** (20+ recommended), **Git**.
+
+```bash
+git clone https://github.com/Chill-AI-Space/claude-session-manager.git
+cd claude-session-manager
+npm install
+npm run build
+npm run start
+```
+
+Open http://localhost:3000/claude-sessions in a browser.
+
+Optional extras:
+- **Claude CLI** (`npm i -g @anthropic-ai/claude-code`) — needed to start/reply to sessions from the UI
+- **ripgrep** (`brew install ripgrep`) — faster text search across sessions
+- **Gemini API key** — free at https://aistudio.google.com/apikey, add `GEMINI_API_KEY=your_key` to `.env.local` for AI-powered search
+
+After starting, go to **Settings → System Setup** to see which components are detected and what's missing.
+
+### Smoke test
+
+```bash
+scripts/smoke-test.sh
+```
+
+Works on both fresh installs (0 sessions) and populated instances. On clean install, data-dependent checks are skipped gracefully.
+
 ## Windows setup (one-click)
 
 Prerequisites: **Node.js 18+** (https://nodejs.org). Git optional (can download zip).
