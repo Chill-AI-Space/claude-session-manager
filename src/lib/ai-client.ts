@@ -14,24 +14,57 @@ function detectProvider(model: string): Provider {
   return "openai"; // gpt-*, o1-*, o3-*, o4-*, etc.
 }
 
+const SETTING_KEY: Record<Provider, string> = {
+  openai: "openai_api_key",
+  anthropic: "anthropic_api_key",
+  google: "google_ai_api_key",
+};
+
+const ENV_KEY: Record<Provider, string> = {
+  openai: "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  google: "GOOGLE_AI_API_KEY",
+};
+
+/** Fallback models when the requested provider's key is missing (ordered by preference) */
+const FALLBACK_MODEL: Record<Provider, [Provider, string][]> = {
+  openai: [["google", "gemini-2.5-flash"], ["anthropic", "claude-haiku-3-5-20241022"]],
+  google: [["openai", "gpt-4o-mini"], ["anthropic", "claude-haiku-3-5-20241022"]],
+  anthropic: [["google", "gemini-2.5-flash"], ["openai", "gpt-4o-mini"]],
+};
+
+function hasApiKey(provider: Provider): boolean {
+  return !!(getSetting(SETTING_KEY[provider]) || process.env[ENV_KEY[provider]]);
+}
+
 function getApiKey(provider: Provider): string {
-  const settingKey: Record<Provider, string> = {
-    openai: "openai_api_key",
-    anthropic: "anthropic_api_key",
-    google: "google_ai_api_key",
-  };
-  const envKey: Record<Provider, string> = {
-    openai: "OPENAI_API_KEY",
-    anthropic: "ANTHROPIC_API_KEY",
-    google: "GOOGLE_AI_API_KEY",
-  };
-  const key = getSetting(settingKey[provider]) || process.env[envKey[provider]];
+  const key = getSetting(SETTING_KEY[provider]) || process.env[ENV_KEY[provider]];
   if (!key) {
     throw new Error(
-      `No API key configured for ${provider}. Set "${settingKey[provider]}" in Settings or ${envKey[provider]} env var.`
+      `No API key configured for ${provider}. Set "${SETTING_KEY[provider]}" in Settings or ${ENV_KEY[provider]} env var.`
     );
   }
   return key;
+}
+
+/**
+ * If the requested model's provider has no API key, try to find
+ * a fallback provider that does have a key configured.
+ * Returns { model, provider } — possibly different from input.
+ */
+function resolveWithFallback(model: string): { model: string; provider: Provider } {
+  const provider = detectProvider(model);
+  if (hasApiKey(provider)) return { model, provider };
+
+  // Try fallbacks in preference order
+  for (const [fbProvider, fbModel] of FALLBACK_MODEL[provider]) {
+    if (hasApiKey(fbProvider)) {
+      return { model: fbModel, provider: fbProvider };
+    }
+  }
+
+  // No fallback available — will throw in getApiKey
+  return { model, provider };
 }
 
 // ── Model context window limits (tokens) ─────────────────────────────────────
@@ -46,7 +79,7 @@ const CONTEXT_LIMITS: Record<string, number> = {
   "o4-mini": 200_000,
   "gpt-5": 200_000, // conservative estimate
   // Anthropic
-  "claude-sonnet-4-5-20250514": 200_000,
+  "claude-sonnet-4-6": 200_000,
   "claude-haiku-3-5-20241022": 200_000,
   // Google
   "gemini-2.5-flash": 1_000_000,
@@ -86,17 +119,17 @@ export interface CompletionResult {
  * Returns the assistant's text response.
  */
 export async function completion(opts: CompletionOptions): Promise<CompletionResult> {
-  const { model, systemPrompt, userPrompt, maxTokens = 4096, temperature = 0.3 } = opts;
-  const provider = detectProvider(model);
-  const apiKey = getApiKey(provider);
+  const { model: requestedModel, systemPrompt, userPrompt, maxTokens = 4096, temperature = 0.3 } = opts;
+  const resolved = resolveWithFallback(requestedModel);
+  const apiKey = getApiKey(resolved.provider);
 
-  switch (provider) {
+  switch (resolved.provider) {
     case "openai":
-      return callOpenAI(apiKey, model, systemPrompt, userPrompt, maxTokens, temperature);
+      return callOpenAI(apiKey, resolved.model, systemPrompt, userPrompt, maxTokens, temperature);
     case "anthropic":
-      return callAnthropic(apiKey, model, systemPrompt, userPrompt, maxTokens, temperature);
+      return callAnthropic(apiKey, resolved.model, systemPrompt, userPrompt, maxTokens, temperature);
     case "google":
-      return callGoogle(apiKey, model, systemPrompt, userPrompt, maxTokens, temperature);
+      return callGoogle(apiKey, resolved.model, systemPrompt, userPrompt, maxTokens, temperature);
   }
 }
 
