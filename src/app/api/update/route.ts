@@ -82,22 +82,23 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        // Step 1: git pull
+        // Step 1: fetch + hard reset (handles dirty files from linters)
         send("step", { step: 1, total: 4, label: "Pulling latest code..." });
-        const pull = await runStep("git", ["pull", "--ff-only", "origin", "main"], PROJECT_ROOT);
-        if (pull.code !== 0) {
-          send("error", { step: 1, message: "git pull failed", output: pull.output });
+        const oldHead = (await runStep("git", ["rev-parse", "--short", "HEAD"], PROJECT_ROOT)).output.trim();
+        const fetchResult = await runStep("git", ["fetch", "origin", "main"], PROJECT_ROOT);
+        if (fetchResult.code !== 0) {
+          send("error", { step: 1, message: "git fetch failed", output: fetchResult.output });
           controller.close();
           return;
         }
-        const alreadyUpToDate = pull.output.includes("Already up to date");
-        send("step_done", { step: 1, output: pull.output.trim().split("\n").slice(-2).join("\n") });
-
-        if (alreadyUpToDate) {
+        const newHead = (await runStep("git", ["rev-parse", "--short", "origin/main"], PROJECT_ROOT)).output.trim();
+        if (oldHead === newHead) {
           send("done", { message: "Already up to date", restarting: false });
           controller.close();
           return;
         }
+        await runStep("git", ["reset", "--hard", "origin/main"], PROJECT_ROOT);
+        send("step_done", { step: 1, output: `${oldHead} → ${newHead}` });
 
         // Step 2: npm install (check if package.json or package-lock.json changed)
         if (!skipInstall) {
