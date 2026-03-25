@@ -61,10 +61,37 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
       .catch(() => {});
   }, []);
 
+  function pollUntilServerReturns() {
+    setUpdateStatus("restarting");
+    setUpdateStep("Restarting server...");
+    setUpdatesAvailable(false);
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      try {
+        const r = await fetch("/api/health", { signal: AbortSignal.timeout(2000) });
+        if (r.ok) {
+          clearInterval(poll);
+          setUpdateStatus("done");
+          setUpdateStep("Updated!");
+          setTimeout(() => window.location.reload(), 1500);
+        }
+      } catch {
+        if (attempts > 60) {
+          clearInterval(poll);
+          setUpdateStatus("error");
+          setUpdateStep("Server didn't come back");
+        }
+      }
+    }, 2000);
+  }
+
   async function triggerUpdate() {
     if (updateStatus === "updating" || updateStatus === "restarting") return;
     setUpdateStatus("updating");
     setUpdateStep("Starting...");
+    let lastStep = 0;
+    let gotDone = false;
     try {
       const res = await fetch("/api/update", { method: "POST" });
       const reader = res.body?.getReader();
@@ -85,39 +112,17 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
           const data = JSON.parse(dataMatch[1]);
           if (event === "step") {
             setUpdateStep(data.label);
+            if (data.step) lastStep = data.step;
+          } else if (event === "step_done") {
+            if (data.step) lastStep = data.step;
           } else if (event === "error") {
             setUpdateStatus("error");
             setUpdateStep(data.message);
             return;
           } else if (event === "done") {
+            gotDone = true;
             if (data.restarting) {
-              setUpdateStatus("restarting");
-              setUpdateStep("Restarting server...");
-              setUpdatesAvailable(false);
-              // Poll until the server comes back
-              let attempts = 0;
-              const poll = setInterval(async () => {
-                attempts++;
-                try {
-                  const r = await fetch("/api/health", { signal: AbortSignal.timeout(2000) });
-                  if (r.ok) {
-                    clearInterval(poll);
-                    setUpdateStatus("done");
-                    setUpdateStep("Updated!");
-                    setTimeout(() => {
-                      setUpdateStatus("idle");
-                      setUpdateStep("");
-                      window.location.reload();
-                    }, 1500);
-                  }
-                } catch {
-                  if (attempts > 30) {
-                    clearInterval(poll);
-                    setUpdateStatus("error");
-                    setUpdateStep("Server didn't come back");
-                  }
-                }
-              }, 2000);
+              pollUntilServerReturns();
             } else {
               // "Already up to date"
               setUpdateStatus("done");
@@ -128,10 +133,22 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
           }
         }
       }
-    } catch (err) {
-      setUpdateStatus("error");
-      setUpdateStep((err as Error).message);
-      setTimeout(() => { setUpdateStatus("idle"); setUpdateStep(""); }, 5000);
+      // Stream ended cleanly but we never got "done" — build likely completed, server restarting
+      if (!gotDone && lastStep >= 3) {
+        pollUntilServerReturns();
+      }
+    } catch {
+      // Stream broke — if we got past the build step, assume server is restarting
+      if (lastStep >= 3) {
+        pollUntilServerReturns();
+      } else if (lastStep >= 1) {
+        // Pull happened but build/restart unclear — try polling anyway
+        pollUntilServerReturns();
+      } else {
+        setUpdateStatus("error");
+        setUpdateStep("Connection lost");
+        setTimeout(() => { setUpdateStatus("idle"); setUpdateStep(""); }, 5000);
+      }
     }
   }
 
