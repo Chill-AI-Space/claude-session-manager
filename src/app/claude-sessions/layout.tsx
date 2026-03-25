@@ -9,7 +9,7 @@ import { SessionListItem, ProjectListItem } from "@/lib/types";
 import {
   RefreshCw, Loader2, PanelLeft, PanelLeftClose, Sparkles,
   Settings, Package, BarChart2, Archive, CircleHelp, ClipboardList,
-  Sun, Moon, Plus,
+  Sun, Moon, Plus, Download, Check, AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,93 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   const [titlesGenerated, setTitlesGenerated] = useState<number | null>(null);
   const initialLoadDone = useRef(false);
   const sessionsRef = useRef(sessions);
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "updating" | "done" | "error" | "restarting">("idle");
+  const [updateStep, setUpdateStep] = useState("");
+  const [updatesAvailable, setUpdatesAvailable] = useState(false);
+
+  // Check for updates on mount (silent background check)
+  useEffect(() => {
+    fetch("/api/update")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.updates_available) setUpdatesAvailable(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function triggerUpdate() {
+    if (updateStatus === "updating" || updateStatus === "restarting") return;
+    setUpdateStatus("updating");
+    setUpdateStep("Starting...");
+    try {
+      const res = await fetch("/api/update", { method: "POST" });
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No stream");
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n\n");
+        buf = lines.pop() || "";
+        for (const block of lines) {
+          const eventMatch = block.match(/^event: (\w+)/);
+          const dataMatch = block.match(/^data: (.+)$/m);
+          if (!eventMatch || !dataMatch) continue;
+          const event = eventMatch[1];
+          const data = JSON.parse(dataMatch[1]);
+          if (event === "step") {
+            setUpdateStep(data.label);
+          } else if (event === "error") {
+            setUpdateStatus("error");
+            setUpdateStep(data.message);
+            return;
+          } else if (event === "done") {
+            if (data.restarting) {
+              setUpdateStatus("restarting");
+              setUpdateStep("Restarting server...");
+              setUpdatesAvailable(false);
+              // Poll until the server comes back
+              let attempts = 0;
+              const poll = setInterval(async () => {
+                attempts++;
+                try {
+                  const r = await fetch("/api/health", { signal: AbortSignal.timeout(2000) });
+                  if (r.ok) {
+                    clearInterval(poll);
+                    setUpdateStatus("done");
+                    setUpdateStep("Updated!");
+                    setTimeout(() => {
+                      setUpdateStatus("idle");
+                      setUpdateStep("");
+                      window.location.reload();
+                    }, 1500);
+                  }
+                } catch {
+                  if (attempts > 30) {
+                    clearInterval(poll);
+                    setUpdateStatus("error");
+                    setUpdateStep("Server didn't come back");
+                  }
+                }
+              }, 2000);
+            } else {
+              // "Already up to date"
+              setUpdateStatus("done");
+              setUpdateStep(data.message);
+              setUpdatesAvailable(false);
+              setTimeout(() => { setUpdateStatus("idle"); setUpdateStep(""); }, 3000);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      setUpdateStatus("error");
+      setUpdateStep((err as Error).message);
+      setTimeout(() => { setUpdateStatus("idle"); setUpdateStep(""); }, 5000);
+    }
+  }
 
   useEffect(() => {
     const saved = localStorage.getItem("theme") as "light" | "dark" | null;
@@ -351,6 +438,49 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
                     New
                   </Button>
                 </Link>
+                <Button
+                  size="sm"
+                  onClick={triggerUpdate}
+                  disabled={updateStatus === "updating" || updateStatus === "restarting"}
+                  title={
+                    updateStatus === "updating" ? updateStep :
+                    updateStatus === "restarting" ? "Restarting server..." :
+                    updateStatus === "done" ? updateStep :
+                    updateStatus === "error" ? updateStep :
+                    updatesAvailable ? "Update available — click to install" :
+                    "Check for updates"
+                  }
+                  className={cn(
+                    "h-5 px-1.5 text-[11px] border bg-transparent rounded relative",
+                    updateStatus === "error"
+                      ? "border-red-500 text-red-500 hover:bg-red-500/10"
+                      : updateStatus === "done"
+                      ? "border-emerald-600 text-emerald-600 hover:bg-emerald-600/10"
+                      : updatesAvailable
+                      ? "border-blue-500 text-blue-500 hover:bg-blue-500/10 animate-pulse"
+                      : "border-muted-foreground/30 text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/50"
+                  )}
+                >
+                  {updateStatus === "updating" || updateStatus === "restarting" ? (
+                    <Loader2 className="h-3 w-3 mr-0.5 animate-spin" />
+                  ) : updateStatus === "done" ? (
+                    <Check className="h-3 w-3 mr-0.5" />
+                  ) : updateStatus === "error" ? (
+                    <AlertCircle className="h-3 w-3 mr-0.5" />
+                  ) : (
+                    <>
+                      <Download className="h-3 w-3 mr-0.5" />
+                      {updatesAvailable && (
+                        <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-blue-500" />
+                      )}
+                    </>
+                  )}
+                  {updateStatus === "updating" ? "Updating" :
+                   updateStatus === "restarting" ? "Restarting" :
+                   updateStatus === "done" ? "Done" :
+                   updateStatus === "error" ? "Error" :
+                   "Update"}
+                </Button>
               </div>
               <Button
                 variant="ghost"

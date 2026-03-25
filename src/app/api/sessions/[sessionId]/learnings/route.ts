@@ -19,7 +19,8 @@ Return a JSON object with these categories (use empty arrays if nothing fits):
   "bugs_fixed": ["Bugs discovered and how they were fixed — include root cause"],
   "tools_learned": ["New tools, commands, APIs, or techniques discovered"],
   "preferences": ["User preferences for workflow, communication, or code style"],
-  "gotchas": ["Pitfalls, edge cases, or 'things that don't work as expected'"]
+  "gotchas": ["Pitfalls, edge cases, or 'things that don't work as expected'"],
+  "prompt_coaching": ["Analysis of user prompts — what was suboptimal and how to prompt better. Format each item as: '❌ What user did → ✅ Better approach'. Focus on: vague instructions that caused confusion, missing context that led to wrong assumptions, overly long prompts that could be shorter, cases where user could have given an example or constraint upfront, unnecessary back-and-forth that a better initial prompt would have avoided"]
 }
 
 Rules:
@@ -27,6 +28,7 @@ Rules:
 - For discoveries: focus on paradigm shifts — what changed and why the new way is better
 - For friction_loops: detecting miscommunication patterns is the value — what caused the loop and what finally resolved it
 - For claude_md_rules, write them as direct instructions (e.g. "Always use X when doing Y")
+- For prompt_coaching: be constructive, not critical. Show the concrete prompt that would have worked better. Only flag patterns that genuinely wasted time or caused misunderstanding — skip nitpicks
 - Skip trivial items — only include things worth remembering
 - Keep each item to 1-2 sentences max
 - Write in the same language the user used in the session

@@ -128,7 +128,7 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
   handleSendRef.current = handleSend;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && (e.metaKey || e.altKey)) {
       e.preventDefault();
       handleSend();
     }
@@ -187,7 +187,7 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
               ? customPlaceholder
               : queueSize > 0
                 ? `${queueSize} queued — type next...`
-                : "Reply to Claude…"
+                : "Reply to Claude… (⌘Enter to send)"
           }
           rows={16}
           className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"

@@ -206,6 +206,7 @@ export function buildCliArgs(opts: {
   sessionId?: string;
   message: string;
   includeMaxTurns?: boolean;
+  model?: string;
 }): string[] {
   const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
   const effort = getSetting("effort_level") || "high";
@@ -219,6 +220,9 @@ export function buildCliArgs(opts: {
   args.push("--output-format", "stream-json");
   args.push("--verbose");
   args.push("--effort", effort);
+
+  const model = opts.model || getSetting("claude_model") || "claude-sonnet-4-6";
+  args.push("--model", model);
 
   if (opts.includeMaxTurns !== false && opts.sessionId) {
     const maxTurns = getSetting("max_turns") || "80";
@@ -587,9 +591,9 @@ class SessionOrchestrator extends EventEmitter {
    * @param correlationId — optional client-generated ID for end-to-end tracking
    * @param verbose — when true, emit extra debug events (tool inputs, tokens, thinking)
    */
-  start(projectPath: string, message: string, correlationId?: string, verbose = false): ReadableStream {
+  start(projectPath: string, message: string, correlationId?: string, verbose = false, model?: string): ReadableStream {
     let sessionId: string | null = null;
-    const args = buildCliArgs({ message });
+    const args = buildCliArgs({ message, model });
     const spawnedAt = Date.now();
 
     if (correlationId) {
@@ -1115,8 +1119,9 @@ class SessionOrchestrator extends EventEmitter {
     const shellCmd = `cd ${JSON.stringify(session.project_path)} && ${claudePath} --resume ${sessionId} --dangerously-skip-permissions -p "You were waiting for tool permission approval but nobody was there to approve. I've restarted you with full permissions. Continue your task where you left off."`;
 
     try {
-      const { terminal } = await openInTerminal(shellCmd);
-      logAction("service", "permission_wait_done", `terminal:${terminal}`, sessionId);
+      const autoClose = getSetting("auto_close_escalation_terminals") !== "false";
+      const { terminal } = await openInTerminal(shellCmd, { autoClose });
+      logAction("service", "permission_wait_done", `terminal:${terminal}${autoClose ? ",autoClose" : ""}`, sessionId);
       this.transition(sessionId, "running");
     } catch (err) {
       logAction("service", "permission_wait_failed", `${err}`, sessionId);
@@ -1144,8 +1149,9 @@ class SessionOrchestrator extends EventEmitter {
     const shellCmd = `cd ${JSON.stringify(session.project_path)} && ${claudePath} --resume ${sessionId} --dangerously-skip-permissions -p "check access again please"`;
 
     try {
-      const { terminal } = await openInTerminal(shellCmd);
-      logAction("service", "permission_escalation_done", `terminal:${terminal}`, sessionId);
+      const autoClose = getSetting("auto_close_escalation_terminals") !== "false";
+      const { terminal } = await openInTerminal(shellCmd, { autoClose });
+      logAction("service", "permission_escalation_done", `terminal:${terminal}${autoClose ? ",autoClose" : ""}`, sessionId);
     } catch (err) {
       logAction("service", "permission_escalation_failed", `${err}`, sessionId);
     }

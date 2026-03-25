@@ -214,6 +214,7 @@ export default function SessionDetailPage({
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [startingNewSession, setStartingNewSession] = useState(false);
+  const [newSessionModel, setNewSessionModel] = useState("");
   const [showNewSessionOpts, setShowNewSessionOpts] = useState(false);
   const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
   const [newSessionMessage, setNewSessionMessage] = useState("");
@@ -394,9 +395,15 @@ export default function SessionDetailPage({
     };
   }, [sessionId, fetchSession]);
 
-  // Auto-poll for new messages when session is active in terminal (not via web)
+  // Auto-poll for new messages when session is active in terminal (not via web).
+  // During streaming, poll at a slower rate just for liveness detection so the
+  // watchdog can notice when the session process dies.
   useEffect(() => {
-    if (!data?.is_active || isStreaming) return;
+    if (isStreaming) {
+      const id = setInterval(() => { fetchSession().catch(() => {}); }, 10_000);
+      return () => clearInterval(id);
+    }
+    if (!data?.is_active) return;
     const id = setInterval(() => { fetchSession().catch(() => {}); }, 2000);
     return () => clearInterval(id);
   }, [data?.is_active, isStreaming, fetchSession]);
@@ -576,15 +583,19 @@ export default function SessionDetailPage({
   useEffect(() => {
     if (!isStreaming) return;
 
-    // Case 1: session went inactive with no streaming text — stream died
-    if (!streamingText && !data?.is_active) {
+    // Case 1: session went inactive — process is dead, stream should close soon.
+    // Short grace period: 3s if no text yet (stream died immediately),
+    // 5s if text exists (process died mid-response, give time for stream to flush).
+    if (data && !data.is_active) {
+      const delay = streamingText ? 5000 : 3000;
       const timer = setTimeout(() => {
         setIsStreaming(false);
         setStreamingText("");
         setStreamStatus(null);
         processingRef.current = false;
         setQueuedMessages([...queueRef.current]);
-      }, 3000);
+        fetchSession({ clearExtras: true }).catch(() => {});
+      }, delay);
       return () => clearTimeout(timer);
     }
 
@@ -1089,7 +1100,7 @@ export default function SessionDetailPage({
       const res = await fetch(startUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: newSessionPath, message: fullMessage }),
+        body: JSON.stringify({ path: newSessionPath, message: fullMessage, ...(newSessionModel && { model: newSessionModel }) }),
       });
 
       if (!res.ok) throw new Error("Failed to start session");
@@ -1442,6 +1453,7 @@ export default function SessionDetailPage({
                     { key: "tools_learned", label: "Tools Learned", single: false },
                     { key: "preferences", label: "Preferences", single: false },
                     { key: "gotchas", label: "Gotchas", single: false },
+                    { key: "prompt_coaching", label: "Prompt Coaching", single: false },
                   ];
                   return (
                     <div className="space-y-2.5">
@@ -1782,6 +1794,7 @@ export default function SessionDetailPage({
                 <span className="text-[10px] text-amber-600 dark:text-amber-400">{focusError}</span>
               )}
             </div>
+
 
             {/* Actions: fold / download / share */}
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -2172,6 +2185,16 @@ export default function SessionDetailPage({
                     <AlertTriangle className="h-3 w-3 text-amber-500" />
                   )}
                 </label>
+                <select
+                  value={newSessionModel}
+                  onChange={(e) => setNewSessionModel(e.target.value)}
+                  className="text-[11px] px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground hover:border-violet-500/30 cursor-pointer max-w-[110px]"
+                  title="Model for new session"
+                >
+                  <option value="">Opus 4.6</option>
+                  <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+                  <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+                </select>
 
                 <div className="flex-1" />
 

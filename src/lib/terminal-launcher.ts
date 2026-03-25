@@ -3,6 +3,12 @@ import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
 
+export interface TerminalOptions {
+  cwd?: string;
+  /** Auto-close the terminal window when the command finishes (macOS only) */
+  autoClose?: boolean;
+}
+
 /** Wrap string for AppleScript */
 function asString(s: string): string {
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -24,13 +30,16 @@ function hasBinary(name: string): boolean {
  * Supports macOS (iTerm2/Terminal.app), Windows (Windows Terminal/cmd.exe), and Linux (common terminals).
  * Returns which terminal was used.
  */
-export async function openInTerminal(shellCmd: string, cwd?: string): Promise<{ terminal: string }> {
+export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | string): Promise<{ terminal: string }> {
+  // Backwards compat: old signature was (shellCmd, cwd?)
+  const options: TerminalOptions = typeof opts === "string" ? { cwd: opts } : (opts ?? {});
+
   if (process.platform === "win32") {
-    return openInWindowsTerminal(shellCmd, cwd);
+    return openInWindowsTerminal(shellCmd, options.cwd);
   }
 
   if (process.platform === "linux") {
-    return openInLinuxTerminal(shellCmd, cwd);
+    return openInLinuxTerminal(shellCmd, options.cwd);
   }
 
   if (process.platform !== "darwin") {
@@ -46,6 +55,10 @@ export async function openInTerminal(shellCmd: string, cwd?: string): Promise<{ 
     useIterm = stdout.trim() === "true";
   } catch {
     // iTerm2 not available
+  }
+
+  if (options.autoClose) {
+    return openMacAutoClose(shellCmd, useIterm);
   }
 
   const script = useIterm
@@ -67,6 +80,76 @@ export async function openInTerminal(shellCmd: string, cwd?: string): Promise<{ 
 
   await execFileAsync("osascript", ["-e", script]);
   return { terminal: useIterm ? "iTerm2" : "Terminal" };
+}
+
+/**
+ * Open command in terminal and auto-close the window when it finishes.
+ * Runs a background osascript that polls the tab and closes it when done.
+ */
+function openMacAutoClose(shellCmd: string, useIterm: boolean): Promise<{ terminal: string }> {
+  // Append "; exit" so the shell exits when the command finishes
+  const cmdWithExit = shellCmd + " ; exit";
+
+  const script = useIterm
+    ? [
+        'tell application "iTerm2"',
+        "  activate",
+        "  set newWindow to (create window with default profile)",
+        "  tell current session of newWindow",
+        `    write text ${asString(cmdWithExit)}`,
+        "  end tell",
+        "end tell",
+        "",
+        "-- Poll until session ends, then close window",
+        "repeat",
+        "  delay 10",
+        "  try",
+        '    tell application "iTerm2"',
+        "      if newWindow is not in windows then exit repeat",
+        "      tell current session of newWindow",
+        "        if (is at shell prompt) then",
+        "          close newWindow",
+        "          exit repeat",
+        "        end if",
+        "      end tell",
+        "    end tell",
+        "  on error",
+        "    exit repeat",
+        "  end try",
+        "end repeat",
+      ].join("\n")
+    : [
+        'tell application "Terminal"',
+        "  activate",
+        `  set theTab to do script ${asString(cmdWithExit)}`,
+        "end tell",
+        "",
+        "-- Poll until tab is no longer busy, then close its window",
+        "repeat",
+        "  delay 10",
+        "  try",
+        '    tell application "Terminal"',
+        "      if not (exists theTab) then exit repeat",
+        "      if not (busy of theTab) then",
+        "        set theWindow to (first window whose tabs contains theTab)",
+        "        close theWindow",
+        "        exit repeat",
+        "      end if",
+        "    end tell",
+        "  on error",
+        "    exit repeat",
+        "  end try",
+        "end repeat",
+      ].join("\n");
+
+  // Run in background — don't block the caller
+  const proc = spawn("osascript", ["-e", script], {
+    detached: true,
+    stdio: "ignore",
+  });
+  proc.unref();
+
+  return Promise.resolve({ terminal: useIterm ? "iTerm2" : "Terminal" });
 }
 
 async function openInWindowsTerminal(shellCmd: string, cwd?: string): Promise<{ terminal: string }> {

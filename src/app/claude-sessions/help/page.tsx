@@ -205,8 +205,8 @@ C:\Users\name\AppData\Roaming\npm</Block>
               { keys: ["Esc"], description: "Stop Claude response (cancel streaming)" },
               { keys: ["⌘L"], description: "Focus reply input" },
               { keys: ["⌘K"], description: "Clear extra messages from view" },
-              { keys: ["Enter"], description: "Send message" },
-              { keys: ["⇧Enter"], description: "New line in message" },
+              { keys: ["⌘Enter"], description: "Send message" },
+              { keys: ["Enter / ⇧Enter"], description: "New line in message" },
             ]},
             { group: "Tips", items: [
               { keys: ["Drop file"], description: "Drag a file into reply box → inserts server path" },

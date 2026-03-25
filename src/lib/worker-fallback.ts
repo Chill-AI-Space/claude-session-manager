@@ -111,7 +111,7 @@ async function callAIFallback(task: WorkerTaskRow): Promise<string | null> {
   }
 
   const useVertex = getSetting("worker_fallback_use_vertex") === "true";
-  const model = getSetting("worker_fallback_model") || "claude-sonnet-4-5-20250514";
+  const model = getSetting("worker_fallback_model") || "claude-sonnet-4-6";
 
   let url: string;
   const headers: Record<string, string> = { "content-type": "application/json" };

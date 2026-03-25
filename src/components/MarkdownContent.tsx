@@ -4,7 +4,7 @@ import { memo, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import { FolderOpen, Check, Maximize2, X, Copy } from "lucide-react";
+import { FolderOpen, Check, Maximize2, X, Copy, ExternalLink } from "lucide-react";
 
 interface MarkdownContentProps {
   content: string;
@@ -37,6 +37,111 @@ function isFilePath(text: string): boolean {
   const t = text.trim();
   if (!t || t.includes(" ") || t.startsWith("http")) return false;
   return FILE_PATH_RE.test(t);
+}
+
+/**
+ * Pre-process markdown to auto-link bare URLs that remark-gfm misses.
+ * Skips URLs already inside markdown link syntax, code blocks, and inline code.
+ */
+function linkifyUrls(md: string): string {
+  const lines = md.split("\n");
+  let inFencedBlock = false;
+  const result: string[] = [];
+
+  for (const line of lines) {
+    // Track fenced code blocks
+    if (/^```/.test(line.trimStart())) {
+      inFencedBlock = !inFencedBlock;
+      result.push(line);
+      continue;
+    }
+    if (inFencedBlock) {
+      result.push(line);
+      continue;
+    }
+
+    // Replace bare URLs in text lines, but skip:
+    // - URLs already in [text](url) or <url> syntax
+    // - URLs inside inline code `backticks`
+    // The regex: match http(s):// URLs not preceded by ]( or " or < or `
+    result.push(
+      line.replace(
+        /(?<![(\]<"`])https?:\/\/[^\s<>)\]`"',;]*[^\s<>)\]`"',;.!?:]/g,
+        (url, offset) => {
+          // Check if we're inside backticks on this line
+          const before = line.slice(0, offset);
+          const backtickCount = (before.match(/`/g) || []).length;
+          if (backtickCount % 2 === 1) return url; // inside inline code
+
+          // Check if already part of a markdown link [text](url)
+          if (before.endsWith("](") || before.endsWith("]: ")) return url;
+
+          return `[${url}](${url})`;
+        }
+      )
+    );
+  }
+  return result.join("\n");
+}
+
+/** Check if a URL is relative (not http/https/mailto/tel/# etc) */
+function isRelativeUrl(href: string): boolean {
+  return !/^(https?:|mailto:|tel:|#|data:)/i.test(href);
+}
+
+function LinkWithCopy({ href, children }: { href?: string; children: React.ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const url = href || "";
+
+  // For relative paths (like docs/file.md), don't render as a link — show as file path
+  if (isRelativeUrl(url)) {
+    return (
+      <span className="inline-flex items-center gap-0.5 group/link">
+        <code className="bg-muted px-1.5 py-0.5 rounded text-[13px] font-mono text-blue-500">
+          {children}
+        </code>
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            navigator.clipboard.writeText(url);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+          className="opacity-0 group-hover/link:opacity-100 transition-opacity text-muted-foreground/60 hover:text-foreground ml-0.5"
+          title="Copy path"
+        >
+          {copied ? <Check className="inline h-3 w-3 text-green-500" /> : <Copy className="inline h-3 w-3" />}
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-baseline gap-0.5 group/link">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-500 underline underline-offset-2 decoration-blue-500/40 hover:decoration-blue-500 transition-colors break-all"
+        title={url}
+      >
+        {children}
+      </a>
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          navigator.clipboard.writeText(url);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+        className="opacity-0 group-hover/link:opacity-100 transition-opacity text-muted-foreground/40 hover:text-muted-foreground shrink-0 self-center"
+        title="Copy URL"
+      >
+        {copied ? <Check className="inline h-2.5 w-2.5 text-green-500" /> : <Copy className="inline h-2.5 w-2.5" />}
+      </button>
+    </span>
+  );
 }
 
 function FileLink({ filePath, projectPath }: { filePath: string; projectPath?: string }) {
@@ -204,11 +309,7 @@ function useMarkdownComponents(projectPath?: string, compact?: boolean): Compone
         );
       },
       a({ href, children }) {
-        return (
-          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-            {children}
-          </a>
-        );
+        return <LinkWithCopy href={href}>{children}</LinkWithCopy>;
       },
       table({ children }) { return <TableWrapper>{children}</TableWrapper>; },
       thead({ children }) { return <thead className="bg-muted/60 dark:bg-muted/30">{children}</thead>; },
@@ -245,6 +346,7 @@ const MemoSection = memo(function MemoSection({
   components: Components;
   className: string;
 }) {
+  const linkified = useMemo(() => linkifyUrls(content), [content]);
   return (
     <div className={className}>
       <ReactMarkdown
@@ -252,7 +354,7 @@ const MemoSection = memo(function MemoSection({
         rehypePlugins={[rehypeRaw]}
         components={components}
       >
-        {content}
+        {linkified}
       </ReactMarkdown>
     </div>
   );
@@ -275,6 +377,8 @@ function MarkdownRenderer({ content, projectPath, compact }: MarkdownContentProp
   const components = useMarkdownComponents(projectPath, compact);
   const className = `markdown-body prose prose-sm dark:prose-invert max-w-none prose-code:before:content-none prose-code:after:content-none prose-headings:first:mt-0 prose-blockquote:pl-3 prose-blockquote:border-l-2 prose-blockquote:border-muted-foreground/30 ${compactClasses}`;
 
+  const linkified = useMemo(() => linkifyUrls(content), [content]);
+
   return (
     <div className={className}>
       <ReactMarkdown
@@ -282,7 +386,7 @@ function MarkdownRenderer({ content, projectPath, compact }: MarkdownContentProp
         rehypePlugins={[rehypeRaw]}
         components={components}
       >
-        {content}
+        {linkified}
       </ReactMarkdown>
     </div>
   );

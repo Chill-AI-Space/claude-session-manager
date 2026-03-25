@@ -416,6 +416,10 @@ const SETTING_DEFAULTS: Record<string, string> = {
   permission_check_interval_ms: "180000",
   // Test word: if set and found in last assistant text, triggers permission escalation (for testing)
   permission_escalation_test_word: "",
+  // Auto-close terminal windows after permission escalation completes
+  auto_close_escalation_terminals: "true",
+  // Claude CLI model (used for terminal sessions)
+  claude_model: "claude-sonnet-4-6",
   // Remote relay settings
   relay_enabled: "false",
   relay_node_id: "",
@@ -438,7 +442,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   // Worker integration
   worker_heartbeat_timeout_ms: "300000",
   worker_fallback_enabled: "true",
-  worker_fallback_model: "claude-sonnet-4-5-20250514",
+  worker_fallback_model: "claude-sonnet-4-6",
   worker_fallback_use_vertex: "false",
   worker_fallback_vertex_project: "",
   worker_fallback_vertex_region: "us-east5",
