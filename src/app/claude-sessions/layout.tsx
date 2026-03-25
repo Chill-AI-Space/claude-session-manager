@@ -455,49 +455,43 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
                     New
                   </Button>
                 </Link>
-                <Button
-                  size="sm"
-                  onClick={triggerUpdate}
-                  disabled={updateStatus === "updating" || updateStatus === "restarting"}
-                  title={
-                    updateStatus === "updating" ? updateStep :
-                    updateStatus === "restarting" ? "Restarting server..." :
-                    updateStatus === "done" ? updateStep :
-                    updateStatus === "error" ? updateStep :
-                    updatesAvailable ? "Update available — click to install" :
-                    "Check for updates"
-                  }
-                  className={cn(
-                    "h-5 px-1.5 text-[11px] border bg-transparent rounded relative",
-                    updateStatus === "error"
-                      ? "border-red-500 text-red-500 hover:bg-red-500/10"
-                      : updateStatus === "done"
-                      ? "border-emerald-600 text-emerald-600 hover:bg-emerald-600/10"
-                      : updatesAvailable
-                      ? "border-blue-500 text-blue-500 hover:bg-blue-500/10 animate-pulse"
-                      : "border-muted-foreground/30 text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/50"
-                  )}
-                >
-                  {updateStatus === "updating" || updateStatus === "restarting" ? (
-                    <Loader2 className="h-3 w-3 mr-0.5 animate-spin" />
-                  ) : updateStatus === "done" ? (
-                    <Check className="h-3 w-3 mr-0.5" />
-                  ) : updateStatus === "error" ? (
-                    <AlertCircle className="h-3 w-3 mr-0.5" />
-                  ) : (
-                    <>
+                {(updatesAvailable || updateStatus !== "idle") && (
+                  <Button
+                    size="sm"
+                    onClick={triggerUpdate}
+                    disabled={updateStatus === "updating" || updateStatus === "restarting"}
+                    title={
+                      updateStatus === "updating" ? updateStep :
+                      updateStatus === "restarting" ? "Restarting server..." :
+                      updateStatus === "done" ? updateStep :
+                      updateStatus === "error" ? updateStep :
+                      "Update available — click to install"
+                    }
+                    className={cn(
+                      "h-5 px-1.5 text-[11px] border bg-transparent rounded",
+                      updateStatus === "error"
+                        ? "border-red-500 text-red-500 hover:bg-red-500/10"
+                        : updateStatus === "done"
+                        ? "border-emerald-600 text-emerald-600 hover:bg-emerald-600/10"
+                        : "border-blue-500 text-blue-500 hover:bg-blue-500/10 animate-pulse"
+                    )}
+                  >
+                    {updateStatus === "updating" || updateStatus === "restarting" ? (
+                      <Loader2 className="h-3 w-3 mr-0.5 animate-spin" />
+                    ) : updateStatus === "done" ? (
+                      <Check className="h-3 w-3 mr-0.5" />
+                    ) : updateStatus === "error" ? (
+                      <AlertCircle className="h-3 w-3 mr-0.5" />
+                    ) : (
                       <Download className="h-3 w-3 mr-0.5" />
-                      {updatesAvailable && (
-                        <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-blue-500" />
-                      )}
-                    </>
-                  )}
-                  {updateStatus === "updating" ? "Updating" :
-                   updateStatus === "restarting" ? "Restarting" :
-                   updateStatus === "done" ? "Done" :
-                   updateStatus === "error" ? "Error" :
-                   "Update"}
-                </Button>
+                    )}
+                    {updateStatus === "updating" ? "Updating" :
+                     updateStatus === "restarting" ? "Restarting" :
+                     updateStatus === "done" ? "Done" :
+                     updateStatus === "error" ? "Error" :
+                     "Update"}
+                  </Button>
+                )}
               </div>
               <Button
                 variant="ghost"
