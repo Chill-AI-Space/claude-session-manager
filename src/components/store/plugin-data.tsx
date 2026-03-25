@@ -9,6 +9,7 @@ import type { PluginData } from "./PluginCard";
 import {
   BabysitterSettings,
   ContextTrashSettings,
+  NewSessionFromReplySettings,
   RemoteRelaySettings,
   RemoteNodesSettings,
   SummaryAiSettings,
@@ -102,7 +103,7 @@ export const PLUGINS: PluginData[] = [
     icon: <Cog className="h-5 w-5" />,
     status: "installed",
     settingsComponent: WorkersSettings as React.ComponentType<any>,
-    settingsKeys: ["worker_heartbeat_timeout_ms", "worker_fallback_enabled", "worker_fallback_model"],
+    settingsKeys: ["worker_heartbeat_timeout_ms", "worker_fallback_enabled", "worker_fallback_model", "openai_api_key", "anthropic_api_key", "google_ai_api_key"],
   },
 
   {
@@ -252,6 +253,8 @@ export const PLUGINS: PluginData[] = [
     tags: ["built-in"],
     icon: <MessageSquare className="h-5 w-5" />,
     status: "available",
+    settingsComponent: NewSessionFromReplySettings as React.ComponentType<any>,
+    settingsKeys: ["google_ai_api_key"],
   },
   {
     id: "gated-knowledge",

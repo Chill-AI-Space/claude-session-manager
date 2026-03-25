@@ -37,11 +37,11 @@ export async function POST(
     return Response.json({
       context: transcript,
       method: "full",
-      gemini_configured: !!getSetting("gemini_api_key") || !!process.env.GEMINI_API_KEY,
+      gemini_configured: !!getSetting("google_ai_api_key") || !!process.env.GEMINI_API_KEY || !!process.env.GOOGLE_AI_API_KEY,
     });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY || getSetting("gemini_api_key");
+  const apiKey = getSetting("google_ai_api_key") || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) {
     // Fallback: last messages + first message (more relevant than just first 4000 chars)
     const fallback = smartTruncate(transcript, 4000);

@@ -7,7 +7,7 @@ export async function GET() {
   const settings = getAllSettings();
   return Response.json({
     ...settings,
-    gemini_configured: (process.env.GEMINI_API_KEY || settings.gemini_api_key) ? "true" : "false",
+    gemini_configured: (settings.google_ai_api_key || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) ? "true" : "false",
   });
 }
 

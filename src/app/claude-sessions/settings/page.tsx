@@ -95,7 +95,7 @@ export default function SettingsPage() {
     "macos-permissions": "macos permissions accessibility terminal focus",
     "terminal-integration": "terminal auto kill retry crash continue stall close new session reply",
     "notifications": "notifications sound browser tab badge notify",
-    "deep-search": "deep search vector pre-filter gemini",
+    "deep-search": "deep search vector pre-filter gemini google ai api key",
     "folder-browser": "folder browser start path browse",
     "appearance": "appearance font size scale theme",
     "maintenance": "maintenance title generate regenerate ai titles",

@@ -4,6 +4,7 @@ export { RemoteRelaySettings } from "./RemoteRelaySettings";
 export { RemoteNodesSettings } from "./RemoteNodesSettings";
 export { SummaryAiSettings } from "./SummaryAiSettings";
 export { WorkersSettings } from "./WorkersSettings";
+export { NewSessionFromReplySettings } from "./NewSessionFromReplySettings";
 export { PermissionsSettings } from "./PermissionsSettings";
 export { TerminalSettings } from "./TerminalSettings";
 export { NotificationsSettings } from "./NotificationsSettings";

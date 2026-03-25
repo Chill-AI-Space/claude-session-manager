@@ -24,7 +24,7 @@ export async function GET() {
 
   const claudeOk = checkCommand("claude");
   const rgOk = checkCommand("rg");
-  const geminiOk = !!process.env.GEMINI_API_KEY;
+  const geminiOk = !!(getSetting("google_ai_api_key") || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY);
 
   const sessionsDir = path.join(os.homedir(), ".claude", "projects");
   let sessionsDirOk = false;
@@ -72,7 +72,7 @@ export async function GET() {
         label: "Gemini API Key",
         ok: geminiOk,
         required: false,
-        fix: geminiOk ? null : "Get a free key at https://aistudio.google.com/apikey then add GEMINI_API_KEY=your_key to .env.local",
+        fix: geminiOk ? null : "Get a free key at https://aistudio.google.com/apikey then set it in Settings → Deep Search or Plugin settings → Summary AI",
       },
       {
         id: "ripgrep",

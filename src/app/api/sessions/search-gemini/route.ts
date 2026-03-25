@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDb, getSetting } from "@/lib/db";
 import { SessionRow } from "@/lib/types";
 import { vectorSearch, generateMissingEmbeddings } from "@/lib/embeddings";
 
@@ -13,10 +13,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Query is required" }, { status: 400 });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getSetting("google_ai_api_key") || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({
-      error: "GEMINI_API_KEY not configured. Add it to .env.local",
+      error: "Google AI API key not configured. Set it in Settings → Deep Search or Summary AI.",
       results: [],
     });
   }

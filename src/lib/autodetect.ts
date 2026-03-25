@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { getDb, getSetting } from "@/lib/db";
 
 export interface ProjectRow {
   project_dir: string;
@@ -88,7 +88,7 @@ export async function autodetectDebug(prompt: string, mode: "fast" | "smart" = "
      FROM projects WHERE session_count > 0 ORDER BY last_activity DESC`
   ).all() as ProjectRow[];
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getSetting("google_ai_api_key") || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   const geminiConfigured = !!apiKey;
 
   // Always compute keyword scores for debug

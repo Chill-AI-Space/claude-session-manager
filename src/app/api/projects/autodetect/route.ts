@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDb, getSetting } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No projects found" }, { status: 404 });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getSetting("google_ai_api_key") || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   const geminiConfigured = !!apiKey;
 
   // Fast mode — instant keyword matching, no API call

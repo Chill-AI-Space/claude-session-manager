@@ -67,8 +67,8 @@ function float32ToBlob(arr: Float32Array): Buffer {
 
 /** Generate embeddings for all sessions that don't have one yet. Returns count generated. */
 export async function generateMissingEmbeddings(): Promise<{ generated: number; error?: string }> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return { generated: 0, error: "GEMINI_API_KEY not configured" };
+  const apiKey = getSetting("google_ai_api_key") || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) return { generated: 0, error: "Google AI API key not configured. Set it in Settings → Deep Search or Summary AI." };
 
   const db = getDb();
   const sessions = db
@@ -108,7 +108,7 @@ export async function generateMissingEmbeddings(): Promise<{ generated: number; 
 export async function vectorSearch(
   query: string
 ): Promise<{ session_id: string; score: number }[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getSetting("google_ai_api_key") || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) return [];
 
   const topK = parseInt(getSetting("vector_search_top_k")) || 20;
