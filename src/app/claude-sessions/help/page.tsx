@@ -1,5 +1,6 @@
 "use client";
 
+// v1.1.0 — added one-click Update button
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
