@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import fs from "fs";
 import { getDb } from "@/lib/db";
-import { readSessionMessages } from "@/lib/session-reader";
+import { readSessionMessages, readSessionMessagesPaginated } from "@/lib/session-reader";
 import { SessionRow } from "@/lib/types";
 import { isSessionActive } from "@/lib/process-detector";
 import { hasResultEvent } from "@/lib/orchestrator";
@@ -62,33 +62,35 @@ export async function GET(
   const searchParams = request.nextUrl.searchParams;
   const PAGE_SIZE = 100;
 
-  // Read all messages first to get total count
-  const allMessages = readSessionMessages(session.jsonl_path);
-  const total = allMessages.length;
-
-  // Default: last PAGE_SIZE messages. "before" param = load messages before index.
-  const before = searchParams.has("before")
+  // Paginated read — only parses the window we need for large sessions
+  const beforeParam = searchParams.has("before")
     ? parseInt(searchParams.get("before")!)
-    : total;
-  const start = Math.max(0, before - PAGE_SIZE);
-  const messages = allMessages.slice(start, before);
+    : undefined;
+  const { messages, total, start } = readSessionMessagesPaginated(
+    session.jsonl_path,
+    { pageSize: PAGE_SIZE, before: beforeParam }
+  );
 
-  // Compute last_message_role live from JSONL (avoids stale DB value after retries)
+  // Compute last_message_role live from the last message in the result
+  // For accuracy, look at the actual last page (when viewing the end of conversation)
   let liveLastMessageRole: string | null = session.last_message_role ?? null;
-  for (let i = allMessages.length - 1; i >= 0; i--) {
-    const msg = allMessages[i];
-    if (msg.type === "compact_boundary") continue;
-    if (msg.type === "assistant") {
-      liveLastMessageRole = "assistant";
-    } else if (msg.type === "user") {
-      const content = msg.content;
-      const isToolResult =
-        Array.isArray(content) &&
-        content.length > 0 &&
-        content.every((b) => (b as { type: string }).type === "tool_result");
-      liveLastMessageRole = isToolResult ? "tool_result" : "user";
+  if (!beforeParam || beforeParam >= total) {
+    // Viewing the tail — last message in our page is the actual last message
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.type === "compact_boundary") continue;
+      if (msg.type === "assistant") {
+        liveLastMessageRole = "assistant";
+      } else if (msg.type === "user") {
+        const content = msg.content;
+        const isToolResult =
+          Array.isArray(content) &&
+          content.length > 0 &&
+          content.every((b) => (b as { type: string }).type === "tool_result");
+        liveLastMessageRole = isToolResult ? "tool_result" : "user";
+      }
+      break;
     }
-    break;
   }
 
   let active = false;

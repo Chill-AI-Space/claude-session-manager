@@ -50,8 +50,10 @@ function pushEntry(entry: LogEntry): void {
     }
   }
 
-  // Queue for remote push
-  remoteBatch.push(entry);
+  // Queue for remote push (cap to prevent unbounded growth when no endpoint is set)
+  if (remoteBatch.length < MAX_ENTRIES) {
+    remoteBatch.push(entry);
+  }
 }
 
 /** Get all buffered entries in chronological order */

@@ -96,9 +96,11 @@ export function createSSEStream(opts: SSEStreamOptions): ReadableStream {
   const env = getCleanEnv();
   const encoder = new TextEncoder();
 
+  let closed = false;
+  let keepaliveTimer: NodeJS.Timeout | undefined;
+
   return new ReadableStream({
     start(controller) {
-      let closed = false;
 
       function send(data: Record<string, unknown>) {
         if (closed) return;
@@ -143,7 +145,6 @@ export function createSSEStream(opts: SSEStreamOptions): ReadableStream {
       onProc?.(proc);
 
       // Keepalive pings
-      let keepaliveTimer: NodeJS.Timeout | undefined;
       if (keepalive) {
         keepaliveTimer = setInterval(() => {
           if (closed) {
@@ -208,6 +209,10 @@ export function createSSEStream(opts: SSEStreamOptions): ReadableStream {
         send({ type: "error", text: err.message });
         close();
       });
+    },
+    cancel() {
+      closed = true;
+      if (keepaliveTimer) clearInterval(keepaliveTimer);
     },
   });
 }

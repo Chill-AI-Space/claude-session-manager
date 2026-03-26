@@ -11,8 +11,161 @@ export function readSessionMessages(
 
   const content = fs.readFileSync(jsonlPath, "utf-8");
   const lines = content.split(/\r?\n/).filter((l) => l.trim());
-  const messages: ParsedMessage[] = [];
+  const messages = parseLines(lines);
 
+  // Merge consecutive assistant messages (streaming chunks)
+  const merged = mergeConsecutiveAssistant(messages);
+
+  // Apply offset and limit
+  if (options?.offset || options?.limit) {
+    const start = options.offset || 0;
+    const end = options.limit ? start + options.limit : undefined;
+    return merged.slice(start, end);
+  }
+
+  return merged;
+}
+
+/**
+ * Optimized reader: counts total messages without building full objects,
+ * then only parses the requested page. Avoids O(N) object allocations
+ * for sessions with thousands of messages.
+ */
+export function readSessionMessagesPaginated(
+  jsonlPath: string,
+  opts: { pageSize: number; before?: number }
+): { messages: ParsedMessage[]; total: number; start: number } {
+  if (!fs.existsSync(jsonlPath)) {
+    return { messages: [], total: 0, start: 0 };
+  }
+
+  const content = fs.readFileSync(jsonlPath, "utf-8");
+  const lines = content.split(/\r?\n/).filter((l) => l.trim());
+
+  // Phase 1: lightweight count — only check type field, don't build objects.
+  // Also track which raw lines are "message lines" (user/assistant/compact_boundary)
+  // so we can map merged-message indices back to raw line indices.
+  const msgLineIndices: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Quick prefix checks to avoid JSON.parse on non-message lines
+    if (line.includes('"type":"user"') || line.includes('"type":"assistant"') ||
+        line.includes('"type":"system"')) {
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type === "system" && obj.subtype === "compact_boundary") {
+          msgLineIndices.push(i);
+        } else if (obj.type === "user" && obj.message?.role === "user") {
+          // Skip tool_result-only
+          const c = obj.message.content;
+          if (Array.isArray(c) && c.every((b: { type: string }) => b.type === "tool_result")) continue;
+          msgLineIndices.push(i);
+        } else if (obj.type === "assistant" && obj.message?.role === "assistant") {
+          msgLineIndices.push(i);
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  // Parse only the needed lines, then merge to get accurate count
+  // For efficiency: parse a generous window, merge, then slice
+  const totalRawMsgs = msgLineIndices.length;
+
+  // We need to figure out the merged total. Since merging only affects
+  // consecutive assistant messages with same UUID, we can estimate or
+  // do a full merge. For accuracy, parse all lines (as before) for small files,
+  // but for large files only parse a larger window.
+  const LARGE_FILE_THRESHOLD = 500; // msg lines
+  if (totalRawMsgs <= LARGE_FILE_THRESHOLD) {
+    // Small file — parse everything (fast enough)
+    const allMessages = parseLines(lines);
+    const merged = mergeConsecutiveAssistant(allMessages);
+    const total = merged.length;
+    const before = opts.before ?? total;
+    const start = Math.max(0, before - opts.pageSize);
+    return { messages: merged.slice(start, before), total, start };
+  }
+
+  // Large file — parse all for merge accuracy but avoid building
+  // full content objects for lines we won't return.
+  // Lightweight parse: only build stubs for counting/merging, full parse for the window.
+  const before = opts.before ?? totalRawMsgs; // approximate
+  const windowStart = Math.max(0, before - opts.pageSize - 50); // extra margin for merging
+  const windowEnd = Math.min(totalRawMsgs, before + 10);
+
+  // Count merged messages before window (lightweight — just count UUIDs)
+  let countBefore = 0;
+  let prevUuid = "";
+  let prevType = "";
+  for (let i = 0; i < windowStart && i < msgLineIndices.length; i++) {
+    try {
+      const obj = JSON.parse(lines[msgLineIndices[i]]);
+      const uuid = obj.uuid || obj.messageId || "";
+      const type = obj.type === "assistant" ? "assistant" : "other";
+      // Merge logic: same uuid + consecutive assistant = same message
+      if (type === "assistant" && prevType === "assistant" && uuid === prevUuid) {
+        // merged with previous — don't count
+      } else {
+        countBefore++;
+      }
+      prevUuid = uuid;
+      prevType = type;
+    } catch {
+      countBefore++;
+      prevUuid = "";
+      prevType = "";
+    }
+  }
+
+  // Full parse for the window
+  const windowLines = [];
+  for (let i = windowStart; i < windowEnd && i < msgLineIndices.length; i++) {
+    windowLines.push(lines[msgLineIndices[i]]);
+  }
+  const windowMessages = parseLines(windowLines);
+  const windowMerged = mergeConsecutiveAssistant(windowMessages);
+
+  // Count merged messages after window
+  let countAfter = 0;
+  prevUuid = "";
+  prevType = "";
+  for (let i = windowEnd; i < msgLineIndices.length; i++) {
+    try {
+      const obj = JSON.parse(lines[msgLineIndices[i]]);
+      const uuid = obj.uuid || obj.messageId || "";
+      const type = obj.type === "assistant" ? "assistant" : "other";
+      if (type === "assistant" && prevType === "assistant" && uuid === prevUuid) {
+        // merged
+      } else {
+        countAfter++;
+      }
+      prevUuid = uuid;
+      prevType = type;
+    } catch {
+      countAfter++;
+      prevUuid = "";
+      prevType = "";
+    }
+  }
+
+  const total = countBefore + windowMerged.length + countAfter;
+  const adjustedBefore = opts.before ?? total;
+  const pageStart = Math.max(0, adjustedBefore - opts.pageSize) - countBefore;
+  const pageEnd = adjustedBefore - countBefore;
+  const messages = windowMerged.slice(
+    Math.max(0, pageStart),
+    Math.max(0, pageEnd)
+  );
+
+  return {
+    messages,
+    total,
+    start: countBefore + Math.max(0, pageStart),
+  };
+}
+
+function parseLines(lines: string[]): ParsedMessage[] {
+  const messages: ParsedMessage[] = [];
   for (const line of lines) {
     try {
       const obj = JSON.parse(line);
@@ -72,18 +225,7 @@ export function readSessionMessages(
       // skip malformed lines
     }
   }
-
-  // Merge consecutive assistant messages (streaming chunks)
-  const merged = mergeConsecutiveAssistant(messages);
-
-  // Apply offset and limit
-  if (options?.offset || options?.limit) {
-    const start = options.offset || 0;
-    const end = options.limit ? start + options.limit : undefined;
-    return merged.slice(start, end);
-  }
-
-  return merged;
+  return messages;
 }
 
 function mergeConsecutiveAssistant(

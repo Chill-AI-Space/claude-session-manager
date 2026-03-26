@@ -1227,6 +1227,7 @@ class SessionOrchestrator extends EventEmitter {
   private cleanupStaleStates(): void {
     const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour for completed/failed/idle
     const runningCutoff = Date.now() - 2 * 60 * 60 * 1000; // 2 hours for running
+    const transientCutoff = Date.now() - 30 * 60 * 1000; // 30 min for transient phases
     for (const [id, state] of this.states) {
       if (
         (state.phase === "completed" || state.phase === "failed" || state.phase === "idle") &&
@@ -1240,10 +1241,34 @@ class SessionOrchestrator extends EventEmitter {
       ) {
         // Running state stuck for >2 hours with dead process — clean up
         dlog.warn("orchestrator", `cleaning up stale running state for ${id} (last activity ${Math.round((Date.now() - state.lastActivity) / 60_000)}min ago)`);
-        state.phase = "completed";
+        this.states.delete(id);
+      } else if (
+        (state.phase === "crashed" || state.phase === "retrying" ||
+         state.phase === "stalled" || state.phase === "continuing") &&
+        state.lastActivity < transientCutoff
+      ) {
+        // Transient phases stuck for >30 min — they should have resolved by now
+        dlog.warn("orchestrator", `cleaning up stuck ${state.phase} state for ${id} (last activity ${Math.round((Date.now() - state.lastActivity) / 60_000)}min ago)`);
         this.states.delete(id);
       }
     }
+
+    // Prune old actions_log rows (keep last 7 days)
+    try {
+      const { getDb } = require("./db");
+      const deleted = getDb()
+        .prepare("DELETE FROM actions_log WHERE created_at < datetime('now', '-7 days')")
+        .run();
+      if (deleted.changes > 0) {
+        dlog.info("orchestrator", `pruned ${deleted.changes} old actions_log rows`);
+      }
+    } catch { /* non-critical */ }
+
+    // Clean up stale offline workers
+    try {
+      const { getWorkerRegistry } = require("./worker-registry");
+      getWorkerRegistry().cleanupStaleWorkers();
+    } catch { /* non-critical */ }
   }
 
   destroy(): void {

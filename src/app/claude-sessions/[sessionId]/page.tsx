@@ -107,6 +107,7 @@ interface SessionDetailData {
   messages_total: number;
   metadata: SessionRow;
   is_active: boolean;
+  has_result?: boolean;
   file_age_ms?: number;
 }
 
@@ -1286,7 +1287,7 @@ export default function SessionDetailPage({
     <>
       {/* Session header — single line: status + title */}
       {(() => {
-        let activityStatus = getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role });
+        let activityStatus = getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role, has_result: data.has_result });
         // If JSONL was written to recently and process is alive, Claude is actively working
         // (not just waiting at prompt — the "terminal-open" heuristic is wrong mid-tool-execution)
         if (data.is_active && data.file_age_ms != null && data.file_age_ms < 30_000 && activityStatus === "terminal-open") {

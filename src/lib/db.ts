@@ -14,7 +14,12 @@ export function getDb(): Database.Database {
     _db = new Database(DB_PATH);
     _db.pragma("journal_mode = WAL");
     _db.pragma("foreign_keys = ON");
+    // Auto-checkpoint when WAL grows beyond 4MB (default is 1000 pages ≈ 4MB)
+    // This prevents WAL from growing to 70MB+ and consuming memory via mmap
+    _db.pragma("wal_autocheckpoint = 1000");
     initTables(_db);
+    // Checkpoint any accumulated WAL from previous runs
+    try { _db.pragma("wal_checkpoint(TRUNCATE)"); } catch { /* non-critical */ }
   }
   return _db;
 }

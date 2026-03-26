@@ -388,6 +388,25 @@ class WorkerRegistry extends EventEmitter {
     } catch { /* non-critical */ }
   }
 
+  /** Remove offline/failed workers that have been inactive for over 1 hour */
+  cleanupStaleWorkers(): void {
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    for (const [id, state] of this.workers) {
+      if (
+        (state.phase === "offline" || state.phase === "failed") &&
+        state.lastHeartbeatAt < cutoff
+      ) {
+        const timer = this.heartbeatTimers.get(id);
+        if (timer) {
+          clearTimeout(timer);
+          this.heartbeatTimers.delete(id);
+        }
+        this.workers.delete(id);
+        dlog.info("worker-registry", `cleaned up stale ${state.phase} worker ${id}`);
+      }
+    }
+  }
+
   destroy(): void {
     for (const timer of this.heartbeatTimers.values()) {
       clearTimeout(timer);

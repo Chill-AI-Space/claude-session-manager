@@ -66,9 +66,16 @@ export async function GET(request: NextRequest) {
       break;
   }
 
+  // Explicit columns — exclude heavy BLOBs (embedding) and large text (summary, learnings)
   const rows = db
     .prepare(
-      `SELECT * FROM sessions ${whereClause} ${sortClause} LIMIT @limit OFFSET @offset`
+      `SELECT session_id, jsonl_path, project_dir, project_path,
+              git_branch, claude_version, model, first_prompt, last_message,
+              generated_title, custom_name, tags, pinned, archived,
+              message_count, total_input_tokens, total_output_tokens,
+              created_at, modified_at, file_mtime, file_size, last_scanned_at,
+              last_message_role, has_result
+       FROM sessions ${whereClause} ${sortClause} LIMIT @limit OFFSET @offset`
     )
     .all({ ...filterParams, limit, offset }) as SessionRow[];
 
@@ -102,6 +109,7 @@ export async function GET(request: NextRequest) {
     total_output_tokens: row.total_output_tokens,
     is_active: activeIds.has(row.session_id),
     last_message_role: (row as SessionRow & { last_message_role?: string }).last_message_role ?? null,
+    has_result: !!row.has_result,
   }));
 
   const totalCount = db

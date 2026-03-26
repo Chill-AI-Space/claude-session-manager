@@ -32,10 +32,47 @@ interface JsonlMetadata {
   fullText: string;
 }
 
+// Large file threshold: above this, use streaming line reader instead of readFileSync+split
+const LARGE_FILE_BYTES = 5 * 1024 * 1024; // 5MB
+
+/** Read file lines without loading entire content into a single string */
+function readLinesStreaming(filePath: string): string[] {
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const CHUNK_SIZE = 256 * 1024; // 256KB chunks
+    const buf = Buffer.alloc(CHUNK_SIZE);
+    const lines: string[] = [];
+    let remainder = "";
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const bytesRead = fs.readSync(fd, buf, 0, CHUNK_SIZE, null);
+      if (bytesRead === 0) break;
+      const chunk = remainder + buf.toString("utf-8", 0, bytesRead);
+      const parts = chunk.split(/\r?\n/);
+      remainder = parts.pop() || "";
+      for (const p of parts) {
+        if (p.trim()) lines.push(p);
+      }
+    }
+    if (remainder.trim()) lines.push(remainder);
+    return lines;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
   try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    const lines = content.split(/\r?\n/).filter((l) => l.trim());
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(filePath);
+    } catch { return null; }
+
+    // For large files, use streaming reader to avoid 3x memory multiplier
+    const lines = stat.size > LARGE_FILE_BYTES
+      ? readLinesStreaming(filePath)
+      : fs.readFileSync(filePath, "utf-8").split(/\r?\n/).filter((l) => l.trim());
 
     let sessionId = "";
     let projectPath = "";
@@ -48,6 +85,8 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
     let hasResult = false;
     let messageCount = 0;
     const textParts: string[] = [];
+    let textPartsSize = 0;
+    const MAX_FTS_TEXT = 20_000; // Cap FTS text to ~20KB per session (keeps FTS tables manageable)
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let createdAt = "";
@@ -113,7 +152,10 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
                 }
                 // Always update — last one wins
                 lastMessage = text.slice(0, 300);
-                textParts.push(text);
+                if (textPartsSize < MAX_FTS_TEXT) {
+                  textParts.push(text);
+                  textPartsSize += text.length;
+                }
               }
             }
           }
@@ -128,12 +170,14 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
                 (usage.cache_creation_input_tokens || 0);
               totalOutputTokens += usage.output_tokens || 0;
             }
-            // Index assistant text too
+            // Index assistant text too (capped)
             const content = obj.message?.content;
-            if (Array.isArray(content)) {
+            if (Array.isArray(content) && textPartsSize < MAX_FTS_TEXT) {
               for (const block of content) {
                 if (block.type === "text" && block.text) {
                   textParts.push(block.text);
+                  textPartsSize += block.text.length;
+                  if (textPartsSize >= MAX_FTS_TEXT) break;
                 }
               }
             }
@@ -330,7 +374,8 @@ export async function scanSessions(
 
       // Detect newly-crashed sessions → delegate to orchestrator
       // Uses file_mtime change (not just role transition) to catch repeated crashes
-      if (metadata.lastMessageRole === "tool_result") {
+      // Skip if session has a result event — that means Claude exited normally
+      if (metadata.lastMessageRole === "tool_result" && !metadata.hasResult) {
         const prev = db
           .prepare("SELECT last_message_role, file_mtime FROM sessions WHERE session_id = ?")
           .get(sessionId) as { last_message_role: string | null; file_mtime: number | null } | undefined;

@@ -58,6 +58,7 @@ export interface SessionListItem {
   total_output_tokens: number;
   is_active?: boolean;
   last_message_role?: string | null;
+  has_result?: boolean;
   // Remote executor fields (set when session comes from a remote node)
   _remote?: boolean;
   _nodeId?: string;
