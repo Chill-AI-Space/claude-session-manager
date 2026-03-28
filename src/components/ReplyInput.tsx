@@ -70,20 +70,20 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
 
+    const paths: string[] = [];
     for (const file of files) {
       const fd = new FormData();
       fd.append("file", file);
       try {
         const res = await fetch("/api/upload", { method: "POST", body: fd });
         const data = await res.json();
-        if (data.path) {
-          insertAtCursor(data.path);
-        } else {
-          insertAtCursor(file.name);
-        }
+        paths.push(data.path || file.name);
       } catch {
-        insertAtCursor(file.name);
+        paths.push(file.name);
       }
+    }
+    if (paths.length > 0) {
+      insertAtCursor(paths.join("\n"));
     }
   };
 
@@ -136,16 +136,20 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
 
   const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
+    const paths: string[] = [];
     for (const file of files) {
       const fd = new FormData();
       fd.append("file", file);
       try {
         const res = await fetch("/api/upload", { method: "POST", body: fd });
         const data = await res.json();
-        insertAtCursor(data.path || file.name);
+        paths.push(data.path || file.name);
       } catch {
-        insertAtCursor(file.name);
+        paths.push(file.name);
       }
+    }
+    if (paths.length > 0) {
+      insertAtCursor(paths.join("\n"));
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
