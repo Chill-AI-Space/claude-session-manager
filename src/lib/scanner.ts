@@ -140,11 +140,14 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
               // Skip task-notification-only messages for lastMessage/firstPrompt
               const isTaskNotif = text.includes("<task-notification>") &&
                 text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, "").trim().length === 0;
+              // Skip babysitter auto-resume messages — they pollute lastMessage context
+              const isBabysitterMsg = /^(You crashed mid-tool|You stalled|Your process exited|You appear to have stalled|You were mid-task)/.test(text);
               if (
                 text &&
                 !text.startsWith("{") &&
                 !text.startsWith("[Request interrupted") &&
                 !isTaskNotif &&
+                !isBabysitterMsg &&
                 text.trim().length > 5
               ) {
                 if (!firstPrompt) {
@@ -535,7 +538,7 @@ export async function scanSessions(
 function detectIncompleteExits(db: ReturnType<typeof getDb>): void {
   const { isSessionActive } = require("./process-detector");
   const orch = getOrchestrator();
-  const MAX_AGE_MS = 30 * 60 * 1000; // Don't auto-resume sessions older than 30 min
+  const MAX_AGE_MS = 4 * 60 * 60 * 1000; // Don't auto-resume sessions older than 4 hours
 
   const cutoffRecent = Date.now() - STALL_THRESHOLD_MS;
   const cutoffOld = Date.now() - MAX_AGE_MS;
@@ -544,6 +547,7 @@ function detectIncompleteExits(db: ReturnType<typeof getDb>): void {
     SELECT session_id, jsonl_path, file_mtime
     FROM sessions
     WHERE last_message_role = 'assistant'
+      AND has_result = 0
       AND file_mtime < ?
       AND file_mtime > ?
   `).all(cutoffRecent, cutoffOld) as Array<{

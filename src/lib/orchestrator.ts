@@ -44,6 +44,7 @@ export interface SessionState {
   projectPath: string;
   pid: number | null;
   retryCount: number;
+  skipCount: number; // how many times isWaitingForUser skipped auto-resume
   lastActivity: number;
   startedAt: number;
   error?: string;
@@ -320,37 +321,62 @@ export function hasResultEvent(jsonlPath: string): boolean {
  * Returns true if auto-resume should be SKIPPED (i.e. Claude is waiting or done).
  * Returns false if Claude appears to be mid-task (should auto-resume).
  */
-async function isWaitingForUser(lastAssistantText: string): Promise<boolean> {
+/**
+ * Check if Claude's last message indicates we should NOT auto-resume.
+ *
+ * @param mode
+ *   - "stall": process alive — skip if asking question OR reporting completion
+ *   - "incomplete_exit": process dead, no result event — skip ONLY if asking question
+ *     (completion check is wrong here: if Claude said "done" but process died without
+ *      result event, that's abnormal and we SHOULD resume)
+ */
+async function isWaitingForUser(lastAssistantText: string, mode: "stall" | "incomplete_exit" = "stall"): Promise<boolean> {
   if (!lastAssistantText.trim()) return false;
 
   const lower = lastAssistantText.toLowerCase();
 
-  // Quick pattern match: questions
-  const waitingPatterns = [
-    /\?\s*$/,
+  // Quick pattern match: explicit questions directed at user
+  // NOTE: /\?\s*$/ was removed — too aggressive, catches rhetorical "?" in explanations
+  // NOTE: \b does NOT work with Cyrillic in JS — \w is [a-zA-Z0-9_] only.
+  // Use (?=[\s.,!?:;\-]|$) or (?:^|[\s]) for Cyrillic word boundaries.
+  const questionPatterns = [
     /which (option|approach|do you|would you)/,
     /do you want/,
     /should i (proceed|continue|go ahead)/,
     /let me know/,
     /please (confirm|clarify|specify|choose|select|provide)/,
     /what (would|do) you (like|prefer|want)/,
-    /готов|подтверди|выбери|какой вариант|хотите|скажи/,
+    /could you (provide|send|share|clarify|specify)/,
+    /подтверди|выбери|какой вариант|хотите/,
+    /напиши|пришли|отправь|укажи|предоставь|уточни/,
+    /не (пришл[оиа]|дош[ёе]л|получил)|обрывается|пусто(?=[\s.,!?]|$)/,
+    /жду(?=[\s.,!?]|$)|когда скажешь|когда скажете|ожидаю (ваш|твой)/,
   ];
-  if (waitingPatterns.some((re) => re.test(lower))) return true;
+  if (questionPatterns.some((re) => re.test(lower))) return true;
 
-  // Quick pattern match: completion indicators
+  // Completion patterns — applies to BOTH modes.
+  // If Claude explicitly said "task done" / "всё готово", don't poke it regardless of mode.
+  // NOTE: \b works fine for English patterns but NOT for Cyrillic — see above.
   const completionPatterns = [
     /\b(all done|all set|task (is |has been )?complet|that'?s it)\b/,
     /\b(here('s| is| are) (the |your |a )?(final|complete|full|result|summary|output))\b/,
     /\bsuccessfully (deployed|published|created|updated|completed|finished|built|pushed)\b/,
     /\b(everything is|changes are|all changes|code is|build is|deploy is) (now |)(done|ready|live|complete|deployed)\b/,
-    /готово|завершен|опубликовано|задач[аи] выполнен|всё сделано|все изменения/,
+    /готов[оа]?(?=[\s.,!?:;\-]|$)|завершен|опубликовано/,
+    /задач[аи] выполнен|всё сделано|все изменения|полностью готов/,
+    /готово к работе|готов к запуску|можешь (запуск|открыва|проверя)/,
   ];
   if (completionPatterns.some((re) => re.test(lower))) return true;
+
+  // For incomplete exits: skip LLM — regex-only, be aggressive about resuming.
+  // Question + completion patterns above already caught the obvious cases.
+  if (mode === "incomplete_exit") return false;
 
   try {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return false;
+
+    const prompt = `Is this message either (A) asking the user a question or requesting input before proceeding, OR (B) a completion/summary message indicating the task is finished? Answer YES if A or B. Answer NO only if the message indicates more work is about to be done.\n\nMessage:\n${lastAssistantText.slice(0, 1500)}`;
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -364,7 +390,7 @@ async function isWaitingForUser(lastAssistantText: string): Promise<boolean> {
         max_tokens: 5,
         messages: [{
           role: "user",
-          content: `Is this message either (A) asking the user a question or requesting input before proceeding, OR (B) a completion/summary message indicating the task is finished? Answer YES if A or B. Answer NO only if the message indicates more work is about to be done.\n\nMessage:\n${lastAssistantText.slice(0, 1500)}`,
+          content: prompt,
         }],
       }),
     });
@@ -376,6 +402,116 @@ async function isWaitingForUser(lastAssistantText: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+const BABYSITTER_PREFIXES = [
+  "You crashed mid-tool",
+  "You stalled",
+  "Your process exited",
+  "You appear to have stalled",
+  "You were mid-task",
+  "Continue from where you left off",
+];
+
+/**
+ * Detect babysitter resume loops in JSONL.
+ *
+ * Scans backwards through the tail of the JSONL counting consecutive
+ * babysitter-initiated "segments" (babysitter prompt → assistant response).
+ * A segment is considered UNPRODUCTIVE if the assistant made ≤ 3 tool_use calls
+ * between two babysitter prompts — i.e. Claude didn't do meaningful work.
+ *
+ * Returns { resumes, unproductiveCount }:
+ *   - resumes: total consecutive babysitter-initiated user messages
+ *   - unproductiveCount: how many of those segments had ≤ 3 tool calls
+ */
+function detectBabysitterLoop(jsonlPath: string): { resumes: number; unproductiveCount: number } {
+  try {
+    const stat = fs.statSync(jsonlPath);
+    const TAIL_BYTES = 64 * 1024;
+    const start = Math.max(0, stat.size - TAIL_BYTES);
+    const fd = fs.openSync(jsonlPath, "r");
+    const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+
+    const lines = buf.toString("utf-8").split(/\r?\n/).filter(Boolean);
+    if (start > 0) lines.shift();
+    lines.reverse();
+
+    let resumes = 0;
+    let unproductiveCount = 0;
+    let toolCallsInSegment = 0;
+
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+
+        if (obj.type === "assistant") {
+          // Count tool_use blocks in assistant messages
+          const content = obj.message?.content;
+          if (Array.isArray(content)) {
+            toolCallsInSegment += content.filter((b: { type: string }) => b.type === "tool_use").length;
+          }
+          continue;
+        }
+
+        if (obj.type !== "user") break;
+
+        const content = obj.message?.content;
+        const text = typeof content === "string" ? content
+          : Array.isArray(content)
+            ? content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("")
+            : "";
+
+        if (BABYSITTER_PREFIXES.some(p => text.startsWith(p))) {
+          resumes++;
+          if (toolCallsInSegment <= 3) unproductiveCount++;
+          toolCallsInSegment = 0; // reset for next segment
+        } else {
+          break; // real user message — stop
+        }
+      } catch { /* skip */ }
+    }
+    return { resumes, unproductiveCount };
+  } catch {
+    return { resumes: 0, unproductiveCount: 0 };
+  }
+}
+
+/**
+ * Check if the last assistant message in JSONL has tool_use blocks.
+ * If true → Claude was actively calling tools when the process died → genuine incomplete exit.
+ * If false → Claude's last output was text-only → it finished speaking, process should have
+ *            exited normally. Resuming text-only exits is almost always a false positive.
+ */
+function lastAssistantHasToolUse(jsonlPath: string): boolean {
+  try {
+    const stat = fs.statSync(jsonlPath);
+    const TAIL_BYTES = 32 * 1024;
+    const start = Math.max(0, stat.size - TAIL_BYTES);
+    const fd = fs.openSync(jsonlPath, "r");
+    const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+
+    const lines = buf.toString("utf-8").split(/\r?\n/).filter(Boolean);
+    if (start > 0) lines.shift();
+    lines.reverse();
+
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type !== "assistant" || !obj.message?.content) continue;
+        const content = obj.message.content;
+        if (Array.isArray(content)) {
+          return content.some((b: { type: string }) => b.type === "tool_use");
+        }
+        return false; // string content = text only
+      } catch { /* skip */ }
+    }
+  } catch { /* ignore */ }
+  return false;
 }
 
 function extractLastAssistantText(jsonlPath: string): string {
@@ -620,6 +756,7 @@ class SessionOrchestrator extends EventEmitter {
                 projectPath,
                 pid: null,
                 retryCount: 0,
+                skipCount: 0,
                 lastActivity: Date.now(),
                 startedAt: Date.now(),
               });
@@ -673,6 +810,7 @@ class SessionOrchestrator extends EventEmitter {
       projectPath,
       pid: null,
       retryCount: this.states.get(sessionId)?.retryCount ?? 0,
+      skipCount: this.states.get(sessionId)?.skipCount ?? 0,
       lastActivity: Date.now(),
       startedAt: Date.now(),
     });
@@ -915,11 +1053,40 @@ class SessionOrchestrator extends EventEmitter {
   private async executeCrashRetry(sessionId: string): Promise<void> {
     const db = getDb();
     const session = db
-      .prepare("SELECT project_path, last_message_role, last_message FROM sessions WHERE session_id = ?")
-      .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role"> & { last_message: string | null } | undefined;
+      .prepare("SELECT project_path, last_message_role, last_message, first_prompt, jsonl_path FROM sessions WHERE session_id = ?")
+      .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path"> & { last_message: string | null; first_prompt: string | null } | undefined;
 
     if (!session || session.last_message_role !== "tool_result") return;
     if (getSetting("auto_retry_on_crash") === "false") return;
+
+    // Detect babysitter loop — if we've already poked this session 2+ times, stop
+    const loop = detectBabysitterLoop(session.jsonl_path);
+    if (loop.unproductiveCount >= 2 || loop.resumes >= 4) {
+      logAction("service", "auto_retry_skipped", `babysitter loop: ${loop.unproductiveCount} unproductive / ${loop.resumes} total resumes`, sessionId);
+      this.transition(sessionId, "failed", "babysitter loop");
+      return;
+    }
+
+    // Check if the assistant message BEFORE the crash was a completion message.
+    // If Claude said "всё готово" and then crashed on a final verification tool call,
+    // retrying is unnecessary — the task was already done.
+    const lastAssistantText = extractLastAssistantText(session.jsonl_path);
+    if (lastAssistantText) {
+      const lower = lastAssistantText.toLowerCase();
+      const completionPatterns = [
+        /\b(all done|all set|task (is |has been )?complet|that'?s it)\b/,
+        /\b(here('s| is| are) (the |your |a )?(final|complete|full|result|summary|output))\b/,
+        /\bsuccessfully (deployed|published|created|updated|completed|finished|built|pushed)\b/,
+        /\b(everything is|changes are|all changes|code is|build is|deploy is) (now |)(done|ready|live|complete|deployed)\b/,
+        /готово|завершен|опубликовано|задач[аи] выполнен|всё сделано|все изменения|полностью готов|готово к работе|готов к запуску/,
+        /жду(?=[\s.,!?]|$)|когда скажешь|можешь (запуск|открыва|проверя)/,
+      ];
+      if (completionPatterns.some((re) => re.test(lower))) {
+        logAction("service", "auto_retry_skipped", `task was completed before crash: "${lastAssistantText.slice(0, 80)}"`, sessionId);
+        this.transition(sessionId, "completed");
+        return;
+      }
+    }
 
     const maxRetries = parseInt(getSetting("orchestrator_max_retries") || "3", 10);
     const state = this.states.get(sessionId);
@@ -934,10 +1101,13 @@ class SessionOrchestrator extends EventEmitter {
     this.emit("session:retrying", { sessionId, attempt: (state?.retryCount ?? 0) + 1 });
     logAction("service", "auto_retry_fired", "orchestrator", sessionId);
 
-    const context = session.last_message
-      ? `\n\nFor context, the user's last message was: "${session.last_message.slice(0, 200)}"`
+    const taskContext = session.first_prompt
+      ? `\n\nOriginal task: "${session.first_prompt.slice(0, 300)}"`
       : "";
-    const retryPrompt = `You crashed mid-tool-execution. I noticed and auto-resumed you. Please check what you were doing, pick up where you left off, and continue the task.${context}`;
+    const userContext = session.last_message
+      ? `\nUser's last message: "${session.last_message.slice(0, 200)}"`
+      : "";
+    const retryPrompt = `You crashed mid-tool-execution. Continue where you left off — do NOT summarize what happened, just keep working.${taskContext}${userContext}`;
 
     const args = buildCliArgs({ sessionId, message: retryPrompt, includeMaxTurns: true });
     const proc = spawn(
@@ -965,11 +1135,19 @@ class SessionOrchestrator extends EventEmitter {
   private async executeStallContinue(sessionId: string): Promise<void> {
     const db = getDb();
     const session = db
-      .prepare("SELECT project_path, last_message_role, last_message, jsonl_path FROM sessions WHERE session_id = ?")
-      .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path"> & { last_message: string | null } | undefined;
+      .prepare("SELECT project_path, last_message_role, last_message, jsonl_path, first_prompt FROM sessions WHERE session_id = ?")
+      .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path"> & { last_message: string | null; first_prompt: string | null } | undefined;
 
     if (!session) return;
     if (getSetting("auto_continue_on_stall") !== "true") return;
+
+    // Detect babysitter loop
+    const loop = detectBabysitterLoop(session.jsonl_path);
+    if (loop.unproductiveCount >= 2 || loop.resumes >= 4) {
+      logAction("service", "stall_continue_skipped", `babysitter loop: ${loop.unproductiveCount} unproductive / ${loop.resumes} total resumes`, sessionId);
+      this.transition(sessionId, "failed", "babysitter loop");
+      return;
+    }
     if (!isSessionActive(sessionId)) return;
 
     try {
@@ -981,21 +1159,39 @@ class SessionOrchestrator extends EventEmitter {
 
     const lastAssistantText = extractLastAssistantText(session.jsonl_path);
     const waiting = await isWaitingForUser(lastAssistantText);
+    const stState = this.states.get(sessionId);
+    const stSkips = stState?.skipCount ?? 0;
+    const MAX_STALL_SKIPS = 3;
 
-    if (waiting) {
-      logAction("service", "stall_continue_skipped", "Claude is asking user a question", sessionId);
+    if (waiting && stSkips < MAX_STALL_SKIPS) {
+      if (stState) {
+        stState.skipCount++;
+      } else {
+        this.states.set(sessionId, {
+          sessionId, phase: "idle", projectPath: session.project_path,
+          pid: null, retryCount: 0, skipCount: 1,
+          lastActivity: Date.now(), startedAt: Date.now(),
+        });
+      }
+      logAction("service", "stall_continue_skipped", `Claude is asking user a question (skip ${stSkips + 1}/${MAX_STALL_SKIPS})`, sessionId);
       this.transition(sessionId, "idle");
       return;
+    }
+    if (waiting && stSkips >= MAX_STALL_SKIPS) {
+      logAction("service", "stall_continue_force_resume", `skipped ${stSkips} times, forcing resume`, sessionId);
     }
 
     this.transition(sessionId, "continuing");
     this.emit("session:continuing", { sessionId });
     logAction("service", "stall_continue_fired", `stalled >${STALL_THRESHOLD_MS / 60_000}min`, sessionId);
 
-    const context = session.last_message
-      ? `\n\nFor context, the user's last message was: "${session.last_message.slice(0, 200)}"`
+    const taskContext = session.first_prompt
+      ? `\n\nOriginal task: "${session.first_prompt.slice(0, 300)}"`
       : "";
-    const stallPrompt = `You appear to have stalled — no output for over 5 minutes. I noticed and auto-resumed you. Please check what you were doing and continue the task.${context}`;
+    const userContext = session.last_message
+      ? `\nUser's last message: "${session.last_message.slice(0, 200)}"`
+      : "";
+    const stallPrompt = `You stalled — no output for over 5 minutes. Continue where you left off. Do NOT summarize what happened, just keep working on the task.${taskContext}${userContext}`;
 
     const args = buildCliArgs({ sessionId, message: stallPrompt, includeMaxTurns: true });
     const proc = spawn(
@@ -1018,11 +1214,19 @@ class SessionOrchestrator extends EventEmitter {
   private async executeIncompleteExitResume(sessionId: string, jsonlPath: string): Promise<void> {
     const db = getDb();
     const session = db
-      .prepare("SELECT project_path, last_message_role, last_message, jsonl_path FROM sessions WHERE session_id = ?")
-      .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path"> & { last_message: string | null } | undefined;
+      .prepare("SELECT project_path, last_message_role, last_message, jsonl_path, first_prompt FROM sessions WHERE session_id = ?")
+      .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path"> & { last_message: string | null; first_prompt: string | null } | undefined;
 
     if (!session) return;
     if (getSetting("auto_retry_on_crash") === "false") return;
+
+    // Detect babysitter loop — stop if unproductive resumes or too many total
+    const loop = detectBabysitterLoop(session.jsonl_path);
+    if (loop.unproductiveCount >= 2 || loop.resumes >= 4) {
+      logAction("service", "incomplete_exit_skipped", `babysitter loop: ${loop.unproductiveCount} unproductive / ${loop.resumes} total resumes`, sessionId);
+      this.transition(sessionId, "failed", "babysitter loop");
+      return;
+    }
 
     // Skip if session actually completed normally (has result event in JSONL)
     if (hasResultEvent(session.jsonl_path)) {
@@ -1035,13 +1239,40 @@ class SessionOrchestrator extends EventEmitter {
     if (isSessionActive(sessionId)) return;
     if (session.last_message_role !== "assistant") return;
 
+    // KEY HEURISTIC: If the last assistant message is text-only (no tool_use),
+    // Claude finished speaking and wasn't waiting for tool results.
+    // The process should have exited normally. Resuming text-only exits
+    // is almost always a false positive ("всё работает", "жду команды", etc.)
+    if (!lastAssistantHasToolUse(session.jsonl_path)) {
+      const lastText = extractLastAssistantText(session.jsonl_path);
+      logAction("service", "incomplete_exit_skipped", `text-only last message (no tool_use): "${lastText.slice(0, 80)}"`, sessionId);
+      this.transition(sessionId, "completed");
+      return;
+    }
+
     // Check if Claude was actually asking a question (don't auto-resume questions)
     const lastAssistantText = extractLastAssistantText(session.jsonl_path);
-    const waiting = await isWaitingForUser(lastAssistantText);
-    if (waiting) {
-      logAction("service", "incomplete_exit_skipped", "Claude was asking a question", sessionId);
+    const waiting = await isWaitingForUser(lastAssistantText, "incomplete_exit");
+    const state0 = this.states.get(sessionId);
+    const skipsSoFar = state0?.skipCount ?? 0;
+    const MAX_SKIPS = 3; // after 3 skips, force-resume regardless
+    if (waiting && skipsSoFar < MAX_SKIPS) {
+      // Track repeated skips — if we keep skipping the same session, eventually force it
+      if (state0) {
+        state0.skipCount++;
+      } else {
+        this.states.set(sessionId, {
+          sessionId, phase: "idle", projectPath: session.project_path,
+          pid: null, retryCount: 0, skipCount: 1,
+          lastActivity: Date.now(), startedAt: Date.now(),
+        });
+      }
+      logAction("service", "incomplete_exit_skipped", `Claude was asking a question (skip ${skipsSoFar + 1}/${MAX_SKIPS})`, sessionId);
       this.transition(sessionId, "idle");
       return;
+    }
+    if (waiting && skipsSoFar >= MAX_SKIPS) {
+      logAction("service", "incomplete_exit_force_resume", `skipped ${skipsSoFar} times, forcing resume`, sessionId);
     }
 
     const maxRetries = parseInt(getSetting("orchestrator_max_retries") || "3", 10);
@@ -1057,10 +1288,13 @@ class SessionOrchestrator extends EventEmitter {
     this.emit("session:retrying", { sessionId, attempt: (state?.retryCount ?? 0) + 1 });
     logAction("service", "incomplete_exit_fired", "orchestrator", sessionId);
 
-    const context = session.last_message
-      ? `\n\nFor context, the user's last message was: "${session.last_message.slice(0, 200)}"`
+    const taskContext = session.first_prompt
+      ? `\n\nOriginal task: "${session.first_prompt.slice(0, 300)}"`
       : "";
-    const resumePrompt = `Your process exited unexpectedly after your last response. You were about to take action but the process died before you could execute. Please review what you said last and continue where you left off.${context}`;
+    const userContext = session.last_message
+      ? `\nUser's last message: "${session.last_message.slice(0, 200)}"`
+      : "";
+    const resumePrompt = `Your process exited unexpectedly. You were mid-task when it died. Continue where you left off — do NOT summarize what happened, just keep working.${taskContext}${userContext}`;
 
     const args = buildCliArgs({ sessionId, message: resumePrompt, includeMaxTurns: true });
     const proc = spawn(
