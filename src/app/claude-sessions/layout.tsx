@@ -37,7 +37,7 @@ export default function SessionsLayout({
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
 const [sidebarOpen, setSidebarOpen] = useState(true);
   const [geminiResults, setGeminiResults] = useState<GeminiResult[]>([]);
@@ -50,6 +50,8 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "updating" | "done" | "error" | "restarting">("idle");
   const [updateStep, setUpdateStep] = useState("");
   const [updatesAvailable, setUpdatesAvailable] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const MAX_SESSIONS_IN_MEMORY = 50;
 
   // Check for updates on mount (silent background check)
   useEffect(() => {
@@ -193,67 +195,93 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   const SIDEBAR_PAGE_SIZE = 40;
 
   const fetchSessions = useCallback(async () => {
+    // Cancel any pending lazy-load request
+    abortControllerRef.current?.abort("cancelled");
+    const abort = new AbortController();
+    abortControllerRef.current = abort;
+
     const params = new URLSearchParams();
-    if (selectedProject) params.set("project", selectedProject);
+    if (selectedProjects.length > 0) params.set("project", selectedProjects.join(","));
     if (searchQuery) params.set("search", searchQuery);
     params.set("sort", "modified");
     params.set("limit", String(SIDEBAR_PAGE_SIZE));
     // Skip remote nodes for instant sidebar load; fetch them lazily below
     params.set("include_remote", "false");
 
-    const res = await fetch(`/api/sessions?${params}`);
-    const data = await res.json();
-    setSessions(data.sessions);
-    setHasMore(data.sessions.length < (data.total ?? 0));
-    setLoading(false);
+    try {
+      const res = await fetch(`/api/sessions?${params}`);
+      const data = await res.json();
 
-    // Lazy-load remote sessions in background (non-blocking)
-    fetch(`/api/sessions?sort=modified&limit=50&include_remote=true`)
-      .then(r => r.json())
-      .then(remoteData => {
-        const remoteSessions = (remoteData.sessions || []).filter(
-          (s: Record<string, unknown>) => s._remote
-        );
-        if (remoteSessions.length > 0) {
-          setSessions(prev => {
-            const localIds = new Set(prev.map((s) => s.session_id));
-            const newRemote = remoteSessions.filter(
-              (s: SessionListItem) => !localIds.has(s.session_id)
-            );
-            if (newRemote.length === 0) return prev;
-            // Merge and sort by modified_at descending
-            const merged = [...prev, ...newRemote];
-            merged.sort((a, b) => {
-              const aTime = String(a.modified_at || "");
-              const bTime = String(b.modified_at || "");
-              return bTime.localeCompare(aTime);
-            });
-            return merged;
-          });
-        }
+      // Apply memory limit: keep only first MAX_SESSIONS_IN_MEMORY
+      const limitedSessions = (data.sessions || []).slice(0, MAX_SESSIONS_IN_MEMORY);
+      setSessions(limitedSessions);
+      setHasMore(limitedSessions.length < (data.total ?? 0));
+      setLoading(false);
+
+      // Lazy-load remote sessions in background (non-blocking)
+      fetch(`/api/sessions?sort=modified&limit=${MAX_SESSIONS_IN_MEMORY}&include_remote=true`, {
+        signal: abort.signal,
       })
-      .catch(() => {}); // remote unavailable — no problem
-  }, [selectedProject, searchQuery]);
+        .then(r => r.json())
+        .then(remoteData => {
+          if (abort.signal.aborted) return;
+          const remoteSessions = (remoteData.sessions || []).filter(
+            (s: Record<string, unknown>) => s._remote
+          );
+          if (remoteSessions.length > 0) {
+            setSessions(prev => {
+              if (abort.signal.aborted) return prev;
+              const localIds = new Set(prev.map((s) => s.session_id));
+              const newRemote = remoteSessions.filter(
+                (s: SessionListItem) => !localIds.has(s.session_id)
+              );
+              if (newRemote.length === 0) return prev;
+              // Merge and sort by modified_at descending, then apply limit
+              const merged = [...prev, ...newRemote];
+              merged.sort((a, b) => {
+                const aTime = String(a.modified_at || "");
+                const bTime = String(b.modified_at || "");
+                return bTime.localeCompare(aTime);
+              });
+              return merged.slice(0, MAX_SESSIONS_IN_MEMORY);
+            });
+          }
+        })
+        .catch(() => {}); // remote unavailable or aborted — no problem
+    } catch {
+      // Main fetch failed — ignore, will retry on next poll
+      setLoading(false);
+    }
+  }, [selectedProjects, searchQuery]);
 
   const loadMoreSessions = useCallback(async () => {
     if (loadingMore || !hasMore) return;
+    // Don't load more if we're already at the memory limit
+    if (sessions.length >= MAX_SESSIONS_IN_MEMORY) return;
+
     setLoadingMore(true);
     const params = new URLSearchParams();
-    if (selectedProject) params.set("project", selectedProject);
+    if (selectedProjects.length > 0) params.set("project", selectedProjects.join(","));
     if (searchQuery) params.set("search", searchQuery);
     params.set("sort", "modified");
-    params.set("limit", String(SIDEBAR_PAGE_SIZE));
+    // Only fetch up to the memory limit
+    const remaining = MAX_SESSIONS_IN_MEMORY - sessions.length;
+    params.set("limit", String(Math.min(SIDEBAR_PAGE_SIZE, remaining)));
     params.set("offset", String(sessions.length));
     params.set("include_remote", "false");
 
     try {
       const res = await fetch(`/api/sessions?${params}`);
       const data = await res.json();
-      setSessions(prev => [...prev, ...data.sessions]);
-      setHasMore(sessions.length + data.sessions.length < (data.total ?? 0));
+      const newSessions = data.sessions || [];
+      setSessions(prev => {
+        const merged = [...prev, ...newSessions];
+        return merged.slice(0, MAX_SESSIONS_IN_MEMORY);
+      });
+      setHasMore(sessions.length + newSessions.length < (data.total ?? 0));
     } catch { /* ignore */ }
     setLoadingMore(false);
-  }, [loadingMore, hasMore, selectedProject, searchQuery, sessions.length]);
+  }, [loadingMore, hasMore, selectedProjects, searchQuery, sessions.length]);
 
   const fetchProjects = useCallback(async () => {
     const res = await fetch("/api/projects");
@@ -330,6 +358,13 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   }, []);
 
   sessionsRef.current = sessions;
+
+  // Cleanup: abort any pending fetch on unmount
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort("unmount");
+    };
+  }, []);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -426,6 +461,10 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     if (initialLoadDone.current) fetchSessions();
+    // Abort any pending requests when search/projects change
+    return () => {
+      abortControllerRef.current?.abort("query-changed");
+    };
   }, [fetchSessions]);
 
   return (
@@ -509,6 +548,9 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
                   searchQuery={searchQuery}
                   onSearchChange={setSearchQuery}
                   onGeminiResults={handleGeminiResults}
+                  projects={projects}
+                  selectedProjects={selectedProjects}
+                  onProjectFilterChange={setSelectedProjects}
                 />
               </div>
               <button

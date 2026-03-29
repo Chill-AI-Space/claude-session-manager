@@ -27,8 +27,15 @@ export async function GET(request: NextRequest) {
     conditions.push("archived = 0");
   }
   if (project) {
-    conditions.push("project_dir = @project");
-    filterParams.project = project;
+    const projectList = project.split(",").filter(Boolean);
+    if (projectList.length === 1) {
+      conditions.push("project_dir = @project");
+      filterParams.project = projectList[0];
+    } else {
+      const placeholders = projectList.map((_, i) => `@proj${i}`).join(",");
+      conditions.push(`project_dir IN (${placeholders})`);
+      projectList.forEach((p, i) => { filterParams[`proj${i}`] = p; });
+    }
   }
   if (search) {
     conditions.push(
@@ -66,11 +73,13 @@ export async function GET(request: NextRequest) {
       break;
   }
 
-  // Explicit columns — exclude heavy BLOBs (embedding) and large text (summary, learnings)
+  // Explicit columns — truncate large text fields for sidebar (UI only shows 100-200 chars)
   const rows = db
     .prepare(
       `SELECT session_id, jsonl_path, project_dir, project_path,
-              git_branch, claude_version, model, first_prompt, last_message,
+              git_branch, claude_version, model,
+              SUBSTR(first_prompt, 1, 500) as first_prompt,
+              SUBSTR(last_message, 1, 500) as last_message,
               generated_title, custom_name, tags, pinned, archived,
               message_count, total_input_tokens, total_output_tokens,
               created_at, modified_at, file_mtime, file_size, last_scanned_at,

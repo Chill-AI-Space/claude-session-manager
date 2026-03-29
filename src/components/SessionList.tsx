@@ -5,7 +5,8 @@ import { SessionListItemComponent } from "./SessionListItem";
 import { GeminiResult } from "./SessionSearch";
 import { Loader2 } from "lucide-react";
 import { useParams } from "next/navigation";
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { Virtuoso } from "react-virtuoso";
 
 interface SessionListProps {
   sessions: SessionListItem[];
@@ -29,11 +30,6 @@ export function SessionList({ sessions, loading, geminiResults, onArchive, hasMo
   }, []);
   const now = Math.floor(nowRaw / 10_000) * 10_000; // 10s bucket
 
-  // IntersectionObserver refs — must be before any early returns (Rules of Hooks)
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const onLoadMoreRef = useRef(onLoadMore);
-  onLoadMoreRef.current = onLoadMore;
-
   // Memoize Gemini-derived maps — only recompute when results change
   const { displaySessions, snippetMap, queryMap } = useMemo(() => {
     if (!geminiResults?.length) {
@@ -51,17 +47,55 @@ export function SessionList({ sessions, loading, geminiResults, onArchive, hasMo
     return { displaySessions, snippetMap, queryMap };
   }, [geminiResults, sessions]);
 
-  useEffect(() => {
-    if (!hasMore || !sentinelRef.current) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) onLoadMoreRef.current?.();
-      },
-      { rootMargin: "200px" }
-    );
-    observer.observe(sentinelRef.current);
-    return () => observer.disconnect();
-  }, [hasMore, displaySessions.length]);
+  // Group sessions by project_dir for sticky headers
+  const groupData = useMemo(() => {
+    const groups: Array<{ projectDir: string; displayName: string; sessions: SessionListItem[] }> = [];
+    let currentProjectDir: string | null = null;
+    let currentGroup: SessionListItem[] = [];
+
+    for (const session of displaySessions) {
+      if (session.project_dir !== currentProjectDir) {
+        if (currentGroup.length > 0) {
+          groups.push({ projectDir: currentProjectDir!, displayName: currentGroup[0].display_name, sessions: currentGroup });
+        }
+        currentProjectDir = session.project_dir;
+        currentGroup = [session];
+      } else {
+        currentGroup.push(session);
+      }
+    }
+    if (currentGroup.length > 0) {
+      groups.push({ projectDir: currentProjectDir!, displayName: currentGroup[0].display_name, sessions: currentGroup });
+    }
+
+    return groups;
+  }, [displaySessions]);
+
+  // Compute total item count: each group has (sessions + 1 header)
+  const totalCount = useMemo(() => {
+    return groupData.reduce((sum, group) => sum + group.sessions.length + 1, 0);
+  }, [groupData]);
+
+  // Map flat index to (group, session) or null for header
+  const itemAtIndex = useCallback((index: number): { type: "header" | "session"; displayName?: string; session?: SessionListItem } | null => {
+    let currentIndex = 0;
+    for (const group of groupData) {
+      // Header
+      if (currentIndex === index) {
+        return { type: "header", displayName: group.displayName };
+      }
+      currentIndex++;
+
+      // Sessions in this group
+      for (const session of group.sessions) {
+        if (currentIndex === index) {
+          return { type: "session", session };
+        }
+        currentIndex++;
+      }
+    }
+    return null;
+  }, [groupData]);
 
   if (loading) {
     return (
@@ -80,45 +114,53 @@ export function SessionList({ sessions, loading, geminiResults, onArchive, hasMo
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="py-1">
-        {displaySessions.map((session, i) => {
-          const prevProject = i > 0 ? displaySessions[i - 1].project_dir : null;
-          const showLabel = session.project_dir !== prevProject;
+    <Virtuoso
+      style={{ flex: 1, overflow: "auto" }}
+      data={Array.from({ length: totalCount })}
+      itemContent={(index) => {
+        const item = itemAtIndex(index);
+        if (!item) return null;
+
+        if (item.type === "header") {
           return (
-            <div key={session.session_id}>
-              {showLabel && (
-                <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider sticky top-0 bg-sidebar/95 backdrop-blur-sm z-10">
-                  {session.display_name}
-                </div>
-              )}
-              <SessionListItemComponent
-                session={session}
-                selected={session.session_id === currentSessionId}
-                snippet={snippetMap?.get(session.session_id)}
-                highlightQuery={queryMap?.get(session.session_id)}
-                now={now}
-                onArchive={onArchive}
-              />
+            <div key={`header-${index}`} className="px-3 pt-2 pb-1 text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider sticky top-0 bg-sidebar/95 backdrop-blur-sm z-10">
+              {item.displayName}
             </div>
           );
-        })}
-        {/* Sentinel for infinite scroll */}
-        {hasMore && (
-          <div ref={sentinelRef} className="flex items-center justify-center py-3">
+        }
+
+        const session = item.session;
+        if (!session) return null;
+        return (
+          <SessionListItemComponent
+            key={session.session_id}
+            session={session}
+            selected={session.session_id === currentSessionId}
+            snippet={snippetMap?.get(session.session_id)}
+            highlightQuery={queryMap?.get(session.session_id)}
+            now={now}
+            onArchive={onArchive}
+          />
+        );
+      }}
+      endReached={() => {
+        if (hasMore && !loadingMore && onLoadMore) {
+          onLoadMore();
+        }
+      }}
+      components={{
+        Footer: hasMore ? () => (
+          <div className="flex items-center justify-center py-3">
             {loadingMore ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
             ) : (
-              <button
-                onClick={onLoadMore}
-                className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Load more...
-              </button>
+              <span className="text-[11px] text-muted-foreground">
+                Loading more...
+              </span>
             )}
           </div>
-        )}
-      </div>
-    </div>
+        ) : undefined,
+      }}
+    />
   );
 }
