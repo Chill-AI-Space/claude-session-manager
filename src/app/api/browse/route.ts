@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import os from "os";
 import path from "path";
-import { readdir, mkdir } from "fs/promises";
+import { readdir, mkdir, opendir } from "fs/promises";
 import { getSetting } from "@/lib/db";
 
 async function searchDirs(
@@ -78,10 +78,16 @@ export async function GET(request: NextRequest) {
         const fullPath = path.join(resolved, item.name);
         let hasChildren = false;
         try {
-          const children = await readdir(fullPath, { withFileTypes: true });
-          hasChildren = children.some(
-            (c) => c.isDirectory() && (showHidden || !c.name.startsWith("."))
-          );
+          // Use opendir + async iterator to stop as soon as we find one subdir
+          // (avoids reading all entries just to check if any directory exists)
+          const dir = await opendir(fullPath);
+          for await (const child of dir) {
+            if (child.isDirectory() && (showHidden || !child.name.startsWith("."))) {
+              hasChildren = true;
+              await dir.close();
+              break;
+            }
+          }
         } catch {
           // Permission denied or other error
         }

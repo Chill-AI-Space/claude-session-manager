@@ -448,6 +448,8 @@ const SETTING_DEFAULTS: Record<string, string> = {
   openai_api_key: "",
   anthropic_api_key: "",
   google_ai_api_key: "",
+  zai_api_key: "",
+  zai_base_url: "",
   // Worker integration
   worker_heartbeat_timeout_ms: "300000",
   worker_fallback_enabled: "true",

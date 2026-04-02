@@ -222,7 +222,9 @@ export function buildCliArgs(opts: {
   args.push("--verbose");
   args.push("--effort", effort);
 
-  const model = opts.model || getSetting("claude_model") || "claude-sonnet-4-6";
+  const rawModel = opts.model || getSetting("claude_model") || "claude-sonnet-4-6";
+  // Strip "z.ai-" prefix — Z.AI routing is handled via env vars, CLI needs the real model name
+  const model = rawModel.startsWith("z.ai-") ? rawModel.slice(5) : rawModel;
   args.push("--model", model);
 
   if (opts.includeMaxTurns !== false && opts.sessionId) {
@@ -458,6 +460,11 @@ function detectBabysitterLoop(jsonlPath: string): { resumes: number; unproductiv
 
         if (obj.type !== "user") break;
 
+        // Skip SDK meta-messages — they are internal Claude Code protocol messages
+        // (e.g. "Continue from where you left off." injected on --resume),
+        // not real babysitter pokes or user input.
+        if (obj.isMeta) continue;
+
         const content = obj.message?.content;
         const text = typeof content === "string" ? content
           : Array.isArray(content)
@@ -509,6 +516,37 @@ function lastAssistantHasToolUse(jsonlPath: string): boolean {
         }
         return false; // string content = text only
       } catch { /* skip */ }
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
+/**
+ * Returns true if the last meaningful event in the JSONL is a result event.
+ * When true, Claude completed its turn and is waiting for user — NOT stalled.
+ * Works for stream-json sessions (result event present). For terminal sessions
+ * without stream-json, returns false (falls through to LLM check).
+ */
+function isLastEventResult(jsonlPath: string): boolean {
+  try {
+    const stat = fs.statSync(jsonlPath);
+    const TAIL_BYTES = 2048;
+    const start = Math.max(0, stat.size - TAIL_BYTES);
+    const fd = fs.openSync(jsonlPath, "r");
+    const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+
+    const lines = buf.toString("utf-8").split(/\r?\n/).filter(Boolean);
+    if (start > 0) lines.shift(); // first line may be truncated
+
+    // Walk backwards — find first parseable line with a meaningful type
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const obj = JSON.parse(lines[i]);
+        if (obj.type === "result") return true;
+        if (obj.type === "user" || obj.type === "assistant") return false;
+      } catch { /* skip malformed */ }
     }
   } catch { /* ignore */ }
   return false;
@@ -802,6 +840,9 @@ class SessionOrchestrator extends EventEmitter {
    * @param verbose — when true, emit extra debug events (tool inputs, tokens, thinking)
    */
   resume(sessionId: string, message: string, projectPath: string, verbose = false): ReadableStream {
+    // Cancel any pending stall_continue — user is actively replying
+    this.queue.cancel(`stall_continue:${sessionId}`);
+
     const args = buildCliArgs({ sessionId, message, includeMaxTurns: true });
 
     this.states.set(sessionId, {
@@ -1059,6 +1100,13 @@ class SessionOrchestrator extends EventEmitter {
     if (!session || session.last_message_role !== "tool_result") return;
     if (getSetting("auto_retry_on_crash") === "false") return;
 
+    // If the process is still alive, it recovered on its own — skip
+    if (isSessionActive(sessionId)) {
+      logAction("service", "auto_retry_skipped", "process alive — recovered before execution", sessionId);
+      this.transition(sessionId, "running");
+      return;
+    }
+
     // Detect babysitter loop — if we've already poked this session 2+ times, stop
     const loop = detectBabysitterLoop(session.jsonl_path);
     if (loop.unproductiveCount >= 2 || loop.resumes >= 4) {
@@ -1135,11 +1183,21 @@ class SessionOrchestrator extends EventEmitter {
   private async executeStallContinue(sessionId: string): Promise<void> {
     const db = getDb();
     const session = db
-      .prepare("SELECT project_path, last_message_role, last_message, jsonl_path, first_prompt FROM sessions WHERE session_id = ?")
-      .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path"> & { last_message: string | null; first_prompt: string | null } | undefined;
+      .prepare("SELECT project_path, last_message_role, last_message, jsonl_path, first_prompt, has_result FROM sessions WHERE session_id = ?")
+      .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path" | "has_result"> & { last_message: string | null; first_prompt: string | null } | undefined;
 
     if (!session) return;
     if (getSetting("auto_continue_on_stall") !== "true") return;
+
+    // Skip if Claude completed the turn normally — process alive means waiting for user, not stalled
+    if (session.has_result) return;
+
+    // Direct JSONL check: last event is a result → Claude just finished, waiting for user
+    if (isLastEventResult(session.jsonl_path)) return;
+
+    // Skip if session is already running (user sent a reply while we were waiting)
+    const currentPhase = this.states.get(sessionId)?.phase;
+    if (currentPhase === "running" || currentPhase === "continuing") return;
 
     // Detect babysitter loop
     const loop = detectBabysitterLoop(session.jsonl_path);

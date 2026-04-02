@@ -22,6 +22,7 @@ import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useComputeNode } from "@/hooks/useComputeNode";
+import { EffectiveModelBadge } from "@/components/EffectiveModelBadge";
 
 const CTX_MAX = 200_000;
 
@@ -249,21 +250,22 @@ export default function SessionDetailPage({
     setTheme(saved === "light" ? "light" : "dark");
   }, []);
 
-  // Poll for pending permission requests (every 2s)
+  // Poll for pending permission requests (every 2s) — only when session is active
   useEffect(() => {
+    if (!data?.is_active && !isStreaming) return;
     let cancelled = false;
     const poll = async () => {
       try {
         const res = await fetch(`/api/permissions/pending?sessionId=${sessionId}`);
         if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled) setPendingPermissions(data);
+        const json = await res.json();
+        if (!cancelled) setPendingPermissions(json);
       } catch { /* ignore */ }
     };
     poll();
     const id = setInterval(poll, 2000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [sessionId]);
+  }, [sessionId, data?.is_active, isStreaming]);
 
   const handlePermissionDecide = async (id: string, behavior: "allow" | "deny") => {
     try {
@@ -1142,9 +1144,6 @@ export default function SessionDetailPage({
     setStreamStatus(null);
     setLastSentText(null);
     processingRef.current = false;
-    // Also clear the queue
-    queueRef.current = [];
-    setQueuedMessages([]);
   }, []);
 
   // Keyboard shortcuts
@@ -1198,9 +1197,12 @@ export default function SessionDetailPage({
   // Use last assistant message's usage — this reflects the actual current context window size.
   // Cumulative total_input_tokens is wrong: each turn re-sends full context so it grows as N².
   // Must include cache_read + cache_creation — with prompt caching most tokens are there.
-  const lastUsage = [...data.messages]
-    .reverse()
-    .find((m) => m.type === "assistant" && m.usage)?.usage;
+  // Iterate backwards to avoid copying the array.
+  let lastUsage: typeof data.messages[0]["usage"] | undefined;
+  for (let i = data.messages.length - 1; i >= 0; i--) {
+    const m = data.messages[i];
+    if (m.type === "assistant" && m.usage) { lastUsage = m.usage; break; }
+  }
   const totalTokens = lastUsage
     ? (lastUsage.input_tokens || 0)
       + (lastUsage.cache_read_input_tokens || 0)
@@ -1441,7 +1443,28 @@ export default function SessionDetailPage({
                     <span className="text-blue-400/70">Extracting learnings…</span>
                   </div>
                 )}
-                {learningsError && <div className="text-[11px] text-red-500 py-1">{learningsError}</div>}
+                {learningsError && (
+                  <div className="text-[11px] text-red-500 py-2 space-y-1">
+                    <div>{learningsError}</div>
+                    <button
+                      onClick={() => {
+                        setLearningsError(null);
+                        setLearningsLoading(true);
+                        fetch(`/api/sessions/${data.session_id}/learnings?refresh=1`, { method: "POST" })
+                          .then(r => r.json())
+                          .then(json => {
+                            if (json.error) setLearningsError(json.error + (json.raw ? `\n\nRaw: ${json.raw.slice(0, 300)}...` : ""));
+                            else setLearnings(json.learnings);
+                          })
+                          .catch(e => setLearningsError(e.message))
+                          .finally(() => setLearningsLoading(false));
+                      }}
+                      className="underline underline-offset-2 hover:text-red-400"
+                    >
+                      Retry with refresh
+                    </button>
+                  </div>
+                )}
                 {learnings && (() => {
                   const l = learnings as Record<string, string | string[]>;
                   const categories = [
@@ -1591,7 +1614,28 @@ export default function SessionDetailPage({
                       </button>
                       {learningsOpen && (
                         <div className="px-4 pb-3 border-t border-border/20">
-                          {learningsError && <div className="text-[11px] text-red-500 py-2">{learningsError}</div>}
+                          {learningsError && (
+                            <div className="text-[11px] text-red-500 py-2 space-y-1">
+                              <div>{learningsError}</div>
+                              <button
+                                onClick={() => {
+                                  setLearningsError(null);
+                                  setLearningsLoading(true);
+                                  fetch(`/api/sessions/${data.session_id}/learnings?refresh=1`, { method: "POST" })
+                                    .then(r => r.json())
+                                    .then(json => {
+                                      if (json.error) setLearningsError(json.error + (json.raw ? `\n\nRaw: ${json.raw.slice(0, 300)}...` : ""));
+                                      else setLearnings(json.learnings);
+                                    })
+                                    .catch(e => setLearningsError(e.message))
+                                    .finally(() => setLearningsLoading(false));
+                                }}
+                                className="underline underline-offset-2 hover:text-red-400"
+                              >
+                                Retry with refresh
+                              </button>
+                            </div>
+                          )}
                           {learnings && (() => {
                             const l = learnings as Record<string, string | string[]>;
                             const entries = Object.entries(l).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : !!v));
@@ -1758,9 +1802,7 @@ export default function SessionDetailPage({
                   {data.messages_total ?? data.metadata.message_count} messages
                 </span>
                 {data.metadata.model && (
-                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
-                    {data.metadata.model.replace("claude-", "")}
-                  </Badge>
+                  <EffectiveModelBadge reportedModel={data.metadata.model} variant="compact" />
                 )}
                 {totalTokens > 0 && <ContextBar tokens={totalTokens} />}
               </div>

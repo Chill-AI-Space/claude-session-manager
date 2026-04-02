@@ -73,7 +73,7 @@ export async function POST(
   }
 
   try {
-    const model = getSetting("learnings_model") || "gpt-4o-mini";
+    const model = getSetting("learnings_model") || "gemini-2.5-flash";
     const messages = readSessionMessages(session.jsonl_path);
     const sessionText = messagesToText(messages, { maxMessageLen: 2000 });
 
@@ -95,7 +95,12 @@ export async function POST(
     // Try to find JSON object
     const objMatch = cleaned.match(/\{[\s\S]*\}/);
     if (!objMatch) {
-      return Response.json({ error: "Failed to parse learnings", raw: result.text }, { status: 500 });
+      console.error("[learnings] No JSON found in response:", result.text);
+      return Response.json({
+        error: "Failed to parse learnings — LLM did not return valid JSON",
+        raw: result.text.slice(0, 1000), // First 1000 chars for debugging
+        model: result.model,
+      }, { status: 500 });
     }
 
     const learnings = JSON.parse(objMatch[0]);

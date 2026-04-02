@@ -93,7 +93,8 @@ async function generateAndSaveSummary(session: SessionForTitle): Promise<string 
       .run(result.text, session.session_id);
 
     return result.text;
-  } catch {
+  } catch (err) {
+    console.error(`[title-gen] Summary failed for ${session.session_id}:`, err instanceof Error ? err.message : err);
     return null;
   }
 }

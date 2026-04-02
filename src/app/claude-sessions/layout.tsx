@@ -289,7 +289,8 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     setProjects(data.projects);
   }, []);
 
-  async function triggerScan(mode: "full" | "incremental" = "incremental"): Promise<void> {
+
+  const triggerScan = useCallback(async (mode: "full" | "incremental" = "incremental"): Promise<void> => {
     setScanning(true);
     await fetch("/api/sessions/scan", {
       method: "POST",
@@ -300,8 +301,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     setScanning(false);
     // Signal the open session detail page to re-fetch
     window.dispatchEvent(new Event("sessions-scanned"));
-  }
-
+  }, [fetchSessions, fetchProjects]);
 
   const archiveSession = useCallback(async (sessionId: string) => {
     setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
@@ -355,7 +355,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     }
     window.addEventListener("session-started", handleSessionStarted);
     return () => window.removeEventListener("session-started", handleSessionStarted);
-  }, []);
+  }, [triggerScan]);
 
   sessionsRef.current = sessions;
 

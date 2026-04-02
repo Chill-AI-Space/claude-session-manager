@@ -96,19 +96,30 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
       try {
         const obj = JSON.parse(line);
 
-        // Track result events — present when Claude exits normally, absent on crash
+        // Track result events — present when Claude exits normally, absent on crash.
+        // has_result tracks the CURRENT TURN: reset when a human user message arrives,
+        // set when Claude produces a result event. This way has_result=1 means
+        // "Claude finished this turn and is waiting for user", not just "ever had a result".
         if (obj.type === "result") {
           hasResult = true;
         }
 
         if (obj.type === "user" || obj.type === "assistant") {
+          // Skip SDK meta-messages (isMeta: true) — these are Claude Code's internal
+          // protocol messages injected on resume/compaction ("Continue from where you left off.")
+          // They are NOT user input and should not affect state tracking or lastMessage.
+          if (obj.isMeta) continue;
+
           messageCount++;
           // Detect tool_result messages (Claude died mid-execution)
-          if (obj.type === "user" && Array.isArray(obj.message?.content) &&
-              obj.message.content.every((b: { type: string }) => b.type === "tool_result")) {
+          const isToolResult = obj.type === "user" && Array.isArray(obj.message?.content) &&
+              obj.message.content.every((b: { type: string }) => b.type === "tool_result");
+          if (isToolResult) {
             lastMessageRole = "tool_result";
           } else {
             lastMessageRole = obj.type;
+            // Human user message = new turn starting → reset current-turn result flag
+            if (obj.type === "user") hasResult = false;
           }
 
           if (!sessionId && obj.sessionId) sessionId = obj.sessionId;
@@ -385,10 +396,19 @@ export async function scanSessions(
         const isNewCrash = !prev || prev.last_message_role !== "tool_result";
         const isRepeatedCrash = prev?.last_message_role === "tool_result" &&
           prev.file_mtime !== null && Math.abs(stat.mtimeMs - prev.file_mtime) > 1000;
-        if (isNewCrash || isRepeatedCrash) {
-          logAction("service", isRepeatedCrash ? "repeated_crash_detected" : "crash_detected", `jsonl:${filePath}`, sessionId);
+        // Protective age guard: don't fire on brand-new tool_result entries.
+        // Gives Claude time to process tool output and write the next assistant message.
+        // 30s minimum prevents false positives when scanner fires right after a tool runs.
+        const fileAgeMs = Date.now() - stat.mtimeMs;
+        const MIN_CRASH_AGE_MS = 90_000;
+        if ((isNewCrash || isRepeatedCrash) && fileAgeMs >= MIN_CRASH_AGE_MS) {
           const capturedPath = filePath;
+          const capturedIsRepeated = isRepeatedCrash;
           postTxActions.push(() => {
+            const { isSessionActive } = require("./process-detector");
+            // Process still alive = Claude is executing, not crashed — skip
+            if (isSessionActive(sessionId)) return;
+            logAction("service", capturedIsRepeated ? "repeated_crash_detected" : "crash_detected", `jsonl:${capturedPath}`, sessionId);
             getOrchestrator().enqueueCrashRetry(sessionId, capturedPath);
           });
         }
@@ -406,6 +426,7 @@ export async function scanSessions(
           const capturedSessionId = sessionId;
           const capturedPath = filePath;
           const capturedSilentMs = silentMs;
+          const capturedHasResult = metadata.hasResult;
           postTxActions.push(() => {
             const { isSessionActive } = require("./process-detector");
             // Check for permission wait (tool_use pending) OR test word trigger
@@ -417,7 +438,8 @@ export async function scanSessions(
               return; // don't also enqueue stall_continue
             }
             // Regular stall detection (5 min threshold)
-            if (capturedSilentMs > STALL_THRESHOLD_MS && isSessionActive(capturedSessionId)) {
+            // Skip if Claude completed the turn normally (has_result) — process alive = waiting for user, not stalled
+            if (capturedSilentMs > STALL_THRESHOLD_MS && isSessionActive(capturedSessionId) && !capturedHasResult) {
               logAction("service", "stall_detected", `silent:${Math.round(capturedSilentMs / 60_000)}min`, capturedSessionId);
               getOrchestrator().enqueueStallContinue(capturedSessionId);
             }

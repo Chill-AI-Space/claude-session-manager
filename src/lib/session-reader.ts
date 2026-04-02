@@ -56,7 +56,8 @@ export function readSessionMessagesPaginated(
         if (obj.type === "system" && obj.subtype === "compact_boundary") {
           msgLineIndices.push(i);
         } else if (obj.type === "user" && obj.message?.role === "user") {
-          // Skip tool_result-only
+          // Skip SDK meta-messages and tool_result-only
+          if (obj.isMeta) continue;
           const c = obj.message.content;
           if (Array.isArray(c) && c.every((b: { type: string }) => b.type === "tool_result")) continue;
           msgLineIndices.push(i);
@@ -179,6 +180,8 @@ function parseLines(lines: string[]): ParsedMessage[] {
           compactMetadata: obj.compactMetadata,
         });
       } else if (obj.type === "user" && obj.message?.role === "user") {
+        // Skip SDK meta-messages ("Continue from where you left off." injected on --resume)
+        if (obj.isMeta) continue;
         // Skip tool_result-only messages (they're part of assistant flow)
         const content = obj.message.content;
         const isToolResultOnly =
