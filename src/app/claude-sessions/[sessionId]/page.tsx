@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud, Hammer } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -213,6 +213,7 @@ export default function SessionDetailPage({
 
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
+  const [newSessionAgent, setNewSessionAgent] = useState<"claude" | "forge">("claude");
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [startingNewSession, setStartingNewSession] = useState(false);
@@ -1103,7 +1104,7 @@ export default function SessionDetailPage({
       const res = await fetch(startUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: newSessionPath, message: fullMessage, ...(newSessionModel && { model: newSessionModel }) }),
+        body: JSON.stringify({ path: newSessionPath, message: fullMessage, ...(newSessionModel && { model: newSessionModel }), ...(newSessionAgent === "forge" && { agent: "forge" }) }),
       });
 
       if (!res.ok) throw new Error("Failed to start session");
@@ -2190,6 +2191,18 @@ export default function SessionDetailPage({
                   <span className={`font-medium ${skipPerms.value ? "text-amber-400" : "text-muted-foreground/60"}`}>
                     {skipPerms.value ? "on" : "off"}
                   </span>
+                </button>
+                <button
+                  onClick={() => setNewSessionAgent(a => a === "claude" ? "forge" : "claude")}
+                  className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors px-2 py-0.5 rounded border ${
+                    newSessionAgent === "forge"
+                      ? "text-orange-400 border-orange-400/40 bg-orange-500/10 hover:bg-orange-500/20"
+                      : "text-muted-foreground/70 border-border hover:text-foreground hover:bg-muted/50"
+                  }`}
+                  title={newSessionAgent === "forge" ? "Using Forge — click to switch to Claude" : "Using Claude — click to switch to Forge"}
+                >
+                  {newSessionAgent === "forge" ? <Hammer className="h-3 w-3" /> : <span className="text-[10px] font-bold leading-none">C</span>}
+                  <span>{newSessionAgent}</span>
                 </button>
                 {compute.nodes.length > 0 && (
                   <button
