@@ -201,15 +201,15 @@ export default function SessionsEmptyState() {
             </button>
             <button
               onClick={() => setSelectedAgent(a => a === "claude" ? "forge" : "claude")}
-              className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
+              className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors px-2 py-0.5 rounded border ${
                 selectedAgent === "forge"
-                  ? "text-orange-400 hover:text-orange-300 hover:bg-orange-500/10"
-                  : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
+                  ? "text-orange-400 border-orange-400/40 bg-orange-500/10 hover:bg-orange-500/20"
+                  : "text-muted-foreground/70 border-border hover:text-foreground hover:bg-muted/50"
               }`}
               title={selectedAgent === "forge" ? "Using Forge — click to switch to Claude" : "Using Claude — click to switch to Forge"}
             >
-              {selectedAgent === "forge" ? <Hammer className="h-3 w-3" /> : <span className="text-[10px] font-medium">C</span>}
-              <span className="font-medium">{selectedAgent}</span>
+              {selectedAgent === "forge" ? <Hammer className="h-3 w-3" /> : <span className="text-[10px] font-bold leading-none">C</span>}
+              <span>{selectedAgent}</span>
             </button>
             {compute.nodes.length > 0 && (
               <button
