@@ -535,7 +535,7 @@ export async function scanSessions(
 
   // Post-scan: index Forge sessions from ~/forge/.forge.db
   try {
-    const { scanForgeSessions } = require("./forge-scanner");
+    const { scanForgeSessions } = await import("./forge-scanner");
     const forgeResult = await scanForgeSessions(db, existingMtimes, mode, upsertSession);
     sessionsScanned += forgeResult.scanned;
     sessionsSkipped += forgeResult.skipped;
