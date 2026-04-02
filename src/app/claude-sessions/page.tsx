@@ -20,10 +20,7 @@ export default function SessionsEmptyState() {
   const dragCounterRef = useRef(0);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
-  const defaultAgentSetting = useSettingToggle("default_agent");
-  const [selectedAgent, setSelectedAgent] = useState<"claude" | "forge">(
-    (defaultAgentSetting.value === "forge" ? "forge" : "claude") as "claude" | "forge"
-  );
+  const [selectedAgent, setSelectedAgent] = useState<"claude" | "forge">("claude");
   const compute = useComputeNode();
   const autodetect = useAutodetect();
   const session = useSessionStart();

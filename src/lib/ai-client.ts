@@ -96,12 +96,9 @@ const CONTEXT_LIMITS: Record<string, number> = {
 
 /** Rough context limit for a model (defaults to 128K if unknown) */
 export function getContextLimit(model: string): number {
-  // Strip z.ai- prefix for lookup
-  const m = model.startsWith("z.ai-") ? model.slice(5) : model;
-  // Try exact match first, then prefix match
-  if (CONTEXT_LIMITS[m]) return CONTEXT_LIMITS[m];
+  if (CONTEXT_LIMITS[model]) return CONTEXT_LIMITS[model];
   for (const [prefix, limit] of Object.entries(CONTEXT_LIMITS)) {
-    if (m.startsWith(prefix)) return limit;
+    if (model.startsWith(prefix)) return limit;
   }
   return 128_000;
 }
@@ -129,17 +126,6 @@ export interface CompletionResult {
  */
 export async function completion(opts: CompletionOptions): Promise<CompletionResult> {
   const { model: requestedModel, systemPrompt, userPrompt, maxTokens = 4096, temperature = 0.3 } = opts;
-
-  // Z.AI: strip prefix, route through Z.AI Anthropic-compatible endpoint
-  if (requestedModel.startsWith("z.ai-")) {
-    const actualModel = requestedModel.slice(5);
-    const zaiKey = getSetting("zai_api_key");
-    if (zaiKey) {
-      return callAnthropic(zaiKey, actualModel, systemPrompt, userPrompt, maxTokens, temperature, "https://api.z.ai/api/anthropic");
-    }
-    // No Z.AI key — fall through with stripped model name
-    return completion({ ...opts, model: actualModel });
-  }
 
   const resolved = resolveWithFallback(requestedModel);
   const apiKey = getApiKey(resolved.provider);

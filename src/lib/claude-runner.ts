@@ -7,26 +7,7 @@ import { ChildProcess } from "child_process";
 import spawn from "cross-spawn";
 import { getClaudePath } from "./claude-bin";
 import { getCleanEnv } from "./utils";
-import { getSetting } from "./db";
 import * as dlog from "./debug-logger";
-
-/**
- * Build env for Claude CLI spawn.
- * When claude_model starts with "z.ai-", injects ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL
- * so Claude CLI routes through Z.AI (which maps to GLM models).
- */
-function getClaudeSpawnEnv(): NodeJS.ProcessEnv {
-  const env = getCleanEnv();
-  const model = getSetting("claude_model") || "";
-  if (model.startsWith("z.ai-")) {
-    const key = getSetting("zai_api_key");
-    if (key) {
-      env.ANTHROPIC_AUTH_TOKEN = key;
-      env.ANTHROPIC_BASE_URL = getSetting("zai_base_url") || process.env.ZAI_BASE_URL || "https://api.z.ai/api/anthropic";
-    }
-  }
-  return env;
-}
 
 // ── One-shot runner (title generation, learnings extraction, etc.) ───────────
 
@@ -36,7 +17,7 @@ export function runClaudeOneShot(opts: {
   timeoutMs?: number;
 }): Promise<string> {
   const { prompt, args = [], timeoutMs = 90_000 } = opts;
-  const env = getClaudeSpawnEnv();
+  const env = getCleanEnv();
 
   return new Promise((resolve, reject) => {
     dlog.debug("claude-runner", `oneshot spawn: ${args.join(" ")}`, { timeoutMs });
@@ -49,10 +30,10 @@ export function runClaudeOneShot(opts: {
     let stdout = "";
     let stderr = "";
 
-    proc.stdout.on("data", (data: Buffer) => {
+    proc.stdout!.on("data", (data: Buffer) => {
       stdout += data.toString();
     });
-    proc.stderr.on("data", (data: Buffer) => {
+    proc.stderr!.on("data", (data: Buffer) => {
       stderr += data.toString();
     });
 
@@ -79,8 +60,8 @@ export function runClaudeOneShot(opts: {
       reject(err);
     });
 
-    proc.stdin.write(prompt);
-    proc.stdin.end();
+    proc.stdin!.write(prompt);
+    proc.stdin!.end();
   });
 }
 
@@ -113,7 +94,7 @@ export interface SSEStreamOptions {
  */
 export function createSSEStream(opts: SSEStreamOptions): ReadableStream {
   const { args, cwd, onLine, onClose, keepalive = true, onProc } = opts;
-  const env = getClaudeSpawnEnv();
+  const env = getCleanEnv();
   const encoder = new TextEncoder();
 
   let closed = false;

@@ -22,7 +22,7 @@ import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useComputeNode } from "@/hooks/useComputeNode";
-import { EffectiveModelBadge } from "@/components/EffectiveModelBadge";
+
 
 const CTX_MAX = 200_000;
 
@@ -1802,7 +1802,7 @@ export default function SessionDetailPage({
                   {data.messages_total ?? data.metadata.message_count} messages
                 </span>
                 {data.metadata.model && (
-                  <EffectiveModelBadge reportedModel={data.metadata.model} variant="compact" />
+                  <span className="text-xs text-muted-foreground">{data.metadata.model}</span>
                 )}
                 {totalTokens > 0 && <ContextBar tokens={totalTokens} />}
               </div>

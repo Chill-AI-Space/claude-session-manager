@@ -33,28 +33,6 @@ export const MODEL_PRESETS: ModelPreset[] = [
     category: "fast",
     description: "Fastest Claude model",
   },
-  // Z.AI → GLM models
-  {
-    id: "zai-glm-5-1",
-    name: "GLM-5.1 (Z.AI)",
-    model: "z.ai-claude-opus-4-6",
-    category: "quality",
-    description: "Opus → GLM-5.1",
-  },
-  {
-    id: "zai-glm-4-7",
-    name: "GLM-4.7 (Z.AI)",
-    model: "z.ai-claude-sonnet-4-6",
-    category: "balanced",
-    description: "Sonnet → GLM-4.7",
-  },
-  {
-    id: "zai-glm-4-5-air",
-    name: "GLM-4.5 Air (Z.AI)",
-    model: "z.ai-claude-haiku-4-5-20251001",
-    category: "fast",
-    description: "Haiku → GLM-4.5-Air",
-  },
   // Other providers
   {
     id: "gpt-4o",

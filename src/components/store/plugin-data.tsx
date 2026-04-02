@@ -82,7 +82,7 @@ export const PLUGINS: PluginData[] = [
   {
     id: "summary-ai",
     name: "Summary AI",
-    description: "AI models & session summaries via OpenAI, Anthropic, Google, or Z.AI (GLM).",
+    description: "AI models & session summaries via OpenAI, Anthropic, or Google.",
     longDescription:
       "Generates session summaries using direct API calls (no CLI sessions spawned). Long transcripts are automatically split into chunks with map/reduce. Supports incremental summaries that update as the session progresses.",
     category: "AI",
@@ -90,7 +90,7 @@ export const PLUGINS: PluginData[] = [
     icon: <Brain className="h-5 w-5" />,
     status: "installed",
     settingsComponent: SummaryAiSettings as React.ComponentType<any>,
-    settingsKeys: ["summary_model", "summary_incremental_model", "learnings_model", "auto_generate_summary", "auto_generate_learnings", "openai_api_key", "anthropic_api_key", "google_ai_api_key", "zai_api_key"],
+    settingsKeys: ["summary_model", "summary_incremental_model", "learnings_model", "auto_generate_summary", "auto_generate_learnings", "openai_api_key", "anthropic_api_key", "google_ai_api_key"],
   },
   {
     id: "workers",

@@ -222,9 +222,7 @@ export function buildCliArgs(opts: {
   args.push("--verbose");
   args.push("--effort", effort);
 
-  const rawModel = opts.model || getSetting("claude_model") || "claude-sonnet-4-6";
-  // Strip "z.ai-" prefix — Z.AI routing is handled via env vars, CLI needs the real model name
-  const model = rawModel.startsWith("z.ai-") ? rawModel.slice(5) : rawModel;
+  const model = opts.model || getSetting("claude_model") || "claude-sonnet-4-6";
   args.push("--model", model);
 
   if (opts.includeMaxTurns !== false && opts.sessionId) {
