@@ -3,7 +3,8 @@
  * - `runClaudeOneShot` — fire prompt, collect text output, return string
  * - `createSSEStream` — spawn Claude with stream-json, return SSE ReadableStream + Response
  */
-import { spawn, type ChildProcess } from "child_process";
+import { ChildProcess } from "child_process";
+import spawn from "cross-spawn";
 import { getClaudePath } from "./claude-bin";
 import { getCleanEnv } from "./utils";
 import * as dlog from "./debug-logger";

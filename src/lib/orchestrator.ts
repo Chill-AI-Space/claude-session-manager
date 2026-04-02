@@ -12,7 +12,7 @@
  * API routes become thin wrappers.
  */
 import { EventEmitter } from "events";
-import { spawn } from "child_process";
+import spawn from "cross-spawn";
 import { getDb, getSetting, logAction } from "./db";
 import { getClaudePath } from "./claude-bin";
 import { getCleanEnv } from "./utils";

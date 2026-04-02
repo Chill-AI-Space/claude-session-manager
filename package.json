@@ -23,6 +23,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "cross-spawn": "^7.0.6",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "glob": "^13.0.6",
@@ -51,6 +52,7 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "playwright": "^1.58.2",
     "vitest": "^4.1.0"
   }
