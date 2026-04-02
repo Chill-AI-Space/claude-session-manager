@@ -7,13 +7,9 @@ echo === Claude Session Manager — Update ===
 
 REM 1. Pull latest
 echo [1/4] Pulling latest code...
-git pull --ff-only origin main
-if errorlevel 1 (
-    echo ERROR: git pull failed. Do you have uncommitted changes?
-    echo Try: git stash && scripts\update.bat && git stash pop
-    pause
-    exit /b 1
-)
+git stash
+git pull --rebase origin main
+git stash pop
 
 REM 2. Install dependencies
 echo [2/4] Installing dependencies...
