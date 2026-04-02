@@ -65,9 +65,14 @@ export async function GET(
   // ── Forge sessions: read from ~/forge/.forge.db ──────────────────────────
   const agentType = (session as SessionRow & { agent_type?: string }).agent_type ?? "claude";
   if (agentType === "forge") {
-    const { readForgeMessages } = await import("@/lib/forge-db");
+    const { readForgeMessages, getForgeConversation } = await import("@/lib/forge-db");
     const forgeMessages = readForgeMessages(sessionId);
-    const fileAgeMs = Date.now() - session.file_mtime;
+    // Use updated_at directly from Forge's DB for accurate is_active (avoids stale cached file_mtime)
+    const forgeRow = getForgeConversation(sessionId);
+    const forgeUpdatedAt = forgeRow?.updated_at
+      ? new Date(forgeRow.updated_at.replace(" ", "T") + "Z").getTime()
+      : session.file_mtime;
+    const fileAgeMs = Date.now() - (forgeUpdatedAt || session.file_mtime);
     const active = fileAgeMs < 5 * 60 * 1000;
     return Response.json({
       session_id: session.session_id,
@@ -77,7 +82,7 @@ export async function GET(
       messages_total: forgeMessages.length,
       metadata: session,
       is_active: active,
-      has_result: session.last_message_role === "assistant",
+      has_result: forgeMessages.some(m => m.type === "assistant"),
       file_age_ms: Math.round(fileAgeMs),
     });
   }
