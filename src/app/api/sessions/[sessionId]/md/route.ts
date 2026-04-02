@@ -42,6 +42,32 @@ export async function GET(
     return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
+  // ── Forge sessions: render from Forge SQLite ─────────────────────────────
+  if (session.jsonl_path?.startsWith("forge://")) {
+    const { readForgeMessages } = await import("@/lib/forge-db");
+    const messages = readForgeMessages(sessionId);
+    const parts: string[] = [];
+    for (const m of messages) {
+      if (m.type === "user") {
+        parts.push(`**You**\n\n${m.content as string}\n`);
+      } else if (m.type === "assistant") {
+        const text = Array.isArray(m.content)
+          ? m.content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("\n\n")
+          : String(m.content ?? "");
+        if (text) parts.push(`${text}\n`);
+      }
+    }
+    const markdown = parts.length > 0 ? parts.join("\n---\n\n") : "*(No messages yet)*\n";
+    return Response.json({
+      markdown,
+      session_id: sessionId,
+      total_messages: messages.length,
+      render_start: 0,
+      render_end: messages.length,
+      has_earlier: false,
+    });
+  }
+
   const limitParam = req.nextUrl.searchParams.get("limit");
   const offsetParam = req.nextUrl.searchParams.get("offset");
 
