@@ -52,7 +52,7 @@ export async function GET(
         parts.push(`**You**\n\n${m.content as string}\n`);
       } else if (m.type === "assistant") {
         const text = Array.isArray(m.content)
-          ? m.content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("\n\n")
+          ? m.content.filter(b => b.type === "text").map(b => (b as { type: "text"; text: string }).text).join("\n\n")
           : String(m.content ?? "");
         if (text) parts.push(`${text}\n`);
       }
