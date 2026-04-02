@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { FolderOpen, Send, Loader2, Sparkles, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud } from "lucide-react";
+import { FolderOpen, Send, Loader2, Sparkles, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud, Hammer } from "lucide-react";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { useSessionStart } from "@/hooks/useSessionStart";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
@@ -20,6 +20,10 @@ export default function SessionsEmptyState() {
   const dragCounterRef = useRef(0);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
+  const defaultAgentSetting = useSettingToggle("default_agent");
+  const [selectedAgent, setSelectedAgent] = useState<"claude" | "forge">(
+    (defaultAgentSetting.value === "forge" ? "forge" : "claude") as "claude" | "forge"
+  );
   const compute = useComputeNode();
   const autodetect = useAutodetect();
   const session = useSessionStart();
@@ -99,7 +103,7 @@ export default function SessionsEmptyState() {
   };
 
   const handleStart = () => {
-    if (folderPath) session.start(folderPath, message);
+    if (folderPath) session.start(folderPath, message, { agent: selectedAgent });
   };
 
   return (
@@ -142,7 +146,7 @@ export default function SessionsEmptyState() {
                 folderPath ? handleStart() : handleAutodetect();
               }
             }}
-            placeholder="What would you like Claude to do? (⌘Enter to start)"
+            placeholder={`What would you like ${selectedAgent === "forge" ? "Forge" : "Claude"} to do? (⌘Enter to start)`}
             rows={5}
             className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-10 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none"
             disabled={session.starting}
@@ -197,6 +201,18 @@ export default function SessionsEmptyState() {
               <span className={`font-medium ${skipPerms.value ? "text-amber-400" : "text-muted-foreground/60"}`}>
                 {skipPerms.value ? "on" : "off"}
               </span>
+            </button>
+            <button
+              onClick={() => setSelectedAgent(a => a === "claude" ? "forge" : "claude")}
+              className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
+                selectedAgent === "forge"
+                  ? "text-orange-400 hover:text-orange-300 hover:bg-orange-500/10"
+                  : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
+              }`}
+              title={selectedAgent === "forge" ? "Using Forge — click to switch to Claude" : "Using Claude — click to switch to Forge"}
+            >
+              {selectedAgent === "forge" ? <Hammer className="h-3 w-3" /> : <span className="text-[10px] font-medium">C</span>}
+              <span className="font-medium">{selectedAgent}</span>
             </button>
             {compute.nodes.length > 0 && (
               <button

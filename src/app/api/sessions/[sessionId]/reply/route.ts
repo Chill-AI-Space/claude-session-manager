@@ -52,6 +52,15 @@ export async function POST(
 
   logAction("service", "reply", `msg_len:${message.length}`, sessionId);
 
+  const agentType = (session as typeof session & { agent_type?: string }).agent_type ?? "claude";
+
+  if (agentType === "forge") {
+    const { parseForgeConvPath } = await import("@/lib/forge-scanner");
+    const conversationId = parseForgeConvPath(session.jsonl_path) ?? sessionId;
+    const stream = getOrchestrator().resumeForge(conversationId, message, session.project_path);
+    return sseResponse(stream);
+  }
+
   // Auto-kill terminal sessions if setting is enabled
   const autoKill = getSetting("auto_kill_terminal_on_reply") === "true";
   if (autoKill) {

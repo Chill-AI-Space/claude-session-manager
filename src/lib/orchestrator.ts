@@ -878,6 +878,130 @@ class SessionOrchestrator extends EventEmitter {
     return stream;
   }
 
+  // ── Public API: Forge start ───────────────────────────────────────────────
+
+  /**
+   * Start a new Forge session. Pre-generates UUID, emits session_id immediately.
+   * Returns SSE stream.
+   */
+  startForge(projectPath: string, message: string): ReadableStream {
+    const { randomUUID } = require("crypto") as typeof import("crypto");
+    const { createForgeSSEStream } = require("./forge-runner") as typeof import("./forge-runner");
+    const conversationId: string = randomUUID();
+
+    this.states.set(conversationId, {
+      sessionId: conversationId,
+      phase: "running",
+      projectPath,
+      pid: null,
+      retryCount: 0,
+      skipCount: 0,
+      lastActivity: Date.now(),
+      startedAt: Date.now(),
+    });
+
+    logAction("service", "forge_start", projectPath, conversationId);
+    this.emit("session:started", { sessionId: conversationId, projectPath });
+
+    const stream = createForgeSSEStream({
+      conversationId,
+      message,
+      projectPath,
+      onClose: async () => {
+        this.transition(conversationId, "completed");
+        this.emit("session:completed", { sessionId: conversationId });
+        try {
+          await scanSessions("incremental");
+          generateTitleBatch(1).catch(() => {});
+        } catch { /* non-critical */ }
+      },
+    });
+
+    return stream;
+  }
+
+  // ── Public API: Forge resume (returns SSE stream) ─────────────────────────
+
+  /**
+   * Resume an existing Forge session with a new message.
+   * Returns SSE stream (for UI-initiated replies).
+   */
+  resumeForge(conversationId: string, message: string, projectPath: string): ReadableStream {
+    const { createForgeSSEStream } = require("./forge-runner") as typeof import("./forge-runner");
+
+    this.queue.cancel(`stall_continue:${conversationId}`);
+
+    this.states.set(conversationId, {
+      sessionId: conversationId,
+      phase: "running",
+      projectPath,
+      pid: null,
+      retryCount: this.states.get(conversationId)?.retryCount ?? 0,
+      skipCount: this.states.get(conversationId)?.skipCount ?? 0,
+      lastActivity: Date.now(),
+      startedAt: Date.now(),
+    });
+
+    logAction("service", "forge_resume", `msg_len:${message.length}`, conversationId);
+    this.emit("session:resumed", { sessionId: conversationId, projectPath });
+
+    return createForgeSSEStream({
+      conversationId,
+      message,
+      projectPath,
+      onClose: async () => {
+        this.transition(conversationId, "completed");
+        this.emit("session:completed", { sessionId: conversationId });
+        try { await scanSessions("incremental"); } catch { /* non-critical */ }
+      },
+    });
+  }
+
+  // ── Public API: Forge resume fire-and-forget (babysitter) ────────────────
+
+  /**
+   * Resume a Forge session in the background (no SSE stream returned).
+   * Used by the babysitter stall detection.
+   */
+  resumeForgeBackground(conversationId: string, message: string, projectPath: string): void {
+    const state = this.states.get(conversationId);
+    if (state && !["idle", "completed", "failed"].includes(state.phase)) return;
+
+    const { getForgePath } = require("./forge-bin") as typeof import("./forge-bin");
+    const { getCleanEnv } = require("./utils") as typeof import("./utils");
+
+    this.states.set(conversationId, {
+      sessionId: conversationId,
+      phase: "running",
+      projectPath,
+      pid: null,
+      retryCount: 0,
+      skipCount: 0,
+      lastActivity: Date.now(),
+      startedAt: Date.now(),
+    });
+
+    logAction("service", "forge_stall_continue", projectPath, conversationId);
+
+    const proc = spawn(getForgePath(), [
+      "--conversation-id", conversationId,
+      "-C", projectPath,
+      "-p", message,
+    ], {
+      cwd: projectPath,
+      env: getCleanEnv(),
+      stdio: "ignore",
+      detached: process.platform !== "win32",
+      windowsHide: true,
+    });
+    proc.unref();
+
+    proc.on("close", async () => {
+      this.transition(conversationId, "completed");
+      try { await scanSessions("incremental"); } catch { /* non-critical */ }
+    });
+  }
+
   // ── Public API: stop ──────────────────────────────────────────────────────
 
   /**

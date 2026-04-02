@@ -533,6 +533,16 @@ export async function scanSessions(
     updateProjects();
   }
 
+  // Post-scan: index Forge sessions from ~/forge/.forge.db
+  try {
+    const { scanForgeSessions } = require("./forge-scanner");
+    const forgeResult = await scanForgeSessions(db, existingMtimes, mode, upsertSession);
+    sessionsScanned += forgeResult.scanned;
+    sessionsSkipped += forgeResult.skipped;
+  } catch (err) {
+    dlog.warn("scanner", `forge scan failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // Post-scan: detect incomplete exits from DB (catches files skipped by incremental scan)
   detectIncompleteExits(db);
 
@@ -572,6 +582,7 @@ function detectIncompleteExits(db: ReturnType<typeof getDb>): void {
       AND has_result = 0
       AND file_mtime < ?
       AND file_mtime > ?
+      AND (agent_type IS NULL OR agent_type = 'claude')
   `).all(cutoffRecent, cutoffOld) as Array<{
     session_id: string;
     jsonl_path: string;

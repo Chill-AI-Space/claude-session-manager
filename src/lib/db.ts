@@ -227,6 +227,9 @@ function initTables(db: Database.Database) {
   if (!colNames.has("learnings")) {
     db.exec("ALTER TABLE sessions ADD COLUMN learnings TEXT");
   }
+  if (!colNames.has("agent_type")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN agent_type TEXT DEFAULT 'claude'");
+  }
   // actions_log migrations
   const actionCols = db.prepare("PRAGMA table_info(actions_log)").all() as { name: string }[];
   const actionColNames = new Set(actionCols.map((c) => c.name));
@@ -464,6 +467,8 @@ const SETTING_DEFAULTS: Record<string, string> = {
   worker_notify_from: "",
   worker_notify_to: "",
   worker_notify_webhook_url: "",
+  // Agent selection — which AI agent to use for new sessions
+  default_agent: "claude",
 };
 
 // Settings cache — avoids reading JSON file on every getSetting() call
