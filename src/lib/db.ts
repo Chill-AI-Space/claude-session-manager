@@ -11,6 +11,10 @@ let _db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (!_db) {
+    const dataDir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
     _db = new Database(DB_PATH);
     _db.pragma("journal_mode = WAL");
     _db.pragma("foreign_keys = ON");
@@ -444,6 +448,8 @@ const SETTING_DEFAULTS: Record<string, string> = {
   openai_api_key: "",
   anthropic_api_key: "",
   google_ai_api_key: "",
+  zai_api_key: "",
+  zai_base_url: "",
   // Worker integration
   worker_heartbeat_timeout_ms: "300000",
   worker_fallback_enabled: "true",

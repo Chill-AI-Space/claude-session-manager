@@ -137,12 +137,12 @@ export default function SessionsEmptyState() {
               if (autodetect.suggestions.length > 0) autodetect.clearSuggestions();
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 folderPath ? handleStart() : handleAutodetect();
               }
             }}
-            placeholder="What would you like Claude to do?"
+            placeholder="What would you like Claude to do? (⌘Enter to start)"
             rows={5}
             className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-10 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none"
             disabled={session.starting}
