@@ -35,6 +35,8 @@ export async function POST(request: NextRequest) {
         message: message.trim(),
         correlationId,
         verbose: verbose ?? false,
+        agent,
+        model,
       });
       return new Response(stream, { headers: SSE_HEADERS });
     } catch (err) {
@@ -49,7 +51,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (agent === "forge") {
-    const stream = getOrchestrator().startForge(projectPath, message.trim());
+    const stream = getOrchestrator().startForge(projectPath, message.trim(), model);
     return sseResponse(stream);
   }
 

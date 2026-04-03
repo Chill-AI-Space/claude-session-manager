@@ -24,7 +24,7 @@ export function useSessionStart(opts?: UseSessionStartOptions) {
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const start = useCallback(async (path: string, message: string, options?: { agent?: string }) => {
+  const start = useCallback(async (path: string, message: string, options?: { agent?: string; model?: string }) => {
     const msg = message.trim();
     if (!msg || !path || starting) return;
     setStarting(true);
@@ -45,7 +45,7 @@ export function useSessionStart(opts?: UseSessionStartOptions) {
       const res = await fetch("/api/sessions/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, message: finalMessage, correlationId, agent: options?.agent }),
+        body: JSON.stringify({ path, message: finalMessage, correlationId, agent: options?.agent, model: options?.model }),
       });
 
       if (!res.ok) {
