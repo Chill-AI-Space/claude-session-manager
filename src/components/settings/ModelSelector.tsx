@@ -44,9 +44,51 @@ export const MODEL_PRESETS: ModelPreset[] = [
   {
     id: "gemini-2.5-flash",
     name: "Gemini 2.5 Flash",
-    model: "gemini-2.5-flash",
+    model: "models/gemini-2.5-flash",
     category: "fast",
     description: "Google Gemini Flash",
+  },
+  {
+    id: "gemini-3-flash-preview",
+    name: "Gemini 3 Flash",
+    model: "models/gemini-3-flash-preview",
+    category: "fast",
+    description: "Google Gemini 3 Preview (Forge default)",
+  },
+  {
+    id: "gemini-3.1-flash-lite-preview",
+    name: "Gemini 3.1 Flash Lite",
+    model: "models/gemini-3.1-flash-lite-preview",
+    category: "fast",
+    description: "Google Gemini 3.1 Flash Lite Preview",
+  },
+  {
+    id: "gemini-3.1-pro-preview",
+    name: "Gemini 3.1 Pro",
+    model: "models/gemini-3.1-pro-preview",
+    category: "quality",
+    description: "Google Gemini 3.1 Pro Preview",
+  },
+  {
+    id: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    model: "models/gemini-2.5-pro",
+    category: "quality",
+    description: "Google Gemini 2.5 Pro",
+  },
+  {
+    id: "gemini-flash-lite-latest",
+    name: "Gemini Flash Lite",
+    model: "models/gemini-flash-lite-latest",
+    category: "fast",
+    description: "Google Gemini Flash Lite (latest)",
+  },
+  {
+    id: "gemini-2.0-flash",
+    name: "Gemini 2.0 Flash",
+    model: "models/gemini-2.0-flash",
+    category: "fast",
+    description: "Google Gemini 2.0 Flash",
   },
 ];
 

@@ -441,11 +441,11 @@ const SETTING_DEFAULTS: Record<string, string> = {
   // Default compute node — if set, new sessions run on this remote node
   default_compute_node: "",
   // Title generation (uses summary as input)
-  title_model: "gpt-4o-mini",
+  title_model: "gemini-2.5-flash-lite",
   // Summary & learnings generation (direct API, no CLI sessions spawned)
-  summary_model: "gpt-4o-mini",
-  summary_incremental_model: "gemini-2.5-flash",
-  learnings_model: "gpt-4o-mini",
+  summary_model: "gemini-2.5-flash-lite",
+  summary_incremental_model: "gemini-2.5-flash-lite",
+  learnings_model: "gemini-2.5-flash-lite",
   auto_generate_summary: "true",
   auto_generate_learnings: "true",
   openai_api_key: "",
