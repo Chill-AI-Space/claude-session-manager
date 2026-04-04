@@ -84,7 +84,7 @@ export async function scanForgeSessions(
               const state = getOrchestrator().status(capturedId);
               if (state && !["idle", "completed", "failed"].includes(state.phase)) return;
               logAction("service", "forge_stall_detected", `silent:${Math.round(silentMs / 60_000)}min`, capturedId);
-              getOrchestrator().resumeForgeBackground(capturedId, "continue", capturedPath);
+              getOrchestrator().resumeForgeBackground(capturedId, "continue", capturedPath, meta.model);
             } catch { /* non-critical */ }
           });
         }
@@ -112,10 +112,10 @@ export async function scanForgeSessions(
         last_scanned_at: now,
       });
 
-      // Set agent_type to 'forge' and generated_title from Forge's title
+      // Set agent_type to 'forge', update model, and generated_title from Forge's title
       db.prepare(
-        `UPDATE sessions SET agent_type = 'forge'${meta.title ? ", generated_title = COALESCE(generated_title, ?)" : ""} WHERE session_id = ?`
-      ).run(...(meta.title ? [meta.title, conversationId] : [conversationId]));
+        `UPDATE sessions SET agent_type = 'forge', model = ?${meta.title ? ", generated_title = COALESCE(generated_title, ?)" : ""} WHERE session_id = ?`
+      ).run(...(meta.title ? [meta.model, meta.title, conversationId] : [meta.model, conversationId]));
 
       scanned++;
     }

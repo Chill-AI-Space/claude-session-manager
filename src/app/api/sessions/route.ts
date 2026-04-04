@@ -135,7 +135,7 @@ export async function GET(request: NextRequest) {
 
   if (includeRemote && offset === 0) {
     try {
-      const remoteResults = await fetchAllRemoteSessions({ limit: 50, search: search || undefined });
+      const remoteResults = await fetchAllRemoteSessions({ limit: Math.max(limit, 100), search: search || undefined });
       for (const result of remoteResults) {
         remoteMeta.push({
           nodeId: result.nodeId,

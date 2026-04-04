@@ -13,6 +13,8 @@ import { Loader2, CheckCircle2, AlertCircle, Search, FolderOpen, Send, ChevronUp
 import { QuasarIcon } from "@/components/QuasarIcon";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ModelSelector, MODEL_PRESETS } from "@/components/settings/ModelSelector";
+import { useSettings } from "@/lib/settings";
 
 interface FolderEntry {
   name: string;
@@ -57,6 +59,8 @@ export function FolderBrowserDialog({
   const [webMessage, setWebMessage] = useState("");
   const [webStarting, setWebStarting] = useState(false);
   const webInputRef = useRef<HTMLTextAreaElement>(null);
+  const { settings, updateSetting } = useSettings();
+  const [webModel, setWebModel] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (open) {
@@ -69,6 +73,12 @@ export function FolderBrowserDialog({
       setWebMessage("");
       setCreatingFolder(false);
       setNewFolderName("");
+      // For web start, default to Forge's default model (Gemini 3 Flash Preview)
+      setWebModel(
+        settings.claude_model === "claude-sonnet-4-6"
+          ? "models/gemini-3-flash-preview"
+          : settings.claude_model,
+      );
       fetch("/api/browse")
         .then((res) => res.json())
         .then((data) => {
@@ -198,7 +208,12 @@ export function FolderBrowserDialog({
       const res = await fetch("/api/sessions/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: webStartPath, message: webMessage.trim() }),
+        body: JSON.stringify({
+          path: webStartPath,
+          message: webMessage.trim(),
+          agent: "forge",
+          model: webModel,
+        }),
       });
 
       if (!res.ok) throw new Error("Failed to start session");
@@ -424,34 +439,42 @@ export function FolderBrowserDialog({
                     className="ml-auto text-muted-foreground/50 hover:text-foreground"
                   >✕</button>
                 </div>
-                <div className="flex gap-2 items-end">
-                  <textarea
-                    ref={webInputRef}
-                    value={webMessage}
-                    onChange={(e) => setWebMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        submitWebStart();
-                      }
-                    }}
-                    placeholder="First message to Claude..."
-                    rows={2}
-                    className="flex-1 resize-none bg-muted/30 border border-input rounded px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                    disabled={webStarting}
+                <div className="flex flex-col gap-2">
+                  <ModelSelector
+                    settingKey="claude_model" // Re-using claude_model for Forge selection
+                    currentModel={webModel || ""}
+                    onUpdate={(_, model) => setWebModel(model)}
+                    label="Forge Model"
                   />
-                  <Button
-                    size="icon"
-                    className="h-9 w-9 shrink-0"
-                    onClick={submitWebStart}
-                    disabled={!webMessage.trim() || webStarting}
-                  >
-                    {webStarting ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4" />
-                    )}
-                  </Button>
+                  <div className="flex gap-2 items-end">
+                    <textarea
+                      ref={webInputRef}
+                      value={webMessage}
+                      onChange={(e) => setWebMessage(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          submitWebStart();
+                        }
+                      }}
+                      placeholder="First message to Forge..."
+                      rows={2}
+                      className="flex-1 resize-none bg-muted/30 border border-input rounded px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                      disabled={webStarting}
+                    />
+                    <Button
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      onClick={submitWebStart}
+                      disabled={!webMessage.trim() || webStarting}
+                    >
+                      {webStarting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}

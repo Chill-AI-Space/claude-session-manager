@@ -97,7 +97,11 @@ async function flushRemote(): Promise<void> {
   if (remoteBatch.length === 0) return;
 
   const endpoint = getSetting("debug_log_endpoint");
-  if (!endpoint) return;
+  if (!endpoint) {
+    // Drop logs if no endpoint — prevents memory usage by remoteBatch
+    remoteBatch = [];
+    return;
+  }
 
   // Grab current batch and reset
   const batch = remoteBatch.slice(0, MAX_BATCH_SIZE);

@@ -85,10 +85,8 @@ function getForgeModel(): string {
   }
 }
 
-let _forgeModel: string | null = null;
 export function getCachedForgeModel(): string {
-  if (!_forgeModel) _forgeModel = getForgeModel();
-  return _forgeModel;
+  return getForgeModel();
 }
 
 /** Extract user messages from Forge context JSON (for metadata) */
