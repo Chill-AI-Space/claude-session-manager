@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { FolderOpen, Send, Loader2, Sparkles, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud } from "lucide-react";
+import { FolderOpen, Send, Loader2, Sparkles, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud, Hammer } from "lucide-react";
+import { ModelSelector } from "@/components/settings/ModelSelector";
+import { useSettings } from "@/lib/settings";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { useSessionStart } from "@/hooks/useSessionStart";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
@@ -20,9 +22,23 @@ export default function SessionsEmptyState() {
   const dragCounterRef = useRef(0);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
+  const [selectedAgent, setSelectedAgent] = useState<"claude" | "forge">("forge");
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
   const compute = useComputeNode();
   const autodetect = useAutodetect();
   const session = useSessionStart();
+  const { settings } = useSettings();
+
+  useEffect(() => {
+    // Initialize selectedModel based on current settings for Forge
+    // If claude_model is default, use Forge's default (Gemini 3 Flash Preview)
+    // Otherwise, use the current claude_model setting.
+    setSelectedModel(
+      settings.claude_model === "claude-sonnet-4-6"
+        ? "models/gemini-3-flash-preview"
+        : settings.claude_model,
+    );
+  }, [settings.claude_model]);
 
   const insertAtCursor = (text: string) => {
     const textarea = textareaRef.current;
@@ -98,8 +114,11 @@ export default function SessionsEmptyState() {
     if (firstPath) setFolderPath(firstPath);
   };
 
+  // Modified handleStart to include selectedModel
   const handleStart = () => {
-    if (folderPath) session.start(folderPath, message);
+    if (folderPath) {
+      session.start(folderPath, message, { agent: selectedAgent, model: selectedModel });
+    }
   };
 
   return (
@@ -137,17 +156,30 @@ export default function SessionsEmptyState() {
               if (autodetect.suggestions.length > 0) autodetect.clearSuggestions();
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 folderPath ? handleStart() : handleAutodetect();
               }
             }}
-            placeholder="What would you like Claude to do?"
+            placeholder={`What would you like ${selectedAgent === "forge" ? "Forge" : "Claude"} to do? (⌘Enter to start)`}
             rows={5}
-            className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-10 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none"
+            className={`w-full resize-none bg-transparent rounded-lg px-3 py-2.5 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none ${selectedAgent === "forge" ? "pb-16" : "pb-10"}`}
             disabled={session.starting}
           />
-          <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center gap-1.5">
+          <div className="absolute bottom-1.5 left-1.5 right-1.5 flex flex-col gap-1">
+            {/* Model row — only when Forge is selected */}
+            {selectedAgent === "forge" && (
+              <div className="flex items-center gap-1.5 px-0.5">
+                <ModelSelector
+                  settingKey="claude_model"
+                  currentModel={selectedModel || ""}
+                  onUpdate={(_, model) => setSelectedModel(model)}
+                  label="Model"
+                />
+              </div>
+            )}
+            {/* Controls row */}
+            <div className="flex items-center gap-1.5">
             <button
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
@@ -198,6 +230,19 @@ export default function SessionsEmptyState() {
                 {skipPerms.value ? "on" : "off"}
               </span>
             </button>
+            <button
+              onClick={() => setSelectedAgent(a => a === "claude" ? "forge" : "claude")}
+              className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors px-2 py-0.5 rounded border ${
+                selectedAgent === "forge"
+                  ? "text-orange-400 border-orange-400/40 bg-orange-500/10 hover:bg-orange-500/20"
+                  : "text-muted-foreground/70 border-border hover:text-foreground hover:bg-muted/50"
+              }`}
+              title={selectedAgent === "forge" ? "Using Forge — click to switch to Claude" : "Using Claude — click to switch to Forge"}
+            >
+              {selectedAgent === "forge" ? <Hammer className="h-3 w-3" /> : <span className="text-[10px] font-bold leading-none">C</span>}
+              <span>{selectedAgent}</span>
+            </button>
+
             {compute.nodes.length > 0 && (
               <button
                 onClick={compute.toggle}
@@ -228,6 +273,7 @@ export default function SessionsEmptyState() {
                 <Send className="h-3.5 w-3.5" />
               )}
             </Button>
+            </div>{/* end controls row */}
           </div>
         </div>
 

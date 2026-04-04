@@ -149,15 +149,12 @@ export function SessionList({ sessions, loading, geminiResults, onArchive, hasMo
         }
       }}
       components={{
-        Footer: hasMore ? () => (
+        Footer: (hasMore || loadingMore) ? () => (
           <div className="flex items-center justify-center py-3">
-            {loadingMore ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-            ) : (
-              <span className="text-[11px] text-muted-foreground">
-                Loading more...
-              </span>
-            )}
+            {loadingMore
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+              : <span className="text-[11px] text-muted-foreground/40">↓ more</span>
+            }
           </div>
         ) : undefined,
       }}

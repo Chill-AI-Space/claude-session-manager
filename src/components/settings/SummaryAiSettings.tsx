@@ -1,8 +1,11 @@
 "use client";
 
 import { SettingsComponentProps } from "./types";
+import { ModelSelector } from "./ModelSelector";
+import { Info } from "lucide-react";
 
 export function SummaryAiSettings({ settings, onUpdate, savedKey }: SettingsComponentProps) {
+
   return (
     <div className="space-y-6">
       <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
@@ -12,6 +15,19 @@ export function SummaryAiSettings({ settings, onUpdate, savedKey }: SettingsComp
         AI models used for session summary generation. Summaries use direct API calls (no CLI sessions spawned).
         Long transcripts are automatically split into chunks (map/reduce).
       </p>
+
+      {/* CLI Model — what model Claude Code sessions run on */}
+      <div className="space-y-1">
+        <div className="text-sm font-medium">CLI session model</div>
+        <p className="text-xs text-muted-foreground">
+          Model used when starting or resuming Claude Code sessions.
+        </p>
+        <ModelSelector
+          settingKey="claude_model"
+          currentModel={settings.claude_model || "claude-sonnet-4-6"}
+          onUpdate={onUpdate}
+        />
+      </div>
 
       {/* One-shot summary model */}
       <div className="space-y-1">
@@ -55,11 +71,11 @@ export function SummaryAiSettings({ settings, onUpdate, savedKey }: SettingsComp
         </p>
         <input
           type="text"
-          value={settings.learnings_model || "gpt-4o-mini"}
+          value={settings.learnings_model || "gemini-2.5-flash"}
           onChange={(e) => onUpdate("learnings_model", e.target.value)}
           onBlur={(e) => onUpdate("learnings_model", e.target.value.trim())}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          placeholder="gpt-4o-mini"
+          placeholder="gemini-2.5-flash"
           className="w-full px-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
         />
       </div>

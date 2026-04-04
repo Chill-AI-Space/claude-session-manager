@@ -174,6 +174,9 @@ export const SessionListItemComponent = memo(
                   {session.git_branch}
                 </span>
               )}
+              {session.agent_type === "forge" && (
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-orange-400/80 px-1 py-0.5 rounded border border-orange-400/20 bg-orange-500/5">forge</span>
+              )}
             </div>
           </div>
         </div>

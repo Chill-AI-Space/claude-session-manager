@@ -3,6 +3,7 @@ import { glob } from "glob";
 import fs from "fs";
 import path from "path";
 import { claudeProjectsDir, UUID_RE } from "./utils";
+import { iterateLinesSync } from "./utils-server";
 import { getOrchestrator, STALL_THRESHOLD_MS, PERMISSION_WAIT_THRESHOLD_MS, detectPermissionWait, detectTestWordInLastAssistant } from "./orchestrator";
 
 const CLAUDE_DIR = claudeProjectsDir();
@@ -32,36 +33,6 @@ interface JsonlMetadata {
   fullText: string;
 }
 
-// Large file threshold: above this, use streaming line reader instead of readFileSync+split
-const LARGE_FILE_BYTES = 5 * 1024 * 1024; // 5MB
-
-/** Read file lines without loading entire content into a single string */
-function readLinesStreaming(filePath: string): string[] {
-  const fd = fs.openSync(filePath, "r");
-  try {
-    const CHUNK_SIZE = 256 * 1024; // 256KB chunks
-    const buf = Buffer.alloc(CHUNK_SIZE);
-    const lines: string[] = [];
-    let remainder = "";
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const bytesRead = fs.readSync(fd, buf, 0, CHUNK_SIZE, null);
-      if (bytesRead === 0) break;
-      const chunk = remainder + buf.toString("utf-8", 0, bytesRead);
-      const parts = chunk.split(/\r?\n/);
-      remainder = parts.pop() || "";
-      for (const p of parts) {
-        if (p.trim()) lines.push(p);
-      }
-    }
-    if (remainder.trim()) lines.push(remainder);
-    return lines;
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
 function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
   try {
     let stat: fs.Stats;
@@ -69,10 +40,7 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
       stat = fs.statSync(filePath);
     } catch { return null; }
 
-    // For large files, use streaming reader to avoid 3x memory multiplier
-    const lines = stat.size > LARGE_FILE_BYTES
-      ? readLinesStreaming(filePath)
-      : fs.readFileSync(filePath, "utf-8").split(/\r?\n/).filter((l) => l.trim());
+    const lines = iterateLinesSync(filePath);
 
     let sessionId = "";
     let projectPath = "";
@@ -96,19 +64,30 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
       try {
         const obj = JSON.parse(line);
 
-        // Track result events — present when Claude exits normally, absent on crash
+        // Track result events — present when Claude exits normally, absent on crash.
+        // has_result tracks the CURRENT TURN: reset when a human user message arrives,
+        // set when Claude produces a result event. This way has_result=1 means
+        // "Claude finished this turn and is waiting for user", not just "ever had a result".
         if (obj.type === "result") {
           hasResult = true;
         }
 
         if (obj.type === "user" || obj.type === "assistant") {
+          // Skip SDK meta-messages (isMeta: true) — these are Claude Code's internal
+          // protocol messages injected on resume/compaction ("Continue from where you left off.")
+          // They are NOT user input and should not affect state tracking or lastMessage.
+          if (obj.isMeta) continue;
+
           messageCount++;
           // Detect tool_result messages (Claude died mid-execution)
-          if (obj.type === "user" && Array.isArray(obj.message?.content) &&
-              obj.message.content.every((b: { type: string }) => b.type === "tool_result")) {
+          const isToolResult = obj.type === "user" && Array.isArray(obj.message?.content) &&
+              obj.message.content.every((b: { type: string }) => b.type === "tool_result");
+          if (isToolResult) {
             lastMessageRole = "tool_result";
           } else {
             lastMessageRole = obj.type;
+            // Human user message = new turn starting → reset current-turn result flag
+            if (obj.type === "user") hasResult = false;
           }
 
           if (!sessionId && obj.sessionId) sessionId = obj.sessionId;
@@ -385,10 +364,19 @@ export async function scanSessions(
         const isNewCrash = !prev || prev.last_message_role !== "tool_result";
         const isRepeatedCrash = prev?.last_message_role === "tool_result" &&
           prev.file_mtime !== null && Math.abs(stat.mtimeMs - prev.file_mtime) > 1000;
-        if (isNewCrash || isRepeatedCrash) {
-          logAction("service", isRepeatedCrash ? "repeated_crash_detected" : "crash_detected", `jsonl:${filePath}`, sessionId);
+        // Protective age guard: don't fire on brand-new tool_result entries.
+        // Gives Claude time to process tool output and write the next assistant message.
+        // 30s minimum prevents false positives when scanner fires right after a tool runs.
+        const fileAgeMs = Date.now() - stat.mtimeMs;
+        const MIN_CRASH_AGE_MS = 90_000;
+        if ((isNewCrash || isRepeatedCrash) && fileAgeMs >= MIN_CRASH_AGE_MS) {
           const capturedPath = filePath;
+          const capturedIsRepeated = isRepeatedCrash;
           postTxActions.push(() => {
+            const { isSessionActive } = require("./process-detector");
+            // Process still alive = Claude is executing, not crashed — skip
+            if (isSessionActive(sessionId)) return;
+            logAction("service", capturedIsRepeated ? "repeated_crash_detected" : "crash_detected", `jsonl:${capturedPath}`, sessionId);
             getOrchestrator().enqueueCrashRetry(sessionId, capturedPath);
           });
         }
@@ -406,6 +394,7 @@ export async function scanSessions(
           const capturedSessionId = sessionId;
           const capturedPath = filePath;
           const capturedSilentMs = silentMs;
+          const capturedHasResult = metadata.hasResult;
           postTxActions.push(() => {
             const { isSessionActive } = require("./process-detector");
             // Check for permission wait (tool_use pending) OR test word trigger
@@ -417,7 +406,8 @@ export async function scanSessions(
               return; // don't also enqueue stall_continue
             }
             // Regular stall detection (5 min threshold)
-            if (capturedSilentMs > STALL_THRESHOLD_MS && isSessionActive(capturedSessionId)) {
+            // Skip if Claude completed the turn normally (has_result) — process alive = waiting for user, not stalled
+            if (capturedSilentMs > STALL_THRESHOLD_MS && isSessionActive(capturedSessionId) && !capturedHasResult) {
               logAction("service", "stall_detected", `silent:${Math.round(capturedSilentMs / 60_000)}min`, capturedSessionId);
               getOrchestrator().enqueueStallContinue(capturedSessionId);
             }
@@ -511,6 +501,16 @@ export async function scanSessions(
     updateProjects();
   }
 
+  // Post-scan: index Forge sessions from ~/forge/.forge.db
+  try {
+    const { scanForgeSessions } = await import("./forge-scanner");
+    const forgeResult = await scanForgeSessions(db, existingMtimes, mode, upsertSession);
+    sessionsScanned += forgeResult.scanned;
+    sessionsSkipped += forgeResult.skipped;
+  } catch (err) {
+    dlog.warn("scanner", `forge scan failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // Post-scan: detect incomplete exits from DB (catches files skipped by incremental scan)
   detectIncompleteExits(db);
 
@@ -550,6 +550,7 @@ function detectIncompleteExits(db: ReturnType<typeof getDb>): void {
       AND has_result = 0
       AND file_mtime < ?
       AND file_mtime > ?
+      AND (agent_type IS NULL OR agent_type = 'claude')
   `).all(cutoffRecent, cutoffOld) as Array<{
     session_id: string;
     jsonl_path: string;

@@ -52,6 +52,18 @@ export async function POST(
 
   logAction("service", "reply", `msg_len:${message.length}`, sessionId);
 
+  const agentType = (session as typeof session & { agent_type?: string }).agent_type ?? "claude";
+
+  if (agentType === "forge") {
+    const { parseForgeConvPath } = await import("@/lib/forge-scanner");
+    const conversationId = parseForgeConvPath(session.jsonl_path) ?? sessionId;
+    // Use the model stored in the session (set when Forge session was started/scanned).
+    // Do NOT fall back to claude_model — that's a Claude model and would overwrite Forge's Gemini config.
+    const model = (session as typeof session & { model?: string | null }).model || undefined;
+    const stream = getOrchestrator().resumeForge(conversationId, message, session.project_path, model);
+    return sseResponse(stream);
+  }
+
   // Auto-kill terminal sessions if setting is enabled
   const autoKill = getSetting("auto_kill_terminal_on_reply") === "true";
   if (autoKill) {

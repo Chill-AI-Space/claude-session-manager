@@ -66,7 +66,7 @@ function linkifyUrls(md: string): string {
     // The regex: match http(s):// URLs not preceded by ]( or " or < or `
     result.push(
       line.replace(
-        /(?<![(\]<"`])https?:\/\/[^\s<>)\]`"',;]*[^\s<>)\]`"',;.!?:]/g,
+        /(?<![(\]<"`*])https?:\/\/[^\s<>)\]`"',;*]*[^\s<>)\]`"',;*.!?:]/g,
         (url, offset) => {
           // Check if we're inside backticks on this line
           const before = line.slice(0, offset);

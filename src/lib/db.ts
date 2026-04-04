@@ -11,6 +11,10 @@ let _db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (!_db) {
+    const dataDir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
     _db = new Database(DB_PATH);
     _db.pragma("journal_mode = WAL");
     _db.pragma("foreign_keys = ON");
@@ -223,6 +227,9 @@ function initTables(db: Database.Database) {
   if (!colNames.has("learnings")) {
     db.exec("ALTER TABLE sessions ADD COLUMN learnings TEXT");
   }
+  if (!colNames.has("agent_type")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN agent_type TEXT DEFAULT 'claude'");
+  }
   // actions_log migrations
   const actionCols = db.prepare("PRAGMA table_info(actions_log)").all() as { name: string }[];
   const actionColNames = new Set(actionCols.map((c) => c.name));
@@ -434,11 +441,11 @@ const SETTING_DEFAULTS: Record<string, string> = {
   // Default compute node — if set, new sessions run on this remote node
   default_compute_node: "",
   // Title generation (uses summary as input)
-  title_model: "gpt-4o-mini",
+  title_model: "gemini-2.5-flash-lite",
   // Summary & learnings generation (direct API, no CLI sessions spawned)
-  summary_model: "gpt-4o-mini",
-  summary_incremental_model: "gemini-2.5-flash",
-  learnings_model: "gpt-4o-mini",
+  summary_model: "gemini-2.5-flash-lite",
+  summary_incremental_model: "gemini-2.5-flash-lite",
+  learnings_model: "gemini-2.5-flash-lite",
   auto_generate_summary: "true",
   auto_generate_learnings: "true",
   openai_api_key: "",
@@ -458,6 +465,8 @@ const SETTING_DEFAULTS: Record<string, string> = {
   worker_notify_from: "",
   worker_notify_to: "",
   worker_notify_webhook_url: "",
+  // Agent selection — which AI agent to use for new sessions
+  default_agent: "claude",
 };
 
 // Settings cache — avoids reading JSON file on every getSetting() call

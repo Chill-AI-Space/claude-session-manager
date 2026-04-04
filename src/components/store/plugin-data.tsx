@@ -82,7 +82,7 @@ export const PLUGINS: PluginData[] = [
   {
     id: "summary-ai",
     name: "Summary AI",
-    description: "AI-powered session summaries via direct API calls to OpenAI, Anthropic, or Google.",
+    description: "AI models & session summaries via OpenAI, Anthropic, or Google.",
     longDescription:
       "Generates session summaries using direct API calls (no CLI sessions spawned). Long transcripts are automatically split into chunks with map/reduce. Supports incremental summaries that update as the session progresses.",
     category: "AI",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ModelSelector } from "@/components/settings/ModelSelector";
 import { Loader2, AlertCircle, X, Search, ArrowLeft, Package, ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
 import {
@@ -98,6 +99,7 @@ export default function SettingsPage() {
     "deep-search": "deep search vector pre-filter gemini google ai api key",
     "folder-browser": "folder browser start path browse",
     "appearance": "appearance font size scale theme",
+    "ai-model": "ai model forge claude gemini gpt anthropic openai",
     "maintenance": "maintenance title generate regenerate ai titles",
   };
 
@@ -167,6 +169,19 @@ export default function SettingsPage() {
 
         {/* ── System Setup ── */}
         {sectionVisible("system-setup") && <SystemHealthSettings healthChecks={healthChecks} />}
+
+        {/* ── AI Model ── */}
+        {sectionVisible("ai-model") && (
+          <div className="space-y-4 rounded-lg border bg-card p-5 shadow-sm">
+            <h2 className="text-sm font-medium">AI Model</h2>
+            <ModelSelector
+              settingKey="claude_model"
+              currentModel={settings.claude_model || ""}
+              onUpdate={updateSetting}
+              label="Model for new sessions"
+            />
+          </div>
+        )}
 
         {/* ── Maintenance ── */}
         {sectionVisible("maintenance") && <MaintenanceSettings />}

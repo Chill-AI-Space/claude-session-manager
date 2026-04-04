@@ -12,7 +12,7 @@
  * API routes become thin wrappers.
  */
 import { EventEmitter } from "events";
-import { spawn } from "child_process";
+import spawn from "cross-spawn";
 import { getDb, getSetting, logAction } from "./db";
 import { getClaudePath } from "./claude-bin";
 import { getCleanEnv } from "./utils";
@@ -458,6 +458,11 @@ function detectBabysitterLoop(jsonlPath: string): { resumes: number; unproductiv
 
         if (obj.type !== "user") break;
 
+        // Skip SDK meta-messages — they are internal Claude Code protocol messages
+        // (e.g. "Continue from where you left off." injected on --resume),
+        // not real babysitter pokes or user input.
+        if (obj.isMeta) continue;
+
         const content = obj.message?.content;
         const text = typeof content === "string" ? content
           : Array.isArray(content)
@@ -509,6 +514,37 @@ function lastAssistantHasToolUse(jsonlPath: string): boolean {
         }
         return false; // string content = text only
       } catch { /* skip */ }
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
+/**
+ * Returns true if the last meaningful event in the JSONL is a result event.
+ * When true, Claude completed its turn and is waiting for user — NOT stalled.
+ * Works for stream-json sessions (result event present). For terminal sessions
+ * without stream-json, returns false (falls through to LLM check).
+ */
+function isLastEventResult(jsonlPath: string): boolean {
+  try {
+    const stat = fs.statSync(jsonlPath);
+    const TAIL_BYTES = 2048;
+    const start = Math.max(0, stat.size - TAIL_BYTES);
+    const fd = fs.openSync(jsonlPath, "r");
+    const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+
+    const lines = buf.toString("utf-8").split(/\r?\n/).filter(Boolean);
+    if (start > 0) lines.shift(); // first line may be truncated
+
+    // Walk backwards — find first parseable line with a meaningful type
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const obj = JSON.parse(lines[i]);
+        if (obj.type === "result") return true;
+        if (obj.type === "user" || obj.type === "assistant") return false;
+      } catch { /* skip malformed */ }
     }
   } catch { /* ignore */ }
   return false;
@@ -802,6 +838,9 @@ class SessionOrchestrator extends EventEmitter {
    * @param verbose — when true, emit extra debug events (tool inputs, tokens, thinking)
    */
   resume(sessionId: string, message: string, projectPath: string, verbose = false): ReadableStream {
+    // Cancel any pending stall_continue — user is actively replying
+    this.queue.cancel(`stall_continue:${sessionId}`);
+
     const args = buildCliArgs({ sessionId, message, includeMaxTurns: true });
 
     this.states.set(sessionId, {
@@ -835,6 +874,156 @@ class SessionOrchestrator extends EventEmitter {
 
     this.emit("session:resumed", { sessionId, projectPath });
     return stream;
+  }
+
+  // ── Public API: Forge start ───────────────────────────────────────────────
+
+  /**
+   * Start a new Forge session. Pre-generates UUID, emits session_id immediately.
+   * Returns SSE stream.
+   */
+  startForge(projectPath: string, message: string, model?: string): ReadableStream {
+    const { randomUUID } = require("crypto") as typeof import("crypto");
+    const { createForgeSSEStream } = require("./forge-runner") as typeof import("./forge-runner");
+    const conversationId: string = randomUUID();
+
+    this.states.set(conversationId, {
+      sessionId: conversationId,
+      phase: "running",
+      projectPath,
+      pid: null,
+      retryCount: 0,
+      skipCount: 0,
+      lastActivity: Date.now(),
+      startedAt: Date.now(),
+    });
+
+    logAction("service", "forge_start", projectPath, conversationId);
+    this.emit("session:started", { sessionId: conversationId, projectPath });
+
+    const stream = createForgeSSEStream({
+      conversationId,
+      message,
+      projectPath,
+      model,
+      onClose: async () => {
+        this.transition(conversationId, "completed");
+        this.emit("session:completed", { sessionId: conversationId });
+        try {
+          await scanSessions("incremental");
+          generateTitleBatch(1).catch(() => {});
+        } catch { /* non-critical */ }
+      },
+    });
+
+    return stream;
+  }
+
+  // ── Public API: Forge resume (returns SSE stream) ─────────────────────────
+
+  /**
+   * Resume an existing Forge session with a new message.
+   * Returns SSE stream (for UI-initiated replies).
+   */
+  resumeForge(conversationId: string, message: string, projectPath: string, model?: string): ReadableStream {
+    const { createForgeSSEStream } = require("./forge-runner") as typeof import("./forge-runner");
+
+    this.queue.cancel(`stall_continue:${conversationId}`);
+
+    this.states.set(conversationId, {
+      sessionId: conversationId,
+      phase: "running",
+      projectPath,
+      pid: null,
+      retryCount: this.states.get(conversationId)?.retryCount ?? 0,
+      skipCount: this.states.get(conversationId)?.skipCount ?? 0,
+      lastActivity: Date.now(),
+      startedAt: Date.now(),
+    });
+
+    logAction("service", "forge_resume", `msg_len:${message.length}`, conversationId);
+    this.emit("session:resumed", { sessionId: conversationId, projectPath });
+
+    return createForgeSSEStream({
+      conversationId,
+      message,
+      projectPath,
+      model,
+      onClose: async () => {
+        this.transition(conversationId, "completed");
+        this.emit("session:completed", { sessionId: conversationId });
+        try { await scanSessions("incremental"); } catch { /* non-critical */ }
+      },
+    });
+  }
+
+  // ── Public API: Forge resume fire-and-forget (babysitter) ────────────────
+
+  /**
+   * Resume a Forge session in the background (no SSE stream returned).
+   * Used by the babysitter stall detection.
+   */
+  resumeForgeBackground(conversationId: string, message: string, projectPath: string, model?: string): void {
+    const state = this.states.get(conversationId);
+    if (state && !["idle", "completed", "failed"].includes(state.phase)) return;
+
+    const { getForgePath } = require("./forge-bin") as typeof import("./forge-bin");
+    const { getCleanEnv } = require("./utils") as typeof import("./utils");
+    const { spawnSync } = require("child_process") as typeof import("child_process");
+
+    this.states.set(conversationId, {
+      sessionId: conversationId,
+      phase: "running",
+      projectPath,
+      pid: null,
+      retryCount: 0,
+      skipCount: 0,
+      lastActivity: Date.now(),
+      startedAt: Date.now(),
+    });
+
+    logAction("service", "forge_stall_continue", projectPath, conversationId);
+
+    // Set model if provided
+    if (model) {
+      spawnSync(getForgePath(), ["config", "set", "model", model], {
+        env: getCleanEnv(),
+        stdio: "ignore",
+      });
+    }
+
+    // Rotate Gemini key before spawning (checks quota, writes working key to ~/forge/.credentials.json)
+    if (process.platform !== "win32") {
+      const rotatePath = `${process.env.HOME}/.claude/scripts/pm-gemini-rotate.sh`;
+      const rotateResult = spawnSync("bash", [rotatePath], {
+        env: getCleanEnv(),
+        encoding: "utf-8",
+        timeout: 35_000,
+      });
+      if (rotateResult.status !== 0) {
+        logAction("service", "forge_stall_continue_skipped", "all Gemini keys exhausted", conversationId);
+        this.transition(conversationId, "failed", "all Gemini keys exhausted");
+        return;
+      }
+    }
+
+    const proc = spawn(getForgePath(), [
+      "--conversation-id", conversationId,
+      "-C", projectPath,
+      "-p", message,
+    ], {
+      cwd: projectPath,
+      env: getCleanEnv(),
+      stdio: "ignore",
+      detached: process.platform !== "win32",
+      windowsHide: true,
+    });
+    proc.unref();
+
+    proc.on("close", async () => {
+      this.transition(conversationId, "completed");
+      try { await scanSessions("incremental"); } catch { /* non-critical */ }
+    });
   }
 
   // ── Public API: stop ──────────────────────────────────────────────────────
@@ -1059,6 +1248,13 @@ class SessionOrchestrator extends EventEmitter {
     if (!session || session.last_message_role !== "tool_result") return;
     if (getSetting("auto_retry_on_crash") === "false") return;
 
+    // If the process is still alive, it recovered on its own — skip
+    if (isSessionActive(sessionId)) {
+      logAction("service", "auto_retry_skipped", "process alive — recovered before execution", sessionId);
+      this.transition(sessionId, "running");
+      return;
+    }
+
     // Detect babysitter loop — if we've already poked this session 2+ times, stop
     const loop = detectBabysitterLoop(session.jsonl_path);
     if (loop.unproductiveCount >= 2 || loop.resumes >= 4) {
@@ -1135,11 +1331,21 @@ class SessionOrchestrator extends EventEmitter {
   private async executeStallContinue(sessionId: string): Promise<void> {
     const db = getDb();
     const session = db
-      .prepare("SELECT project_path, last_message_role, last_message, jsonl_path, first_prompt FROM sessions WHERE session_id = ?")
-      .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path"> & { last_message: string | null; first_prompt: string | null } | undefined;
+      .prepare("SELECT project_path, last_message_role, last_message, jsonl_path, first_prompt, has_result FROM sessions WHERE session_id = ?")
+      .get(sessionId) as Pick<SessionRow, "project_path" | "last_message_role" | "jsonl_path" | "has_result"> & { last_message: string | null; first_prompt: string | null } | undefined;
 
     if (!session) return;
     if (getSetting("auto_continue_on_stall") !== "true") return;
+
+    // Skip if Claude completed the turn normally — process alive means waiting for user, not stalled
+    if (session.has_result) return;
+
+    // Direct JSONL check: last event is a result → Claude just finished, waiting for user
+    if (isLastEventResult(session.jsonl_path)) return;
+
+    // Skip if session is already running (user sent a reply while we were waiting)
+    const currentPhase = this.states.get(sessionId)?.phase;
+    if (currentPhase === "running" || currentPhase === "continuing") return;
 
     // Detect babysitter loop
     const loop = detectBabysitterLoop(session.jsonl_path);
@@ -1495,6 +1701,10 @@ class SessionOrchestrator extends EventEmitter {
         .run();
       if (deleted.changes > 0) {
         dlog.info("orchestrator", `pruned ${deleted.changes} old actions_log rows`);
+        // Vacuum occasionally if rows were deleted
+        if (Math.random() < 0.1) {
+          getDb().exec("VACUUM; ANALYZE;");
+        }
       }
     } catch { /* non-critical */ }
 

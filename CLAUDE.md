@@ -148,11 +148,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/settings
 tail -20 ~/Library/Logs/claude-session-manager.log
 tail -20 ~/Library/Logs/claude-session-manager-error.log
 
-# 6. Reply (spawn claude) works — critical check
-curl -s -X POST http://localhost:3000/api/sessions/$(curl -s http://localhost:3000/api/sessions | python3 -c "import json,sys; s=json.load(sys.stdin); print(s[0]['session_id'])" 2>/dev/null)/reply \
-  -H "Content-Type: application/json" -d '{"message":"ping"}' --max-time 30 | head -c 200
-
-# 7. Debug log pipeline ping (non-blocking — skip if debug_log_endpoint not set)
+# 6. Debug log pipeline ping (non-blocking — skip if debug_log_endpoint not set)
 curl -s -X POST http://localhost:3000/api/debug/ping | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'Debug ping: {d[\"status\"]} ({d.get(\"totalMs\",\"?\")}{\"ms\" if \"totalMs\" in d else \"\"})')"
 ```
 
@@ -325,3 +321,49 @@ When writing new code, follow these rules to keep Windows compatibility:
 - **Signals**: `SIGTERM`/`SIGKILL` work differently. Use `proc.kill()` without arguments for cross-platform compatibility
 - **Line endings**: JSONL parsing should handle `\r\n` (use `split(/\r?\n/)`)
 - **Path in Claude projects dir**: `pathToProjectDir()` replaces both `/` and `\` with `-`
+
+## Sessions Choreography
+
+When multiple Claude sessions work in parallel, proper coordination keeps everyone moving and avoids conflicts. Without discipline: sessions overwrite each other's code, deploy conflicting versions, tasks get stuck.
+
+### Rule 1 — all running/deployed code lives in files and git
+
+Any code that runs or deploys **must be committed** (at least to a branch). Not in git — doesn't exist. Not ready for main — open a branch, it'll be visible in `git branch`. This is the only way two sessions don't step on each other.
+
+### Rule 2 — sessions can see each other
+
+All active sessions are visible in real time via Session Manager. Find active sessions in the same repo:
+
+```bash
+# Who's working in the same repo?
+curl -s "http://localhost:3000/api/sessions/peers?path=/abs/path/to/repo" | jq .
+
+# All active sessions across all repos
+curl -s "http://localhost:3000/api/sessions?limit=50&include_remote=false" | \
+  jq '[.sessions[] | select(.is_active) | {session_id, project_path, generated_title}]'
+```
+
+### Rule 3 — check for siblings before touching a repo
+
+Before starting work in a repo, check if another session is already there. If yes: coordinate (different branches, different files, or sequence the work). A task shouldn't get stuck because of a conflict with a parallel session.
+
+### Rule 4 — pass the baton via orchestrator
+
+Finished a task, deployed — check if another session is active in a related repo. If yes: send it context via the orchestrator (fire-and-forget, returns immediately):
+
+```bash
+# Send a message to another session — fire-and-forget
+curl -s -X POST "http://localhost:3000/api/orchestrator" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"resume","sessionId":"SESSION_UUID","message":"deploy complete — please run smoke tests","priority":"high"}'
+# Returns: {"taskId":"resume:SESSION_UUID","ok":true}
+
+# Find the target session_id first
+curl -s "http://localhost:3000/api/sessions/peers?path=/path/to/repo" | jq '.[\"peers\"][0].session_id'
+```
+
+Use `/api/sessions/{id}/reply` only when you want to stream the response back (SSE). For cross-session signals, always use `/api/orchestrator` — it enqueues and returns instantly.
+
+### Why orchestrator, not /reply
+
+`/reply` returns an SSE stream — curl hangs until Claude finishes responding. `/api/orchestrator` with `type: "resume"` enqueues the message and returns `{taskId, ok: true}` immediately. Use orchestrator for inter-session events; use `/reply` only when you need to stream the response back to a UI or terminal.

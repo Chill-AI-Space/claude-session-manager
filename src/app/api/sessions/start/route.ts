@@ -9,12 +9,13 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { path: projectPath, message, correlationId, verbose, model } = body as {
+  const { path: projectPath, message, correlationId, verbose, model, agent } = body as {
     path: string;
     message: string;
     correlationId?: string;
     verbose?: boolean;
     model?: string;
+    agent?: string;
   };
 
   if (!projectPath || !message?.trim()) {
@@ -34,6 +35,8 @@ export async function POST(request: NextRequest) {
         message: message.trim(),
         correlationId,
         verbose: verbose ?? false,
+        agent,
+        model,
       });
       return new Response(stream, { headers: SSE_HEADERS });
     } catch (err) {
@@ -45,6 +48,11 @@ export async function POST(request: NextRequest) {
   // Local execution
   if (correlationId) {
     logAction("service", "session_start_api_received", JSON.stringify({ correlationId, path: projectPath }));
+  }
+
+  if (agent === "forge") {
+    const stream = getOrchestrator().startForge(projectPath, message.trim(), model);
+    return sseResponse(stream);
   }
 
   const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model);

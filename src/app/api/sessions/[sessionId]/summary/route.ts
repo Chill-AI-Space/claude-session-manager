@@ -65,7 +65,7 @@ export async function POST(
   }
 
   try {
-    const model = getSetting("summary_model") || "gpt-4o-mini";
+    const model = getSetting("summary_model") || "gemini-2.5-flash";
     const messages = readSessionMessages(session.jsonl_path);
     const sessionText = messagesToText(messages, { maxMessageLen: 2000 });
 

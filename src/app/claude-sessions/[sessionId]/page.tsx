@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud, Hammer } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -17,11 +17,13 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import Link from "next/link";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
+import { MODEL_PRESETS } from "@/components/settings/ModelSelector";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useComputeNode } from "@/hooks/useComputeNode";
+
 
 const CTX_MAX = 200_000;
 
@@ -212,6 +214,7 @@ export default function SessionDetailPage({
 
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
+  const [newSessionAgent, setNewSessionAgent] = useState<"claude" | "forge">("claude");
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [startingNewSession, setStartingNewSession] = useState(false);
@@ -249,21 +252,22 @@ export default function SessionDetailPage({
     setTheme(saved === "light" ? "light" : "dark");
   }, []);
 
-  // Poll for pending permission requests (every 2s)
+  // Poll for pending permission requests (every 2s) — only when session is active
   useEffect(() => {
+    if (!data?.is_active && !isStreaming) return;
     let cancelled = false;
     const poll = async () => {
       try {
         const res = await fetch(`/api/permissions/pending?sessionId=${sessionId}`);
         if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled) setPendingPermissions(data);
+        const json = await res.json();
+        if (!cancelled) setPendingPermissions(json);
       } catch { /* ignore */ }
     };
     poll();
     const id = setInterval(poll, 2000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [sessionId]);
+  }, [sessionId, data?.is_active, isStreaming]);
 
   const handlePermissionDecide = async (id: string, behavior: "allow" | "deny") => {
     try {
@@ -1101,7 +1105,7 @@ export default function SessionDetailPage({
       const res = await fetch(startUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: newSessionPath, message: fullMessage, ...(newSessionModel && { model: newSessionModel }) }),
+        body: JSON.stringify({ path: newSessionPath, message: fullMessage, ...(newSessionModel && { model: newSessionModel }), ...(newSessionAgent === "forge" && { agent: "forge" }) }),
       });
 
       if (!res.ok) throw new Error("Failed to start session");
@@ -1142,9 +1146,6 @@ export default function SessionDetailPage({
     setStreamStatus(null);
     setLastSentText(null);
     processingRef.current = false;
-    // Also clear the queue
-    queueRef.current = [];
-    setQueuedMessages([]);
   }, []);
 
   // Keyboard shortcuts
@@ -1198,9 +1199,12 @@ export default function SessionDetailPage({
   // Use last assistant message's usage — this reflects the actual current context window size.
   // Cumulative total_input_tokens is wrong: each turn re-sends full context so it grows as N².
   // Must include cache_read + cache_creation — with prompt caching most tokens are there.
-  const lastUsage = [...data.messages]
-    .reverse()
-    .find((m) => m.type === "assistant" && m.usage)?.usage;
+  // Iterate backwards to avoid copying the array.
+  let lastUsage: typeof data.messages[0]["usage"] | undefined;
+  for (let i = data.messages.length - 1; i >= 0; i--) {
+    const m = data.messages[i];
+    if (m.type === "assistant" && m.usage) { lastUsage = m.usage; break; }
+  }
   const totalTokens = lastUsage
     ? (lastUsage.input_tokens || 0)
       + (lastUsage.cache_read_input_tokens || 0)
@@ -1441,7 +1445,28 @@ export default function SessionDetailPage({
                     <span className="text-blue-400/70">Extracting learnings…</span>
                   </div>
                 )}
-                {learningsError && <div className="text-[11px] text-red-500 py-1">{learningsError}</div>}
+                {learningsError && (
+                  <div className="text-[11px] text-red-500 py-2 space-y-1">
+                    <div>{learningsError}</div>
+                    <button
+                      onClick={() => {
+                        setLearningsError(null);
+                        setLearningsLoading(true);
+                        fetch(`/api/sessions/${data.session_id}/learnings?refresh=1`, { method: "POST" })
+                          .then(r => r.json())
+                          .then(json => {
+                            if (json.error) setLearningsError(json.error + (json.raw ? `\n\nRaw: ${json.raw.slice(0, 300)}...` : ""));
+                            else setLearnings(json.learnings);
+                          })
+                          .catch(e => setLearningsError(e.message))
+                          .finally(() => setLearningsLoading(false));
+                      }}
+                      className="underline underline-offset-2 hover:text-red-400"
+                    >
+                      Retry with refresh
+                    </button>
+                  </div>
+                )}
                 {learnings && (() => {
                   const l = learnings as Record<string, string | string[]>;
                   const categories = [
@@ -1591,7 +1616,28 @@ export default function SessionDetailPage({
                       </button>
                       {learningsOpen && (
                         <div className="px-4 pb-3 border-t border-border/20">
-                          {learningsError && <div className="text-[11px] text-red-500 py-2">{learningsError}</div>}
+                          {learningsError && (
+                            <div className="text-[11px] text-red-500 py-2 space-y-1">
+                              <div>{learningsError}</div>
+                              <button
+                                onClick={() => {
+                                  setLearningsError(null);
+                                  setLearningsLoading(true);
+                                  fetch(`/api/sessions/${data.session_id}/learnings?refresh=1`, { method: "POST" })
+                                    .then(r => r.json())
+                                    .then(json => {
+                                      if (json.error) setLearningsError(json.error + (json.raw ? `\n\nRaw: ${json.raw.slice(0, 300)}...` : ""));
+                                      else setLearnings(json.learnings);
+                                    })
+                                    .catch(e => setLearningsError(e.message))
+                                    .finally(() => setLearningsLoading(false));
+                                }}
+                                className="underline underline-offset-2 hover:text-red-400"
+                              >
+                                Retry with refresh
+                              </button>
+                            </div>
+                          )}
                           {learnings && (() => {
                             const l = learnings as Record<string, string | string[]>;
                             const entries = Object.entries(l).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : !!v));
@@ -1758,9 +1804,7 @@ export default function SessionDetailPage({
                   {data.messages_total ?? data.metadata.message_count} messages
                 </span>
                 {data.metadata.model && (
-                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
-                    {data.metadata.model.replace("claude-", "")}
-                  </Badge>
+                  <span className="text-xs text-muted-foreground">{data.metadata.model}</span>
                 )}
                 {totalTokens > 0 && <ContextBar tokens={totalTokens} />}
               </div>
@@ -2149,6 +2193,22 @@ export default function SessionDetailPage({
                     {skipPerms.value ? "on" : "off"}
                   </span>
                 </button>
+                <button
+                  onClick={() => {
+                    const next = newSessionAgent === "claude" ? "forge" : "claude";
+                    setNewSessionAgent(next);
+                    setNewSessionModel(next === "forge" ? "models/gemini-3-flash-preview" : "");
+                  }}
+                  className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors px-2 py-0.5 rounded border ${
+                    newSessionAgent === "forge"
+                      ? "text-orange-400 border-orange-400/40 bg-orange-500/10 hover:bg-orange-500/20"
+                      : "text-muted-foreground/70 border-border hover:text-foreground hover:bg-muted/50"
+                  }`}
+                  title={newSessionAgent === "forge" ? "Using Forge — click to switch to Claude" : "Using Claude — click to switch to Forge"}
+                >
+                  {newSessionAgent === "forge" ? <Hammer className="h-3 w-3" /> : <span className="text-[10px] font-bold leading-none">C</span>}
+                  <span>{newSessionAgent}</span>
+                </button>
                 {compute.nodes.length > 0 && (
                   <button
                     onClick={compute.toggle}
@@ -2189,12 +2249,17 @@ export default function SessionDetailPage({
                 <select
                   value={newSessionModel}
                   onChange={(e) => setNewSessionModel(e.target.value)}
-                  className="text-[11px] px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground hover:border-violet-500/30 cursor-pointer max-w-[110px]"
+                  className="text-[11px] px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground hover:border-violet-500/30 cursor-pointer max-w-[140px]"
                   title="Model for new session"
                 >
-                  <option value="">Opus 4.6</option>
-                  <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-                  <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+                  {newSessionAgent === "forge"
+                    ? MODEL_PRESETS.filter(p => p.model.startsWith("models/gemini") || p.model.startsWith("gemini") || p.model === "claude-sonnet-4-6").map(p => (
+                        <option key={p.id} value={p.model}>{p.name}</option>
+                      ))
+                    : MODEL_PRESETS.filter(p => p.model.startsWith("claude") || p.model.startsWith("gpt")).map(p => (
+                        <option key={p.id} value={p.model}>{p.name}</option>
+                      ))
+                  }
                 </select>
 
                 <div className="flex-1" />

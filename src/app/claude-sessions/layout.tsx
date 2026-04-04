@@ -51,7 +51,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   const [updateStep, setUpdateStep] = useState("");
   const [updatesAvailable, setUpdatesAvailable] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const MAX_SESSIONS_IN_MEMORY = 50;
+  const MAX_SESSIONS_IN_MEMORY = 5000;
 
   // Check for updates on mount (silent background check)
   useEffect(() => {
@@ -204,7 +204,9 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     if (selectedProjects.length > 0) params.set("project", selectedProjects.join(","));
     if (searchQuery) params.set("search", searchQuery);
     params.set("sort", "modified");
-    params.set("limit", String(SIDEBAR_PAGE_SIZE));
+    // On auto-refresh, preserve the user's loaded count so scroll position isn't reset
+    const fetchLimit = Math.max(SIDEBAR_PAGE_SIZE, sessionsRef.current.length);
+    params.set("limit", String(fetchLimit));
     // Skip remote nodes for instant sidebar load; fetch them lazily below
     params.set("include_remote", "false");
 
@@ -289,7 +291,8 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     setProjects(data.projects);
   }, []);
 
-  async function triggerScan(mode: "full" | "incremental" = "incremental"): Promise<void> {
+
+  const triggerScan = useCallback(async (mode: "full" | "incremental" = "incremental"): Promise<void> => {
     setScanning(true);
     await fetch("/api/sessions/scan", {
       method: "POST",
@@ -300,8 +303,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     setScanning(false);
     // Signal the open session detail page to re-fetch
     window.dispatchEvent(new Event("sessions-scanned"));
-  }
-
+  }, [fetchSessions, fetchProjects]);
 
   const archiveSession = useCallback(async (sessionId: string) => {
     setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
@@ -355,7 +357,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     }
     window.addEventListener("session-started", handleSessionStarted);
     return () => window.removeEventListener("session-started", handleSessionStarted);
-  }, []);
+  }, [triggerScan]);
 
   sessionsRef.current = sessions;
 

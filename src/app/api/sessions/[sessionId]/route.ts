@@ -62,6 +62,31 @@ export async function GET(
   const searchParams = request.nextUrl.searchParams;
   const PAGE_SIZE = 100;
 
+  // ── Forge sessions: read from ~/forge/.forge.db ──────────────────────────
+  const agentType = (session as SessionRow & { agent_type?: string }).agent_type ?? "claude";
+  if (agentType === "forge") {
+    const { readForgeMessages, getForgeConversation } = await import("@/lib/forge-db");
+    const forgeMessages = readForgeMessages(sessionId);
+    // Use updated_at directly from Forge's DB for accurate is_active (avoids stale cached file_mtime)
+    const forgeRow = getForgeConversation(sessionId);
+    const forgeUpdatedAt = forgeRow?.updated_at
+      ? new Date(forgeRow.updated_at.replace(" ", "T") + "Z").getTime()
+      : session.file_mtime;
+    const fileAgeMs = Date.now() - (forgeUpdatedAt || session.file_mtime);
+    const active = fileAgeMs < 5 * 60 * 1000;
+    return Response.json({
+      session_id: session.session_id,
+      project_path: session.project_path,
+      messages: forgeMessages,
+      messages_start: 0,
+      messages_total: forgeMessages.length,
+      metadata: session,
+      is_active: active,
+      has_result: forgeMessages.some(m => m.type === "assistant"),
+      file_age_ms: Math.round(fileAgeMs),
+    });
+  }
+
   // Paginated read — only parses the window we need for large sessions
   const beforeParam = searchParams.has("before")
     ? parseInt(searchParams.get("before")!)

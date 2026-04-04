@@ -3,7 +3,8 @@
  * - `runClaudeOneShot` — fire prompt, collect text output, return string
  * - `createSSEStream` — spawn Claude with stream-json, return SSE ReadableStream + Response
  */
-import { spawn, type ChildProcess } from "child_process";
+import { ChildProcess } from "child_process";
+import spawn from "cross-spawn";
 import { getClaudePath } from "./claude-bin";
 import { getCleanEnv } from "./utils";
 import * as dlog from "./debug-logger";
@@ -29,10 +30,10 @@ export function runClaudeOneShot(opts: {
     let stdout = "";
     let stderr = "";
 
-    proc.stdout.on("data", (data: Buffer) => {
+    proc.stdout!.on("data", (data: Buffer) => {
       stdout += data.toString();
     });
-    proc.stderr.on("data", (data: Buffer) => {
+    proc.stderr!.on("data", (data: Buffer) => {
       stderr += data.toString();
     });
 
@@ -59,8 +60,8 @@ export function runClaudeOneShot(opts: {
       reject(err);
     });
 
-    proc.stdin.write(prompt);
-    proc.stdin.end();
+    proc.stdin!.write(prompt);
+    proc.stdin!.end();
   });
 }
 

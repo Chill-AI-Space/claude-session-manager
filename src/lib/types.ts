@@ -25,6 +25,7 @@ export interface SessionRow {
   has_result?: number;
   summary?: string | null;
   learnings?: string | null;
+  agent_type?: string | null;
 }
 
 export interface ProjectRow {
@@ -59,6 +60,7 @@ export interface SessionListItem {
   is_active?: boolean;
   last_message_role?: string | null;
   has_result?: boolean;
+  agent_type?: string | null;
   // Remote executor fields (set when session comes from a remote node)
   _remote?: boolean;
   _nodeId?: string;

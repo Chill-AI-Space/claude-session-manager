@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
               generated_title, custom_name, tags, pinned, archived,
               message_count, total_input_tokens, total_output_tokens,
               created_at, modified_at, file_mtime, file_size, last_scanned_at,
-              last_message_role, has_result
+              last_message_role, has_result, agent_type
        FROM sessions ${whereClause} ${sortClause} LIMIT @limit OFFSET @offset`
     )
     .all({ ...filterParams, limit, offset }) as SessionRow[];
@@ -116,9 +116,12 @@ export async function GET(request: NextRequest) {
     modified_at: row.modified_at,
     total_input_tokens: row.total_input_tokens,
     total_output_tokens: row.total_output_tokens,
-    is_active: activeIds.has(row.session_id),
+    is_active: (row as SessionRow & { agent_type?: string }).agent_type === "forge"
+      ? (Date.now() - row.file_mtime) < 5 * 60 * 1000
+      : activeIds.has(row.session_id),
     last_message_role: (row as SessionRow & { last_message_role?: string }).last_message_role ?? null,
     has_result: !!row.has_result,
+    agent_type: (row as SessionRow & { agent_type?: string }).agent_type ?? "claude",
   }));
 
   const totalCount = db
@@ -132,7 +135,7 @@ export async function GET(request: NextRequest) {
 
   if (includeRemote && offset === 0) {
     try {
-      const remoteResults = await fetchAllRemoteSessions({ limit: 50, search: search || undefined });
+      const remoteResults = await fetchAllRemoteSessions({ limit: Math.max(limit, 100), search: search || undefined });
       for (const result of remoteResults) {
         remoteMeta.push({
           nodeId: result.nodeId,

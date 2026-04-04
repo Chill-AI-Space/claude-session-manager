@@ -20,10 +20,10 @@ const SETTING_KEY: Record<Provider, string> = {
   google: "google_ai_api_key",
 };
 
-const ENV_KEY: Record<Provider, string> = {
-  openai: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  google: "GOOGLE_AI_API_KEY",
+const ENV_KEY: Record<Provider, string[]> = {
+  openai: ["OPENAI_API_KEY"],
+  anthropic: ["ANTHROPIC_API_KEY"],
+  google: ["GOOGLE_AI_API_KEY", "GEMINI_API_KEY"],
 };
 
 /** Fallback models when the requested provider's key is missing (ordered by preference) */
@@ -33,15 +33,22 @@ const FALLBACK_MODEL: Record<Provider, [Provider, string][]> = {
   anthropic: [["google", "gemini-2.5-flash"], ["openai", "gpt-4o-mini"]],
 };
 
+function getEnvKey(provider: Provider): string | undefined {
+  for (const envVar of ENV_KEY[provider]) {
+    if (process.env[envVar]) return process.env[envVar];
+  }
+  return undefined;
+}
+
 function hasApiKey(provider: Provider): boolean {
-  return !!(getSetting(SETTING_KEY[provider]) || process.env[ENV_KEY[provider]]);
+  return !!(getSetting(SETTING_KEY[provider]) || getEnvKey(provider));
 }
 
 function getApiKey(provider: Provider): string {
-  const key = getSetting(SETTING_KEY[provider]) || process.env[ENV_KEY[provider]];
+  const key = getSetting(SETTING_KEY[provider]) || getEnvKey(provider);
   if (!key) {
     throw new Error(
-      `No API key configured for ${provider}. Set "${SETTING_KEY[provider]}" in Settings or ${ENV_KEY[provider]} env var.`
+      `No API key configured for ${provider}. Set "${SETTING_KEY[provider]}" in Settings or ${ENV_KEY[provider].join("/")} env var.`
     );
   }
   return key;
@@ -89,7 +96,6 @@ const CONTEXT_LIMITS: Record<string, number> = {
 
 /** Rough context limit for a model (defaults to 128K if unknown) */
 export function getContextLimit(model: string): number {
-  // Try exact match first, then prefix match
   if (CONTEXT_LIMITS[model]) return CONTEXT_LIMITS[model];
   for (const [prefix, limit] of Object.entries(CONTEXT_LIMITS)) {
     if (model.startsWith(prefix)) return limit;
@@ -120,6 +126,7 @@ export interface CompletionResult {
  */
 export async function completion(opts: CompletionOptions): Promise<CompletionResult> {
   const { model: requestedModel, systemPrompt, userPrompt, maxTokens = 4096, temperature = 0.3 } = opts;
+
   const resolved = resolveWithFallback(requestedModel);
   const apiKey = getApiKey(resolved.provider);
 
@@ -170,7 +177,8 @@ async function callOpenAI(
 
 async function callAnthropic(
   apiKey: string, model: string, system: string | undefined,
-  user: string, maxTokens: number, temperature: number
+  user: string, maxTokens: number, temperature: number,
+  baseUrl = "https://api.anthropic.com"
 ): Promise<CompletionResult> {
   const body: Record<string, unknown> = {
     model,
@@ -180,7 +188,7 @@ async function callAnthropic(
   };
   if (system) body.system = system;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch(`${baseUrl}/v1/messages`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
