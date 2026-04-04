@@ -57,7 +57,10 @@ export async function POST(
   if (agentType === "forge") {
     const { parseForgeConvPath } = await import("@/lib/forge-scanner");
     const conversationId = parseForgeConvPath(session.jsonl_path) ?? sessionId;
-    const stream = getOrchestrator().resumeForge(conversationId, message, session.project_path);
+    // Use the model stored in the session (set when Forge session was started/scanned).
+    // Do NOT fall back to claude_model — that's a Claude model and would overwrite Forge's Gemini config.
+    const model = (session as typeof session & { model?: string | null }).model || undefined;
+    const stream = getOrchestrator().resumeForge(conversationId, message, session.project_path, model);
     return sseResponse(stream);
   }
 

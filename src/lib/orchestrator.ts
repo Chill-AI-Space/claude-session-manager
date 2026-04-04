@@ -882,7 +882,7 @@ class SessionOrchestrator extends EventEmitter {
    * Start a new Forge session. Pre-generates UUID, emits session_id immediately.
    * Returns SSE stream.
    */
-  startForge(projectPath: string, message: string): ReadableStream {
+  startForge(projectPath: string, message: string, model?: string): ReadableStream {
     const { randomUUID } = require("crypto") as typeof import("crypto");
     const { createForgeSSEStream } = require("./forge-runner") as typeof import("./forge-runner");
     const conversationId: string = randomUUID();
@@ -905,6 +905,7 @@ class SessionOrchestrator extends EventEmitter {
       conversationId,
       message,
       projectPath,
+      model,
       onClose: async () => {
         this.transition(conversationId, "completed");
         this.emit("session:completed", { sessionId: conversationId });
@@ -924,7 +925,7 @@ class SessionOrchestrator extends EventEmitter {
    * Resume an existing Forge session with a new message.
    * Returns SSE stream (for UI-initiated replies).
    */
-  resumeForge(conversationId: string, message: string, projectPath: string): ReadableStream {
+  resumeForge(conversationId: string, message: string, projectPath: string, model?: string): ReadableStream {
     const { createForgeSSEStream } = require("./forge-runner") as typeof import("./forge-runner");
 
     this.queue.cancel(`stall_continue:${conversationId}`);
@@ -947,6 +948,7 @@ class SessionOrchestrator extends EventEmitter {
       conversationId,
       message,
       projectPath,
+      model,
       onClose: async () => {
         this.transition(conversationId, "completed");
         this.emit("session:completed", { sessionId: conversationId });
@@ -961,12 +963,13 @@ class SessionOrchestrator extends EventEmitter {
    * Resume a Forge session in the background (no SSE stream returned).
    * Used by the babysitter stall detection.
    */
-  resumeForgeBackground(conversationId: string, message: string, projectPath: string): void {
+  resumeForgeBackground(conversationId: string, message: string, projectPath: string, model?: string): void {
     const state = this.states.get(conversationId);
     if (state && !["idle", "completed", "failed"].includes(state.phase)) return;
 
     const { getForgePath } = require("./forge-bin") as typeof import("./forge-bin");
     const { getCleanEnv } = require("./utils") as typeof import("./utils");
+    const { spawnSync } = require("child_process") as typeof import("child_process");
 
     this.states.set(conversationId, {
       sessionId: conversationId,
@@ -980,6 +983,29 @@ class SessionOrchestrator extends EventEmitter {
     });
 
     logAction("service", "forge_stall_continue", projectPath, conversationId);
+
+    // Set model if provided
+    if (model) {
+      spawnSync(getForgePath(), ["config", "set", "model", model], {
+        env: getCleanEnv(),
+        stdio: "ignore",
+      });
+    }
+
+    // Rotate Gemini key before spawning (checks quota, writes working key to ~/forge/.credentials.json)
+    if (process.platform !== "win32") {
+      const rotatePath = `${process.env.HOME}/.claude/scripts/pm-gemini-rotate.sh`;
+      const rotateResult = spawnSync("bash", [rotatePath], {
+        env: getCleanEnv(),
+        encoding: "utf-8",
+        timeout: 35_000,
+      });
+      if (rotateResult.status !== 0) {
+        logAction("service", "forge_stall_continue_skipped", "all Gemini keys exhausted", conversationId);
+        this.transition(conversationId, "failed", "all Gemini keys exhausted");
+        return;
+      }
+    }
 
     const proc = spawn(getForgePath(), [
       "--conversation-id", conversationId,
@@ -1675,6 +1701,10 @@ class SessionOrchestrator extends EventEmitter {
         .run();
       if (deleted.changes > 0) {
         dlog.info("orchestrator", `pruned ${deleted.changes} old actions_log rows`);
+        // Vacuum occasionally if rows were deleted
+        if (Math.random() < 0.1) {
+          getDb().exec("VACUUM; ANALYZE;");
+        }
       }
     } catch { /* non-critical */ }
 

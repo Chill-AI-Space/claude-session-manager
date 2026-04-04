@@ -10,6 +10,7 @@
  *   ● [HH:MM:SS] Finished <uuid>      ← completion
  */
 import spawn from "cross-spawn";
+import { spawnSync } from "child_process";
 import { getForgePath } from "./forge-bin";
 import { getCleanEnv } from "./utils";
 import * as dlog from "./debug-logger";
@@ -22,6 +23,7 @@ export interface ForgeSSEStreamOptions {
   conversationId: string;
   message: string;
   projectPath: string;
+  model?: string;
   /** Called when the process closes (after done event sent) */
   onClose?: () => void;
 }
@@ -31,7 +33,7 @@ export interface ForgeSSEStreamOptions {
  * Emits `session_id` immediately (we control the UUID).
  */
 export function createForgeSSEStream(opts: ForgeSSEStreamOptions): ReadableStream {
-  const { conversationId, message, projectPath, onClose } = opts;
+  const { conversationId, message, projectPath, model, onClose } = opts;
   const encoder = new TextEncoder();
 
   let closed = false;
@@ -73,6 +75,32 @@ export function createForgeSSEStream(opts: ForgeSSEStreamOptions): ReadableStrea
         "-C", projectPath,
         "-p", message,
       ];
+
+      // Set model if provided (Forge doesn't have a flag, so we set it via config)
+      if (model) {
+        dlog.info("forge-runner", `set model: forge config set model "${model}"`);
+        spawnSync(getForgePath(), ["config", "set", "model", model], {
+          env: getCleanEnv(),
+          stdio: "ignore",
+        });
+      }
+
+      // Rotate Gemini key before spawning (checks quota, writes working key to ~/forge/.credentials.json)
+      if (process.platform !== "win32") {
+        const rotatePath = `${process.env.HOME}/.claude/scripts/pm-gemini-rotate.sh`;
+        const rotateResult = spawnSync("bash", [rotatePath], {
+          env: getCleanEnv(),
+          encoding: "utf-8",
+          timeout: 35_000,
+        });
+        if (rotateResult.status !== 0) {
+          dlog.warn("forge-runner", "pm-gemini-rotate.sh: all keys exhausted or script failed");
+          send({ type: "error", text: "All Gemini API keys exhausted. Cannot start Forge session." });
+          close();
+          return;
+        }
+        dlog.info("forge-runner", `pm-gemini-rotate.sh: ok (key set in credentials.json)`);
+      }
 
       dlog.info("forge-runner", `spawn: forge ${args.slice(0, 4).join(" ")} ...`, { cwd: projectPath });
 
