@@ -3,6 +3,7 @@ import { glob } from "glob";
 import fs from "fs";
 import path from "path";
 import { claudeProjectsDir, UUID_RE } from "./utils";
+import { iterateLinesSync } from "./utils-server";
 import { getOrchestrator, STALL_THRESHOLD_MS, PERMISSION_WAIT_THRESHOLD_MS, detectPermissionWait, detectTestWordInLastAssistant } from "./orchestrator";
 
 const CLAUDE_DIR = claudeProjectsDir();
@@ -32,36 +33,6 @@ interface JsonlMetadata {
   fullText: string;
 }
 
-// Large file threshold: above this, use streaming line reader instead of readFileSync+split
-const LARGE_FILE_BYTES = 5 * 1024 * 1024; // 5MB
-
-/** Read file lines without loading entire content into a single string */
-function readLinesStreaming(filePath: string): string[] {
-  const fd = fs.openSync(filePath, "r");
-  try {
-    const CHUNK_SIZE = 256 * 1024; // 256KB chunks
-    const buf = Buffer.alloc(CHUNK_SIZE);
-    const lines: string[] = [];
-    let remainder = "";
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const bytesRead = fs.readSync(fd, buf, 0, CHUNK_SIZE, null);
-      if (bytesRead === 0) break;
-      const chunk = remainder + buf.toString("utf-8", 0, bytesRead);
-      const parts = chunk.split(/\r?\n/);
-      remainder = parts.pop() || "";
-      for (const p of parts) {
-        if (p.trim()) lines.push(p);
-      }
-    }
-    if (remainder.trim()) lines.push(remainder);
-    return lines;
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
 function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
   try {
     let stat: fs.Stats;
@@ -69,10 +40,7 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
       stat = fs.statSync(filePath);
     } catch { return null; }
 
-    // For large files, use streaming reader to avoid 3x memory multiplier
-    const lines = stat.size > LARGE_FILE_BYTES
-      ? readLinesStreaming(filePath)
-      : fs.readFileSync(filePath, "utf-8").split(/\r?\n/).filter((l) => l.trim());
+    const lines = iterateLinesSync(filePath);
 
     let sessionId = "";
     let projectPath = "";
