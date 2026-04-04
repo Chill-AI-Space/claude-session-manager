@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import Link from "next/link";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
+import { MODEL_PRESETS } from "@/components/settings/ModelSelector";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
@@ -2193,7 +2194,11 @@ export default function SessionDetailPage({
                   </span>
                 </button>
                 <button
-                  onClick={() => setNewSessionAgent(a => a === "claude" ? "forge" : "claude")}
+                  onClick={() => {
+                    const next = newSessionAgent === "claude" ? "forge" : "claude";
+                    setNewSessionAgent(next);
+                    setNewSessionModel(next === "forge" ? "models/gemini-3-flash-preview" : "");
+                  }}
                   className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors px-2 py-0.5 rounded border ${
                     newSessionAgent === "forge"
                       ? "text-orange-400 border-orange-400/40 bg-orange-500/10 hover:bg-orange-500/20"
@@ -2244,12 +2249,17 @@ export default function SessionDetailPage({
                 <select
                   value={newSessionModel}
                   onChange={(e) => setNewSessionModel(e.target.value)}
-                  className="text-[11px] px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground hover:border-violet-500/30 cursor-pointer max-w-[110px]"
+                  className="text-[11px] px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground hover:border-violet-500/30 cursor-pointer max-w-[140px]"
                   title="Model for new session"
                 >
-                  <option value="">Opus 4.6</option>
-                  <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-                  <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+                  {newSessionAgent === "forge"
+                    ? MODEL_PRESETS.filter(p => p.model.startsWith("models/gemini") || p.model.startsWith("gemini")).map(p => (
+                        <option key={p.id} value={p.model}>{p.name}</option>
+                      ))
+                    : MODEL_PRESETS.filter(p => p.model.startsWith("claude") || p.model.startsWith("gpt")).map(p => (
+                        <option key={p.id} value={p.model}>{p.name}</option>
+                      ))
+                  }
                 </select>
 
                 <div className="flex-1" />
