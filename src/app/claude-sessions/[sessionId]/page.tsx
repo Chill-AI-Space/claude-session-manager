@@ -2253,7 +2253,7 @@ export default function SessionDetailPage({
                   title="Model for new session"
                 >
                   {newSessionAgent === "forge"
-                    ? MODEL_PRESETS.filter(p => p.model.startsWith("models/gemini") || p.model.startsWith("gemini")).map(p => (
+                    ? MODEL_PRESETS.filter(p => p.model.startsWith("models/gemini") || p.model.startsWith("gemini") || p.model === "claude-sonnet-4-6").map(p => (
                         <option key={p.id} value={p.model}>{p.name}</option>
                       ))
                     : MODEL_PRESETS.filter(p => p.model.startsWith("claude") || p.model.startsWith("gpt")).map(p => (
