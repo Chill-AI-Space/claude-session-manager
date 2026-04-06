@@ -230,6 +230,9 @@ function initTables(db: Database.Database) {
   if (!colNames.has("agent_type")) {
     db.exec("ALTER TABLE sessions ADD COLUMN agent_type TEXT DEFAULT 'claude'");
   }
+  if (!colNames.has("previous_session_id")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN previous_session_id TEXT");
+  }
   // actions_log migrations
   const actionCols = db.prepare("PRAGMA table_info(actions_log)").all() as { name: string }[];
   const actionColNames = new Set(actionCols.map((c) => c.name));

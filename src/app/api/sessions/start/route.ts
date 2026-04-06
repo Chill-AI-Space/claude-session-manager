@@ -9,13 +9,14 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { path: projectPath, message, correlationId, verbose, model, agent } = body as {
+  const { path: projectPath, message, correlationId, verbose, model, agent, previous_session_id } = body as {
     path: string;
     message: string;
     correlationId?: string;
     verbose?: boolean;
     model?: string;
     agent?: string;
+    previous_session_id?: string;
   };
 
   if (!projectPath || !message?.trim()) {
@@ -55,6 +56,6 @@ export async function POST(request: NextRequest) {
     return sseResponse(stream);
   }
 
-  const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model);
+  const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id);
   return sseResponse(stream);
 }

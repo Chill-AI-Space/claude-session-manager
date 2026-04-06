@@ -10,6 +10,7 @@ export function sessionToMarkdown(
   opts?: {
     sessionId?: string;
     projectPath?: string;
+    previousSessionId?: string;
     maxToolResultLen?: number;
     /** Only render last N messages (for lazy loading). Header still uses all messages for stats. */
     messageLimit?: number;
@@ -53,6 +54,7 @@ export function sessionToMarkdown(
   }
 
   if (firstUser?.git_branch) metaLines.push(`- **Branch:** \`${firstUser.git_branch}\``);
+  if (opts?.previousSessionId) metaLines.push(`- **Previous session:** [\`${opts.previousSessionId}\`](/claude-sessions/${opts.previousSessionId})`);
 
   parts.push(metaLines.join("\n"));
   parts.push("");

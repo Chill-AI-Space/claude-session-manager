@@ -762,8 +762,9 @@ class SessionOrchestrator extends EventEmitter {
    * Start a new Claude session. Returns SSE stream.
    * @param correlationId — optional client-generated ID for end-to-end tracking
    * @param verbose — when true, emit extra debug events (tool inputs, tokens, thinking)
+   * @param previousSessionId — ID of the session this was spawned from (context carry-over)
    */
-  start(projectPath: string, message: string, correlationId?: string, verbose = false, model?: string): ReadableStream {
+  start(projectPath: string, message: string, correlationId?: string, verbose = false, model?: string, previousSessionId?: string): ReadableStream {
     let sessionId: string | null = null;
     const args = buildCliArgs({ message, model });
     const spawnedAt = Date.now();
@@ -813,6 +814,11 @@ class SessionOrchestrator extends EventEmitter {
           await scanSessions("incremental");
           if (correlationId) {
             logAction("service", "session_start_scan_done", JSON.stringify({ correlationId, elapsedMs: Date.now() - spawnedAt }), sessionId ?? undefined);
+          }
+          if (previousSessionId && sessionId) {
+            try {
+              getDb().prepare("UPDATE sessions SET previous_session_id = ? WHERE session_id = ?").run(previousSessionId, sessionId);
+            } catch { /* non-critical */ }
           }
           generateTitleBatch(1).catch(() => {});
         } catch { /* non-critical */ }

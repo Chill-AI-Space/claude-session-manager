@@ -35,8 +35,8 @@ export async function GET(
 
   const db = getDb();
   const session = db
-    .prepare("SELECT jsonl_path, project_path FROM sessions WHERE session_id = ?")
-    .get(sessionId) as Pick<SessionRow, "jsonl_path" | "project_path"> | undefined;
+    .prepare("SELECT jsonl_path, project_path, previous_session_id FROM sessions WHERE session_id = ?")
+    .get(sessionId) as Pick<SessionRow, "jsonl_path" | "project_path" | "previous_session_id"> | undefined;
 
   if (!session) {
     return Response.json({ error: "Session not found" }, { status: 404 });
@@ -81,6 +81,7 @@ export async function GET(
     const result = sessionToMarkdownPaginated(session.jsonl_path, {
       sessionId,
       projectPath: session.project_path,
+      previousSessionId: session.previous_session_id ?? undefined,
       messageLimit: messageLimit === 0 ? undefined : messageLimit,
       messageOffset,
     });
