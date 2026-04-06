@@ -48,6 +48,7 @@ export interface SessionState {
   lastActivity: number;
   startedAt: number;
   error?: string;
+  onCompleteUrl?: string; // webhook to POST when session finishes
 }
 
 export type TaskType =
@@ -208,6 +209,7 @@ export function buildCliArgs(opts: {
   message: string;
   includeMaxTurns?: boolean;
   model?: string;
+  appendSystemPrompt?: string;
 }): string[] {
   const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
   const effort = getSetting("effort_level") || "high";
@@ -234,7 +236,29 @@ export function buildCliArgs(opts: {
     args.push("--dangerously-skip-permissions");
   }
 
+  if (opts.appendSystemPrompt) {
+    args.push("--append-system-prompt", opts.appendSystemPrompt);
+  }
+
   return args;
+}
+
+/** Build the system prompt context block injected when inject_session_context is enabled. */
+function buildSessionContextPrompt(sessionId?: string): string | undefined {
+  if (getSetting("inject_session_context") !== "true") return undefined;
+  const base = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
+  const lines = ["[Session Manager Context]"];
+  if (sessionId) {
+    lines.push(`Session ID: ${sessionId}`);
+    lines.push(`Callback URL: POST ${base}/api/sessions/${sessionId}/reply  body: {"message":"..."}`);
+  } else {
+    lines.push(`Callback URL pattern: POST ${base}/api/sessions/{SESSION_ID}/reply  body: {"message":"..."}`);
+    lines.push("(Your SESSION_ID is assigned at session start and visible in your conversation metadata.)");
+  }
+  lines.push(`Start sub-session: POST ${base}/api/sessions/start  body: {"path":"...","message":"..."}`);
+  lines.push(`Active sessions: GET ${base}/api/sessions`);
+  lines.push("[End Context]");
+  return lines.join("\n");
 }
 
 /** Parse a stream-json line and emit simplified SSE events. */
@@ -763,10 +787,12 @@ class SessionOrchestrator extends EventEmitter {
    * @param correlationId — optional client-generated ID for end-to-end tracking
    * @param verbose — when true, emit extra debug events (tool inputs, tokens, thinking)
    * @param previousSessionId — ID of the session this was spawned from (context carry-over)
+   * @param onCompleteUrl — optional webhook URL to POST when the session finishes
    */
-  start(projectPath: string, message: string, correlationId?: string, verbose = false, model?: string, previousSessionId?: string): ReadableStream {
+  start(projectPath: string, message: string, correlationId?: string, verbose = false, model?: string, previousSessionId?: string, onCompleteUrl?: string): ReadableStream {
     let sessionId: string | null = null;
-    const args = buildCliArgs({ message, model });
+    const contextPrompt = buildSessionContextPrompt(); // no sessionId yet for new sessions
+    const args = buildCliArgs({ message, model, appendSystemPrompt: contextPrompt });
     const spawnedAt = Date.now();
 
     if (correlationId) {
@@ -796,6 +822,7 @@ class SessionOrchestrator extends EventEmitter {
                 skipCount: 0,
                 lastActivity: Date.now(),
                 startedAt: Date.now(),
+                onCompleteUrl,
               });
               this.emit("session:started", { sessionId: id, projectPath });
             }
@@ -822,6 +849,15 @@ class SessionOrchestrator extends EventEmitter {
           }
           generateTitleBatch(1).catch(() => {});
         } catch { /* non-critical */ }
+        // Fire on_complete webhook if provided
+        const completeUrl = onCompleteUrl || (sessionId ? this.states.get(sessionId)?.onCompleteUrl : undefined);
+        if (completeUrl && sessionId) {
+          fetch(completeUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId, event: "completed" }),
+          }).catch(() => {}); // fire-and-forget
+        }
       },
       onProc: (proc) => {
         if (correlationId) {
@@ -847,7 +883,8 @@ class SessionOrchestrator extends EventEmitter {
     // Cancel any pending stall_continue — user is actively replying
     this.queue.cancel(`stall_continue:${sessionId}`);
 
-    const args = buildCliArgs({ sessionId, message, includeMaxTurns: true });
+    const contextPrompt = buildSessionContextPrompt(sessionId);
+    const args = buildCliArgs({ sessionId, message, includeMaxTurns: true, appendSystemPrompt: contextPrompt });
 
     this.states.set(sessionId, {
       sessionId,

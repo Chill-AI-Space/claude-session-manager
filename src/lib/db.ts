@@ -470,6 +470,10 @@ const SETTING_DEFAULTS: Record<string, string> = {
   worker_notify_webhook_url: "",
   // Agent selection — which AI agent to use for new sessions
   default_agent: "claude",
+  // Session choreography — inject session context (session_id + callback URL) into system prompt
+  inject_session_context: "false",
+  // Base URL for callback URLs injected into sessions (e.g. http://localhost:3000 or relay URL)
+  csm_base_url: "http://localhost:3000",
 };
 
 // Settings cache — avoids reading JSON file on every getSetting() call

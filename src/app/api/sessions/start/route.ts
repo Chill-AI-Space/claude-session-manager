@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { path: projectPath, message, correlationId, verbose, model, agent, previous_session_id } = body as {
+  const { path: projectPath, message, correlationId, verbose, model, agent, previous_session_id, on_complete_url } = body as {
     path: string;
     message: string;
     correlationId?: string;
@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
     model?: string;
     agent?: string;
     previous_session_id?: string;
+    on_complete_url?: string;
   };
 
   if (!projectPath || !message?.trim()) {
@@ -56,6 +57,6 @@ export async function POST(request: NextRequest) {
     return sseResponse(stream);
   }
 
-  const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id);
+  const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url);
   return sseResponse(stream);
 }
