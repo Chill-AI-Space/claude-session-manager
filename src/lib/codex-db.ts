@@ -126,6 +126,13 @@ function normalizeCodexTool(
       return { name: "WebSearch", input };
     case "web_fetch":
       return { name: "WebFetch", input };
+    case "write_stdin": {
+      const { text, ...rest } = input;
+      return { name: "write_stdin", input: { input: text, ...rest } };
+    }
+    case "list_mcp_resources":
+    case "read_mcp_resource":
+      return { name, input };
     default:
       return { name, input };
   }
