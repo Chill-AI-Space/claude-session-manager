@@ -891,7 +891,12 @@ class SessionOrchestrator extends EventEmitter {
   startForge(projectPath: string, message: string, model?: string): ReadableStream {
     const { randomUUID } = require("crypto") as typeof import("crypto");
     const { createForgeSSEStream } = require("./forge-runner") as typeof import("./forge-runner");
+    const { insertPendingForgeSession } = require("./db") as typeof import("./db");
     const conversationId: string = randomUUID();
+
+    // Pre-insert into DB immediately so the session appears in the list
+    // and the prompt is preserved even if Forge fails to start.
+    insertPendingForgeSession(conversationId, projectPath, message);
 
     this.states.set(conversationId, {
       sessionId: conversationId,

@@ -582,3 +582,42 @@ export function getIssues(opts: { status?: string; limit?: number } = {}): Issue
 export function updateIssueStatus(id: number, status: "new" | "seen" | "resolved"): void {
   getDb().prepare("UPDATE issues SET status = ? WHERE id = ?").run(status, id);
 }
+
+/**
+ * Pre-insert a Forge session placeholder into sessions.db immediately when
+ * the user clicks Start — before key rotation or process spawn. This ensures
+ * the session appears in the list right away and the first_prompt is preserved
+ * even if Forge fails to start. The forge-scanner upsert will fill in real
+ * data once Forge writes to ~/forge/.forge.db.
+ */
+export function insertPendingForgeSession(
+  conversationId: string,
+  projectPath: string,
+  message: string
+): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const projectDir = projectPath.replace(/[\\/]/g, "-");
+  const jsonlPath = `forge://${conversationId}`;
+  try {
+    db.prepare(`
+      INSERT OR IGNORE INTO sessions (
+        session_id, jsonl_path, project_dir, project_path,
+        git_branch, claude_version, model, agent_type,
+        first_prompt, last_message, last_message_role, has_result,
+        message_count, total_input_tokens, total_output_tokens,
+        created_at, modified_at, file_mtime, file_size, last_scanned_at
+      ) VALUES (
+        ?, ?, ?, ?,
+        NULL, NULL, NULL, 'forge',
+        ?, NULL, NULL, 0,
+        0, 0, 0,
+        ?, ?, ?, 0, ?
+      )
+    `).run(
+      conversationId, jsonlPath, projectDir, projectPath,
+      message.slice(0, 500),
+      now, now, Date.now(), now
+    );
+  } catch { /* non-critical — real data arrives via scanner */ }
+}
