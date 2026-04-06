@@ -4,6 +4,7 @@ import { SessionRow } from "@/lib/types";
 import { openInTerminal } from "@/lib/terminal-launcher";
 import { getClaudePath } from "@/lib/claude-bin";
 import { getForgePath } from "@/lib/forge-bin";
+import { getCodexPath } from "@/lib/codex-bin";
 
 export const dynamic = "force-dynamic";
 
@@ -26,17 +27,25 @@ export async function POST(
   const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
   const skipFlag = skipPermissions ? " --dangerously-skip-permissions" : "";
   
-  const isForge = session.agent_type === "forge";
-  const bin = isForge ? getForgePath() : getClaudePath();
-  const flag = isForge ? "--conversation-id" : "--resume";
-  // For Claude: use claude_model setting. For Forge: use the model stored in the session
-  // (do NOT use claude_model for Forge — it would overwrite Forge's Gemini config).
-  const model = isForge
-    ? (session as typeof session & { model?: string | null }).model || null
-    : getSetting("claude_model");
-  const modelFlag = !isForge && model ? ` --model "${model}"` : "";
-  const forgeModelCmd = isForge && model ? `"${bin}" config set model "${model}" && ` : "";
-  const shellCmd = `cd "${cwd}" && ${forgeModelCmd}"${bin}" ${flag} "${sessionId}"${isForge ? "" : skipFlag + modelFlag}`;
+  const agentType = (session as typeof session & { agent_type?: string }).agent_type ?? "claude";
+  const isForge = agentType === "forge";
+  const isCodex = agentType === "codex";
+
+  let shellCmd: string;
+  if (isCodex) {
+    const bin = getCodexPath();
+    shellCmd = `cd "${cwd}" && "${bin}" resume "${sessionId}"`;
+  } else if (isForge) {
+    const bin = getForgePath();
+    const model = (session as typeof session & { model?: string | null }).model || null;
+    const forgeModelCmd = model ? `"${bin}" config set model "${model}" && ` : "";
+    shellCmd = `cd "${cwd}" && ${forgeModelCmd}"${bin}" --conversation-id "${sessionId}"`;
+  } else {
+    const bin = getClaudePath();
+    const model = getSetting("claude_model");
+    const modelFlag = model ? ` --model "${model}"` : "";
+    shellCmd = `cd "${cwd}" && "${bin}" --resume "${sessionId}"${skipFlag}${modelFlag}`;
+  }
 
   try {
     const { terminal } = await openInTerminal(shellCmd);

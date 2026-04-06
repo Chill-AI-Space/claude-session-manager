@@ -177,6 +177,9 @@ export const SessionListItemComponent = memo(
               {session.agent_type === "forge" && (
                 <span className="text-[9px] font-semibold uppercase tracking-wide text-orange-400/80 px-1 py-0.5 rounded border border-orange-400/20 bg-orange-500/5">forge</span>
               )}
+              {session.agent_type === "codex" && (
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-violet-400/80 px-1 py-0.5 rounded border border-violet-400/20 bg-violet-500/5">codex</span>
+              )}
             </div>
           </div>
         </div>

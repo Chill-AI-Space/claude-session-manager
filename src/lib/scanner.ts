@@ -511,6 +511,16 @@ export async function scanSessions(
     dlog.warn("scanner", `forge scan failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // Post-scan: index Codex sessions from ~/.codex/state_5.sqlite
+  try {
+    const { scanCodexSessions } = await import("./codex-scanner");
+    const codexResult = await scanCodexSessions(db, existingMtimes, mode, upsertSession);
+    sessionsScanned += codexResult.scanned;
+    sessionsSkipped += codexResult.skipped;
+  } catch (err) {
+    dlog.warn("scanner", `codex scan failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // Post-scan: detect incomplete exits from DB (catches files skipped by incremental scan)
   detectIncompleteExits(db);
 

@@ -62,8 +62,32 @@ export async function GET(
   const searchParams = request.nextUrl.searchParams;
   const PAGE_SIZE = 100;
 
-  // ── Forge sessions: read from ~/forge/.forge.db ──────────────────────────
+  // ── Codex sessions: read from JSONL rollout file ─────────────────────────
   const agentType = (session as SessionRow & { agent_type?: string }).agent_type ?? "claude";
+  if (agentType === "codex") {
+    const { readCodexMessages } = await import("@/lib/codex-db");
+    const codexMessages = readCodexMessages(session.jsonl_path);
+    let fileMtime = session.file_mtime;
+    try {
+      const fs2 = await import("fs");
+      fileMtime = fs2.statSync(session.jsonl_path).mtimeMs;
+    } catch { /* use cached */ }
+    const fileAgeMs = Date.now() - (fileMtime || 0);
+    const active = fileAgeMs < 5 * 60 * 1000;
+    return Response.json({
+      session_id: session.session_id,
+      project_path: session.project_path,
+      messages: codexMessages,
+      messages_start: 0,
+      messages_total: codexMessages.length,
+      metadata: session,
+      is_active: active,
+      has_result: codexMessages.some(m => m.type === "assistant"),
+      file_age_ms: Math.round(fileAgeMs),
+    });
+  }
+
+  // ── Forge sessions: read from ~/forge/.forge.db ──────────────────────────
   if (agentType === "forge") {
     const { readForgeMessages, getForgeConversation } = await import("@/lib/forge-db");
     const forgeMessages = readForgeMessages(sessionId);
@@ -213,6 +237,11 @@ export async function PATCH(
   if (body.archived !== undefined) {
     updates.push("archived = @archived");
     values.archived = body.archived ? 1 : 0;
+  }
+
+  if (body.model !== undefined) {
+    updates.push("model = @model");
+    values.model = body.model;
   }
 
   if (updates.length > 0) {
