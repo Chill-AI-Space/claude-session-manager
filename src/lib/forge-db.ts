@@ -196,6 +196,12 @@ export function readForgeMessages(conversationId: string): ParsedMessage[] {
             role?: string;
             content?: string;
             raw_content?: { Text?: string };
+            tool_calls?: Array<{ name: string; call_id?: string; arguments?: unknown }>;
+          };
+          tool?: {
+            name?: string;
+            call_id?: string;
+            output?: { is_error?: boolean; values?: Array<{ text?: string }> };
           };
         };
       }>;
@@ -206,30 +212,62 @@ export function readForgeMessages(conversationId: string): ParsedMessage[] {
 
     for (const m of parsed.messages ?? []) {
       const role = m?.message?.text?.role;
+
+      // Tool result messages (undefined role, has m.message.tool)
+      if (!role && m?.message?.tool) {
+        const tool = m.message.tool;
+        const toolOutput = tool.output?.values?.[0]?.text ?? "";
+        const isError = tool.output?.is_error ?? false;
+        const toolName = (tool.name ?? "tool").replace(/^mcp_playwright_tool_/, "");
+        // Only show errors and short results (skip huge page snapshots)
+        if (isError && toolOutput) {
+          const errText = `❌ ${toolName}: ${toolOutput.slice(0, 300)}`;
+          messages.push({
+            uuid: `forge-${conversationId}-${idx++}`,
+            type: "assistant",
+            timestamp: row.updated_at ?? row.created_at,
+            content: [{ type: "text", text: errText }],
+          });
+        }
+        continue;
+      }
+
       if (role === "System") continue;
 
       const raw = m?.message?.text?.raw_content?.Text;
       const content = m?.message?.text?.content ?? "";
+      const toolCalls = m?.message?.text?.tool_calls;
       const text = raw || content
         .replace(/<task>|<\/task>|<system_date>[^<]*<\/system_date>/g, "")
         .trim();
-
-      if (!text) continue;
 
       if (role === "User") {
         messages.push({
           uuid: `forge-${conversationId}-${idx++}`,
           type: "user",
           timestamp: row.created_at,
-          content: text,
+          content: text || "(empty)",
         });
       } else if (role === "Assistant") {
-        messages.push({
-          uuid: `forge-${conversationId}-${idx++}`,
-          type: "assistant",
-          timestamp: row.updated_at ?? row.created_at,
-          content: [{ type: "text", text }],
-        });
+        if (text) {
+          messages.push({
+            uuid: `forge-${conversationId}-${idx++}`,
+            type: "assistant",
+            timestamp: row.updated_at ?? row.created_at,
+            content: [{ type: "text", text }],
+          });
+        } else if (toolCalls?.length) {
+          // Assistant made tool calls without text — show as tool use indicator
+          const names = toolCalls
+            .map(t => t.name.replace(/^mcp_playwright_tool_/, "").replace(/_/g, " "))
+            .join(", ");
+          messages.push({
+            uuid: `forge-${conversationId}-${idx++}`,
+            type: "assistant",
+            timestamp: row.updated_at ?? row.created_at,
+            content: [{ type: "text", text: `🔧 ${names}` }],
+          });
+        }
       }
     }
 
