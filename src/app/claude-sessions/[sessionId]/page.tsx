@@ -141,6 +141,7 @@ export default function SessionDetailPage({
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
+  const [statusHistory, setStatusHistory] = useState<string[]>([]);
   // Track last time we received ANY data on the SSE stream (for stale detection)
   const lastStreamEventRef = useRef<number>(0);
 
@@ -214,7 +215,7 @@ export default function SessionDetailPage({
 
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
-  const [newSessionAgent, setNewSessionAgent] = useState<"claude" | "forge">("claude");
+  const [newSessionAgent, setNewSessionAgent] = useState<"claude" | "forge" | "codex">("claude");
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [startingNewSession, setStartingNewSession] = useState(false);
@@ -692,6 +693,26 @@ export default function SessionDetailPage({
     }
   }, [data?.is_active]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Gemini quota exhausted banner
+  const isGeminiQuotaError = !!streamError?.startsWith("GEMINI_QUOTA_EXHAUSTED:");
+  const geminiExhaustedModel = isGeminiQuotaError ? (streamError!.slice("GEMINI_QUOTA_EXHAUSTED:".length) || data?.metadata?.model || "") : "";
+  const [switchingModel, setSwitchingModel] = useState(false);
+  const switchToFlash = useCallback(async () => {
+    if (!data) return;
+    setSwitchingModel(true);
+    try {
+      await fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "models/gemini-2.5-flash" }),
+      });
+      setStreamError(null);
+      await fetchSession({ clearExtras: true });
+    } finally {
+      setSwitchingModel(false);
+    }
+  }, [data, sessionId, fetchSession]);
+
   // Auto-retry countdown for interrupted sessions
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -762,6 +783,7 @@ export default function SessionDetailPage({
     setStreamingText("");
     setStreamError(null);
     setStreamStatus(null);
+    setStatusHistory([]);
     setIsStreaming(true);
     lastStreamEventRef.current = Date.now();
 
@@ -817,6 +839,7 @@ export default function SessionDetailPage({
                 setStreamStatus(null);
               } else if (evt.type === "status") {
                 setStreamStatus(evt.text);
+                setStatusHistory(prev => [...prev.slice(-49), evt.text]);
               } else if (evt.type === "error") {
                 setStreamError(evt.text);
               } else if (evt.type === "done") {
@@ -1105,7 +1128,7 @@ export default function SessionDetailPage({
       const res = await fetch(startUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: newSessionPath, message: fullMessage, previous_session_id: sessionId, ...(newSessionModel && { model: newSessionModel }), ...(newSessionAgent === "forge" && { agent: "forge" }) }),
+        body: JSON.stringify({ path: newSessionPath, message: fullMessage, previous_session_id: sessionId, ...(newSessionModel && { model: newSessionModel }), ...(newSessionAgent !== "claude" && { agent: newSessionAgent }) }),
       });
 
       if (!res.ok) throw new Error("Failed to start session");
@@ -1917,12 +1940,23 @@ export default function SessionDetailPage({
                 </div>
               </div>
             ) : isStreaming ? (
-              <div className="flex items-center gap-2 p-2.5 text-xs rounded-lg border border-orange-500/30 bg-orange-500/5 text-orange-600 dark:text-orange-400">
-                <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-                <span className="flex-1 truncate">{streamStatus || "Thinking…"}</span>
-                <button onClick={cancelStreaming} className="text-muted-foreground/60 hover:text-foreground transition-colors" title="Stop (Esc)">
-                  <X className="h-3 w-3" />
-                </button>
+              <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 text-orange-600 dark:text-orange-400 overflow-hidden">
+                {/* current status line */}
+                <div className="flex items-center gap-2 p-2.5 text-xs">
+                  <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                  <span className="flex-1 truncate">{streamStatus || "Thinking…"}</span>
+                  <button onClick={cancelStreaming} className="text-muted-foreground/60 hover:text-foreground transition-colors" title="Stop (Esc)">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                {/* history log — up to 50 past status events */}
+                {statusHistory.length > 1 && (
+                  <div className="border-t border-orange-500/20 px-2.5 pb-2 max-h-40 overflow-y-auto flex flex-col-reverse">
+                    {[...statusHistory].reverse().slice(1).map((s, i) => (
+                      <div key={i} className="text-[10px] text-orange-500/60 dark:text-orange-400/50 py-0.5 truncate font-mono">{s}</div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : data.is_active && !queuedMessages.length ? (
               <div className="flex items-center gap-2 p-2.5 text-xs rounded-lg border border-border bg-muted/30 text-muted-foreground">
@@ -1941,6 +1975,35 @@ export default function SessionDetailPage({
                 </span>
               </div>
             ) : null}
+
+            {/* Gemini quota exhausted banner */}
+            {isGeminiQuotaError && (
+              <div className="flex items-start gap-2.5 p-2.5 text-xs rounded-lg border border-yellow-500/40 bg-yellow-500/8 text-yellow-700 dark:text-yellow-400">
+                <Zap className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium">Gemini quota exhausted</div>
+                  {geminiExhaustedModel && (
+                    <div className="opacity-70 mt-0.5 font-mono">{geminiExhaustedModel}</div>
+                  )}
+                  <div className="opacity-70 mt-0.5">All API keys hit their daily limit for this model.</div>
+                  <div className="flex gap-1.5 mt-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-[11px] px-2 border-yellow-500/40 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/10"
+                      onClick={switchToFlash}
+                      disabled={switchingModel}
+                    >
+                      {switchingModel ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Zap className="h-3 w-3 mr-1" />}
+                      Switch to gemini-2.5-flash
+                    </Button>
+                  </div>
+                </div>
+                <button className="text-yellow-500/60 hover:text-yellow-500 shrink-0" onClick={() => setStreamError(null)}>
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
 
             {/* Context Guard error */}
             {contextGuardError && (
@@ -2195,18 +2258,26 @@ export default function SessionDetailPage({
                 </button>
                 <button
                   onClick={() => {
-                    const next = newSessionAgent === "claude" ? "forge" : "claude";
+                    const next = newSessionAgent === "claude" ? "forge" : newSessionAgent === "forge" ? "codex" : "claude";
                     setNewSessionAgent(next);
-                    setNewSessionModel(next === "forge" ? "models/gemini-3-flash-preview" : "");
+                    setNewSessionModel(next === "forge" ? "models/gemini-3-flash-preview" : next === "codex" ? "gpt-5.4" : "");
                   }}
                   className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors px-2 py-0.5 rounded border ${
                     newSessionAgent === "forge"
                       ? "text-orange-400 border-orange-400/40 bg-orange-500/10 hover:bg-orange-500/20"
-                      : "text-muted-foreground/70 border-border hover:text-foreground hover:bg-muted/50"
+                      : newSessionAgent === "codex"
+                        ? "text-violet-400 border-violet-400/40 bg-violet-500/10 hover:bg-violet-500/20"
+                        : "text-muted-foreground/70 border-border hover:text-foreground hover:bg-muted/50"
                   }`}
-                  title={newSessionAgent === "forge" ? "Using Forge — click to switch to Claude" : "Using Claude — click to switch to Forge"}
+                  title={
+                    newSessionAgent === "forge" ? "Using Forge — click to switch to Codex"
+                    : newSessionAgent === "codex" ? "Using Codex — opens in terminal, click to switch to Claude"
+                    : "Using Claude — click to switch to Forge"
+                  }
                 >
-                  {newSessionAgent === "forge" ? <Hammer className="h-3 w-3" /> : <span className="text-[10px] font-bold leading-none">C</span>}
+                  {newSessionAgent === "forge" ? <Hammer className="h-3 w-3" />
+                    : newSessionAgent === "codex" ? <span className="text-[10px] font-bold leading-none">{"{ }"}</span>
+                    : <span className="text-[10px] font-bold leading-none">C</span>}
                   <span>{newSessionAgent}</span>
                 </button>
                 {compute.nodes.length > 0 && (
@@ -2256,9 +2327,13 @@ export default function SessionDetailPage({
                     ? MODEL_PRESETS.filter(p => p.model.startsWith("models/gemini") || p.model.startsWith("gemini") || p.model === "claude-sonnet-4-6").map(p => (
                         <option key={p.id} value={p.model}>{p.name}</option>
                       ))
-                    : MODEL_PRESETS.filter(p => p.model.startsWith("claude") || p.model.startsWith("gpt")).map(p => (
-                        <option key={p.id} value={p.model}>{p.name}</option>
-                      ))
+                    : newSessionAgent === "codex"
+                      ? MODEL_PRESETS.filter(p => p.model.startsWith("gpt")).map(p => (
+                          <option key={p.id} value={p.model}>{p.name}</option>
+                        ))
+                      : MODEL_PRESETS.filter(p => p.model.startsWith("claude")).map(p => (
+                          <option key={p.id} value={p.model}>{p.name}</option>
+                        ))
                   }
                 </select>
 
@@ -2284,10 +2359,16 @@ export default function SessionDetailPage({
                     setShowNewSessionOpts(false);
                   }}
                   disabled={startingNewSession}
-                  className="text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 bg-emerald-600 text-white hover:bg-emerald-500"
+                  className={`text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 text-white ${
+                    newSessionAgent === "codex"
+                      ? "bg-violet-600 hover:bg-violet-500"
+                      : "bg-emerald-600 hover:bg-emerald-500"
+                  }`}
                 >
                   {startingNewSession ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : newSessionAgent === "codex" ? (
+                    "Terminal ↗"
                   ) : (
                     "Start ↗"
                   )}

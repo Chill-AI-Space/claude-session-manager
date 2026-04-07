@@ -57,6 +57,30 @@ export async function POST(request: NextRequest) {
     return sseResponse(stream);
   }
 
+  if (agent === "codex") {
+    // Codex is a TUI — open in terminal and return a lightweight SSE stream
+    const { getCodexPath } = await import("@/lib/codex-bin");
+    const { openInTerminal } = await import("@/lib/terminal-launcher");
+    const bin = getCodexPath();
+    const modelFlag = model ? ` -c model="${model}"` : "";
+    const safeMsg = message.trim().replace(/"/g, '\\"');
+    const shellCmd = `cd "${projectPath}" && "${bin}"${modelFlag} "${safeMsg}"`;
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          const { terminal } = await openInTerminal(shellCmd);
+          controller.enqueue(`data: ${JSON.stringify({ type: "status", status: `Codex opened in ${terminal}` })}\n\n`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          controller.enqueue(`data: ${JSON.stringify({ type: "error", error: msg })}\n\n`);
+        }
+        controller.enqueue(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+        controller.close();
+      },
+    });
+    return new Response(stream, { headers: SSE_HEADERS });
+  }
+
   const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url);
   return sseResponse(stream);
 }

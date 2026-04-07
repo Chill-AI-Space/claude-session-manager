@@ -33,7 +33,14 @@ export const MODEL_PRESETS: ModelPreset[] = [
     category: "fast",
     description: "Fastest Claude model",
   },
-  // Other providers
+  // OpenAI / Codex models
+  {
+    id: "gpt-5.4",
+    name: "GPT-5.4",
+    model: "gpt-5.4",
+    category: "quality",
+    description: "OpenAI GPT-5.4 (Codex default)",
+  },
   {
     id: "gpt-4o",
     name: "GPT-4o",
