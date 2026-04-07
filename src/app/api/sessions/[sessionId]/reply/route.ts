@@ -57,11 +57,32 @@ export async function POST(
   if (agentType === "forge") {
     const { parseForgeConvPath } = await import("@/lib/forge-scanner");
     const conversationId = parseForgeConvPath(session.jsonl_path) ?? sessionId;
-    // Use the model stored in the session (set when Forge session was started/scanned).
-    // Do NOT fall back to claude_model — that's a Claude model and would overwrite Forge's Gemini config.
     const model = (session as typeof session & { model?: string | null }).model || undefined;
     const stream = getOrchestrator().resumeForge(conversationId, message, session.project_path, model);
     return sseResponse(stream);
+  }
+
+  if (agentType === "codex") {
+    // Codex is a TUI — open terminal with `codex resume SESSION_ID "message"`
+    const { getCodexPath } = await import("@/lib/codex-bin");
+    const { openInTerminal } = await import("@/lib/terminal-launcher");
+    const bin = getCodexPath();
+    const safeMsg = message.replace(/"/g, '\\"');
+    const shellCmd = `cd "${session.project_path}" && "${bin}" resume "${sessionId}" "${safeMsg}"`;
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          const { terminal } = await openInTerminal(shellCmd);
+          controller.enqueue(`data: ${JSON.stringify({ type: "status", status: `Codex opened in ${terminal}` })}\n\n`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          controller.enqueue(`data: ${JSON.stringify({ type: "error", error: msg })}\n\n`);
+        }
+        controller.enqueue(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+        controller.close();
+      },
+    });
+    return new Response(stream, { headers: SSE_HEADERS });
   }
 
   // Auto-kill terminal sessions if setting is enabled
