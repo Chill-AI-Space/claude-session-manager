@@ -35,11 +35,48 @@ export async function GET(
 
   const db = getDb();
   const session = db
-    .prepare("SELECT jsonl_path, project_path, previous_session_id FROM sessions WHERE session_id = ?")
-    .get(sessionId) as Pick<SessionRow, "jsonl_path" | "project_path" | "previous_session_id"> | undefined;
+    .prepare("SELECT jsonl_path, project_path, previous_session_id, agent_type FROM sessions WHERE session_id = ?")
+    .get(sessionId) as (Pick<SessionRow, "jsonl_path" | "project_path" | "previous_session_id"> & { agent_type?: string }) | undefined;
 
   if (!session) {
     return Response.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  // ── Codex sessions: render from rollout JSONL ────────────────────────────
+  if (session.agent_type === "codex") {
+    const { readCodexMessages } = await import("@/lib/codex-db");
+    const messages = readCodexMessages(session.jsonl_path);
+    const parts: string[] = [];
+    for (const m of messages) {
+      if (m.type === "user") {
+        parts.push(`**You**\n\n${m.content as string}\n`);
+      } else if (m.type === "assistant") {
+        const blocks = Array.isArray(m.content) ? m.content : [];
+        const textParts: string[] = [];
+        const toolParts: string[] = [];
+        for (const b of blocks) {
+          if (b.type === "text" && b.text?.trim()) {
+            textParts.push(b.text);
+          } else if (b.type === "tool_use") {
+            const input = b.input as Record<string, unknown>;
+            const cmd = input.command ?? input.file_path ?? input.query ?? input.url ?? Object.values(input)[0];
+            const detail = cmd ? `: \`${String(cmd).slice(0, 120)}\`` : "";
+            toolParts.push(`🔧 **${b.name}**${detail}`);
+          }
+        }
+        const text = [...textParts, ...toolParts].join("\n\n");
+        if (text) parts.push(`${text}\n`);
+      }
+    }
+    const markdown = parts.length > 0 ? parts.join("\n---\n\n") : "*(No messages yet)*\n";
+    return Response.json({
+      markdown,
+      session_id: sessionId,
+      total_messages: messages.length,
+      render_start: 0,
+      render_end: messages.length,
+      has_earlier: false,
+    });
   }
 
   // ── Forge sessions: render from Forge SQLite ─────────────────────────────
