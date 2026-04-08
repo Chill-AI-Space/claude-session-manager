@@ -58,9 +58,10 @@ export async function POST(request: NextRequest) {
   }
 
   if (agent === "codex") {
-    // Codex is a TUI — open in terminal and return a lightweight SSE stream
+    // Codex is a TUI — open in terminal, then poll for the new thread and return its ID
     const { getCodexPath } = await import("@/lib/codex-bin");
     const { openInTerminal } = await import("@/lib/terminal-launcher");
+    const { listCodexThreads } = await import("@/lib/codex-db");
     const bin = getCodexPath();
     const modelFlag = model ? ` -c model="${model}"` : "";
     const safeMsg = message.trim().replace(/"/g, '\\"');
@@ -68,8 +69,71 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // Snapshot existing thread IDs before launch
+          const existingIds = new Set(listCodexThreads().map((t) => t.id));
+          const startedAt = Math.floor(Date.now() / 1000) - 5; // 5s tolerance
+
           const { terminal } = await openInTerminal(shellCmd);
           controller.enqueue(`data: ${JSON.stringify({ type: "status", status: `Codex opened in ${terminal}` })}\n\n`);
+
+          // Poll for the new Codex thread (up to 15 seconds)
+          let sessionId: string | null = null;
+          for (let i = 0; i < 30; i++) {
+            await new Promise((r) => setTimeout(r, 500));
+            const threads = listCodexThreads();
+            const newThread = threads.find((t) => !existingIds.has(t.id) && t.created_at >= startedAt);
+            if (newThread) {
+              sessionId = newThread.id;
+              // Upsert session into main DB so the UI can navigate to it
+              const { getDb } = await import("@/lib/db");
+              const fsLib = await import("fs");
+              const osLib = await import("os");
+              const db = getDb();
+              const cwd = newThread.cwd ?? osLib.default.homedir();
+              const projectDir = cwd.replace(/[\\/]/g, "-");
+              const modelLabel = newThread.model ?? (newThread.model_provider === "openai" ? "gpt-4o" : newThread.model_provider);
+              let fileMtime = newThread.updated_at * 1000;
+              try { fileMtime = fsLib.statSync(newThread.rollout_path).mtimeMs; } catch { /* use DB timestamp */ }
+              const now = new Date().toISOString();
+              db.prepare(`
+                INSERT INTO sessions (
+                  session_id, jsonl_path, project_dir, project_path,
+                  git_branch, claude_version, model, agent_type,
+                  first_prompt, last_message, last_message_role, has_result,
+                  message_count, total_input_tokens, total_output_tokens,
+                  created_at, modified_at, file_mtime, file_size, last_scanned_at
+                ) VALUES (
+                  @session_id, @jsonl_path, @project_dir, @project_path,
+                  @git_branch, NULL, @model, 'codex',
+                  @first_prompt, @last_message, NULL, 1,
+                  0, @total_input_tokens, 0,
+                  @created_at, @modified_at, @file_mtime, 0, @last_scanned_at
+                ) ON CONFLICT(session_id) DO UPDATE SET
+                  jsonl_path = @jsonl_path, model = @model,
+                  modified_at = @modified_at, file_mtime = @file_mtime,
+                  last_scanned_at = @last_scanned_at
+              `).run({
+                session_id: sessionId,
+                jsonl_path: newThread.rollout_path,
+                project_dir: projectDir,
+                project_path: cwd,
+                git_branch: newThread.git_branch ?? null,
+                model: modelLabel,
+                first_prompt: newThread.first_user_message?.slice(0, 500) ?? null,
+                last_message: newThread.first_user_message?.slice(0, 500) ?? null,
+                total_input_tokens: newThread.tokens_used ?? 0,
+                created_at: new Date(newThread.created_at * 1000).toISOString(),
+                modified_at: new Date(fileMtime).toISOString(),
+                file_mtime: fileMtime,
+                last_scanned_at: now,
+              });
+              controller.enqueue(`data: ${JSON.stringify({ type: "session_id", session_id: sessionId })}\n\n`);
+              break;
+            }
+          }
+          if (!sessionId) {
+            controller.enqueue(`data: ${JSON.stringify({ type: "status", status: "Codex started — check sidebar for new session" })}\n\n`);
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           controller.enqueue(`data: ${JSON.stringify({ type: "error", error: msg })}\n\n`);
