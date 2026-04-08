@@ -230,7 +230,9 @@ export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
         turn = { timestamp: ts, textBlocks: [], toolBlocks: [], callIndex: new Map() };
       } else if (pt === "agent_message") {
         const msg = p.message as string | undefined;
-        if (!msg || !turn) continue;
+        if (!msg) continue;
+        // Auto-create turn if user_message arrived without a new task_started
+        if (!turn) turn = { timestamp: ts, textBlocks: [], toolBlocks: [], callIndex: new Map() };
         // Deduplicate: skip if this text already added in turn
         if (!turn.textBlocks.includes(msg)) {
           turn.textBlocks.push(msg);

@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { FolderOpen, Send, Loader2, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud, Hammer } from "lucide-react";
+import { FolderOpen, Send, Loader2, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud } from "lucide-react";
+import { AgentToggleButton, type AgentType, DEFAULT_MODEL } from "@/components/AgentToggleButton";
 import { ModelSelector } from "@/components/settings/ModelSelector";
 import { useSettings } from "@/lib/settings";
 import { useAutodetect } from "@/hooks/useAutodetect";
@@ -22,7 +23,7 @@ export default function SessionsEmptyState() {
   const dragCounterRef = useRef(0);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
-  const [selectedAgent, setSelectedAgent] = useState<"claude" | "forge">("claude");
+  const [selectedAgent, setSelectedAgent] = useState<AgentType>("claude");
   const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
   const compute = useComputeNode();
   const autodetect = useAutodetect();
@@ -30,12 +31,18 @@ export default function SessionsEmptyState() {
   const { settings } = useSettings();
 
   useEffect(() => {
-    setSelectedModel(
-      settings.claude_model === "claude-sonnet-4-6"
-        ? "models/gemini-2.5-flash"
-        : settings.claude_model,
-    );
-  }, [settings.claude_model]);
+    if (selectedAgent === "forge") {
+      setSelectedModel(
+        settings.claude_model === "claude-sonnet-4-6"
+          ? "models/gemini-2.5-flash"
+          : settings.claude_model,
+      );
+    } else if (selectedAgent === "codex") {
+      setSelectedModel("gpt-5.4");
+    } else {
+      setSelectedModel(undefined);
+    }
+  }, [settings.claude_model, selectedAgent]);
 
   const insertAtCursor = (text: string) => {
     const textarea = textareaRef.current;
@@ -169,7 +176,7 @@ export default function SessionsEmptyState() {
                 handleSmartStart();
               }
             }}
-            placeholder={`What would you like ${selectedAgent === "forge" ? "Forge" : "Claude"} to do? (⌘Enter to start)`}
+            placeholder={`What would you like ${selectedAgent === "forge" ? "Forge" : selectedAgent === "codex" ? "Codex" : "Claude"} to do? (⌘Enter to start)`}
             rows={5}
             className={`w-full resize-none bg-transparent rounded-lg px-3 py-2.5 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none ${selectedAgent === "forge" ? "pb-16" : "pb-10"}`}
             disabled={isBusy}
@@ -221,18 +228,13 @@ export default function SessionsEmptyState() {
               >
                 <ShieldOff className="h-3 w-3" />
               </button>
-              <button
-                onClick={() => setSelectedAgent(a => a === "claude" ? "forge" : "claude")}
-                className={`flex items-center gap-1 text-[11px] font-medium transition-colors px-1.5 py-0.5 rounded border ${
-                  selectedAgent === "forge"
-                    ? "text-orange-400 border-orange-400/40 bg-orange-500/10 hover:bg-orange-500/20"
-                    : "text-muted-foreground/50 border-border hover:text-foreground hover:bg-muted/50"
-                }`}
-                title={selectedAgent === "forge" ? "Forge agent — click to switch to Claude" : "Claude agent — click to switch to Forge"}
-              >
-                {selectedAgent === "forge" ? <Hammer className="h-3 w-3" /> : <span className="text-[10px] font-bold leading-none">C</span>}
-                <span>{selectedAgent}</span>
-              </button>
+              <AgentToggleButton
+                agent={selectedAgent}
+                onCycle={(next) => {
+                  setSelectedAgent(next);
+                  setSelectedModel(DEFAULT_MODEL[next] || undefined);
+                }}
+              />
               {compute.nodes.length > 0 && (
                 <button
                   onClick={compute.toggle}

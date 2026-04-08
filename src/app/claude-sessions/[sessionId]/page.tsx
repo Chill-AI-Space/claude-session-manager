@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud, Hammer } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -23,6 +23,7 @@ import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useComputeNode } from "@/hooks/useComputeNode";
+import { AgentToggleButton, type AgentType, DEFAULT_MODEL } from "@/components/AgentToggleButton";
 
 
 const CTX_MAX = 200_000;
@@ -215,7 +216,7 @@ export default function SessionDetailPage({
 
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
-  const [newSessionAgent, setNewSessionAgent] = useState<"claude" | "forge" | "codex">("claude");
+  const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("claude");
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [startingNewSession, setStartingNewSession] = useState(false);
@@ -2256,30 +2257,14 @@ export default function SessionDetailPage({
                     {skipPerms.value ? "on" : "off"}
                   </span>
                 </button>
-                <button
-                  onClick={() => {
-                    const next = newSessionAgent === "claude" ? "forge" : newSessionAgent === "forge" ? "codex" : "claude";
+                <AgentToggleButton
+                  agent={newSessionAgent}
+                  onCycle={(next) => {
                     setNewSessionAgent(next);
-                    setNewSessionModel(next === "forge" ? "models/gemini-2.5-flash" : next === "codex" ? "gpt-5.4" : "");
+                    setNewSessionModel(DEFAULT_MODEL[next]);
                   }}
-                  className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors px-2 py-0.5 rounded border ${
-                    newSessionAgent === "forge"
-                      ? "text-orange-400 border-orange-400/40 bg-orange-500/10 hover:bg-orange-500/20"
-                      : newSessionAgent === "codex"
-                        ? "text-violet-400 border-violet-400/40 bg-violet-500/10 hover:bg-violet-500/20"
-                        : "text-muted-foreground/70 border-border hover:text-foreground hover:bg-muted/50"
-                  }`}
-                  title={
-                    newSessionAgent === "forge" ? "Using Forge — click to switch to Codex"
-                    : newSessionAgent === "codex" ? "Using Codex — opens in terminal, click to switch to Claude"
-                    : "Using Claude — click to switch to Forge"
-                  }
-                >
-                  {newSessionAgent === "forge" ? <Hammer className="h-3 w-3" />
-                    : newSessionAgent === "codex" ? <span className="text-[10px] font-bold leading-none">{"{ }"}</span>
-                    : <span className="text-[10px] font-bold leading-none">C</span>}
-                  <span>{newSessionAgent}</span>
-                </button>
+                  size="md"
+                />
                 {compute.nodes.length > 0 && (
                   <button
                     onClick={compute.toggle}
