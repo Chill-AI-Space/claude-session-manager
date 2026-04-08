@@ -2260,7 +2260,7 @@ export default function SessionDetailPage({
                   onClick={() => {
                     const next = newSessionAgent === "claude" ? "forge" : newSessionAgent === "forge" ? "codex" : "claude";
                     setNewSessionAgent(next);
-                    setNewSessionModel(next === "forge" ? "models/gemini-3-flash-preview" : next === "codex" ? "gpt-5.4" : "");
+                    setNewSessionModel(next === "forge" ? "models/gemini-2.5-flash" : next === "codex" ? "gpt-5.4" : "");
                   }}
                   className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors px-2 py-0.5 rounded border ${
                     newSessionAgent === "forge"

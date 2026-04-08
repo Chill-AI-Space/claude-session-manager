@@ -32,7 +32,7 @@ export default function SessionsEmptyState() {
   useEffect(() => {
     setSelectedModel(
       settings.claude_model === "claude-sonnet-4-6"
-        ? "models/gemini-3-flash-preview"
+        ? "models/gemini-2.5-flash"
         : settings.claude_model,
     );
   }, [settings.claude_model]);

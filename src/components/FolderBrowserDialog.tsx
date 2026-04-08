@@ -73,10 +73,10 @@ export function FolderBrowserDialog({
       setWebMessage("");
       setCreatingFolder(false);
       setNewFolderName("");
-      // For web start, default to Forge's default model (Gemini 3 Flash Preview)
+      // For web start, default to Forge's default model (Gemini 2.5 Flash)
       setWebModel(
         settings.claude_model === "claude-sonnet-4-6"
-          ? "models/gemini-3-flash-preview"
+          ? "models/gemini-2.5-flash"
           : settings.claude_model,
       );
       fetch("/api/browse")
