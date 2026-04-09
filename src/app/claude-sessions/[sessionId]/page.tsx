@@ -78,11 +78,6 @@ function ContextBar({ tokens }: { tokens: number }) {
   );
 }
 
-const SETTING_LABELS: Record<string, string> = {
-  dangerously_skip_permissions: "Skip Permissions",
-  auto_kill_terminal_on_reply: "Auto-Kill Terminal",
-  context_guard_enabled: "Context Guard",
-};
 
 function FocusErrorBanner({ error }: { error: string }): React.ReactElement {
   return (
@@ -1315,12 +1310,6 @@ export default function SessionDetailPage({
   const allMessages = [...earlierMessages, ...data.messages, ...extraMessages];
   const hasEarlier = (earliestLoaded ?? 0) > 0;
 
-  const enabledSettings = settings
-    ? Object.entries(settings)
-        .filter(([, v]) => v === "true")
-        .map(([k]) => SETTING_LABELS[k] || k)
-    : [];
-
   return (
     <>
       {/* Session header — single line: status + title */}
@@ -1346,34 +1335,6 @@ export default function SessionDetailPage({
               <span className="text-[11px] font-medium text-green-600 dark:text-green-400 shrink-0 flex items-center gap-1.5">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 Working...
-              </span>
-            )}
-            {isRunning && data.process_vitals && (
-              <span className="flex items-center gap-2 shrink-0 font-mono text-[10px]">
-                <span
-                  className={`px-1.5 py-0.5 rounded ${
-                    data.process_vitals.cpu_percent > 5
-                      ? "bg-green-500/15 text-green-600 dark:text-green-400"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                  title="CPU usage of the Claude process"
-                >
-                  CPU {data.process_vitals.cpu_percent.toFixed(0)}%
-                </span>
-                <span
-                  className={`px-1.5 py-0.5 rounded ${
-                    data.process_vitals.has_established_tcp
-                      ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                  title={
-                    data.process_vitals.has_established_tcp
-                      ? `API active: ${data.process_vitals.tcp_connections.join(", ")}`
-                      : "No active API connection"
-                  }
-                >
-                  {data.process_vitals.has_established_tcp ? "API ↓" : "API idle"}
-                </span>
               </span>
             )}
             {isInterrupted && (
@@ -2055,10 +2016,37 @@ export default function SessionDetailPage({
               </div>
             )}
 
-            {/* Settings & shortcuts */}
-            {enabledSettings.length > 0 && (
-              <div className="text-[10px] text-muted-foreground/50">
-                {enabledSettings.join(" · ")}
+            {/* Process vitals */}
+            {data.is_active && data.process_vitals && (
+              <div className="font-mono text-[10px] text-muted-foreground/70 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={data.process_vitals.cpu_percent > 5 ? "text-green-600 dark:text-green-400" : ""}
+                    title="CPU usage of Claude process"
+                  >
+                    CPU {data.process_vitals.cpu_percent.toFixed(0)}%
+                  </span>
+                  <span className="opacity-40">·</span>
+                  <span title="Resident memory">RAM {data.process_vitals.mem_mb} MB</span>
+                  <span className="opacity-40">·</span>
+                  <span title="Process uptime">
+                    {data.process_vitals.elapsed_secs < 60
+                      ? `${data.process_vitals.elapsed_secs}s`
+                      : data.process_vitals.elapsed_secs < 3600
+                        ? `${Math.floor(data.process_vitals.elapsed_secs / 60)}m`
+                        : `${Math.floor(data.process_vitals.elapsed_secs / 3600)}h`}
+                  </span>
+                </div>
+                <div
+                  className={data.process_vitals.has_established_tcp ? "text-blue-600 dark:text-blue-400" : "opacity-40"}
+                  title={data.process_vitals.has_established_tcp
+                    ? `${data.process_vitals.tcp_connections.length} ESTABLISHED TCP connections`
+                    : "No active TCP connections"}
+                >
+                  {data.process_vitals.has_established_tcp
+                    ? `API: ${data.process_vitals.tcp_connections.length} conn`
+                    : "API: idle"}
+                </div>
               </div>
             )}
             <div className="text-[10px] text-muted-foreground/40 flex items-center gap-3">
