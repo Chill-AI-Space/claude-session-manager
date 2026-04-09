@@ -233,6 +233,22 @@ function initTables(db: Database.Database) {
   if (!colNames.has("previous_session_id")) {
     db.exec("ALTER TABLE sessions ADD COLUMN previous_session_id TEXT");
   }
+  // Delegation contract columns
+  if (!colNames.has("reply_to_session_id")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN reply_to_session_id TEXT");
+  }
+  if (!colNames.has("delegation_task")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN delegation_task TEXT");
+  }
+  if (!colNames.has("delegation_status")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN delegation_status TEXT");
+  }
+  if (!colNames.has("delegation_ping_count")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN delegation_ping_count INTEGER DEFAULT 0");
+  }
+  if (!colNames.has("delegation_last_ping_at")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN delegation_last_ping_at INTEGER");
+  }
   // actions_log migrations
   const actionCols = db.prepare("PRAGMA table_info(actions_log)").all() as { name: string }[];
   const actionColNames = new Set(actionCols.map((c) => c.name));

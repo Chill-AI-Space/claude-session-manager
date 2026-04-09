@@ -16,6 +16,7 @@ export async function POST(
   const body = await request.json();
   const message = body.message;
   const verbose = body.verbose === true;
+  const delegatingSessionId: string | undefined = body.delegating_session_id;
 
   if (!message || typeof message !== "string") {
     return Response.json({ error: "Message is required" }, { status: 400 });
@@ -51,6 +52,15 @@ export async function POST(
   }
 
   logAction("service", "reply", `msg_len:${message.length}`, sessionId);
+
+  // If a delegated child session is reporting back, mark its delegation as replied
+  if (delegatingSessionId) {
+    try {
+      db.prepare(
+        "UPDATE sessions SET delegation_status = 'replied' WHERE session_id = ? AND delegation_status = 'pending'"
+      ).run(delegatingSessionId);
+    } catch { /* non-critical */ }
+  }
 
   const agentType = (session as typeof session & { agent_type?: string }).agent_type ?? "claude";
 

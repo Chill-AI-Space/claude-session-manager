@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { path: projectPath, message, correlationId, verbose, model, agent, previous_session_id, on_complete_url } = body as {
+  const { path: projectPath, message, correlationId, verbose, model, agent, previous_session_id, on_complete_url, reply_to_session_id, delegation_task } = body as {
     path: string;
     message: string;
     correlationId?: string;
@@ -18,6 +18,8 @@ export async function POST(request: NextRequest) {
     agent?: string;
     previous_session_id?: string;
     on_complete_url?: string;
+    reply_to_session_id?: string;
+    delegation_task?: string;
   };
 
   if (!projectPath || !message?.trim()) {
@@ -147,6 +149,6 @@ export async function POST(request: NextRequest) {
     return new Response(stream, { headers: SSE_HEADERS });
   }
 
-  const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url);
+  const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url, reply_to_session_id, delegation_task);
   return sseResponse(stream);
 }

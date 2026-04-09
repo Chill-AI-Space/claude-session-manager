@@ -524,6 +524,9 @@ export async function scanSessions(
   // Post-scan: detect incomplete exits from DB (catches files skipped by incremental scan)
   detectIncompleteExits(db);
 
+  // Post-scan: ping delegated sessions that haven't reported back
+  detectStalledDelegations(db);
+
   const result = {
     sessionsScanned,
     sessionsSkipped,
@@ -578,6 +581,125 @@ function detectIncompleteExits(db: ReturnType<typeof getDb>): void {
     const silentMin = Math.round((Date.now() - session.file_mtime) / 60_000);
     logAction("service", "incomplete_exit_detected", `silent:${silentMin}min (post-scan)`, session.session_id);
     orch.enqueueIncompleteExitResume(session.session_id, session.jsonl_path);
+  }
+}
+
+/**
+ * Ping delegated sessions that have finished work but haven't reported back.
+ *
+ * A "delegated session" has reply_to_session_id set and delegation_status = 'pending'.
+ * After the child session completes (process dead, or has_result=1), we give it a grace
+ * period, then periodically remind it to report back. After MAX_PINGS missed reminders,
+ * we auto-send a FAILED reply to the parent session.
+ */
+function detectStalledDelegations(db: ReturnType<typeof getDb>): void {
+  const INITIAL_WAIT_MS = 5 * 60 * 1000;   // wait 5 min after completion before first ping
+  const PING_INTERVAL_MS = 10 * 60 * 1000;  // 10 min between pings
+  const MAX_PINGS = 3;
+
+  const now = Date.now();
+  const base = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
+
+  const candidates = db.prepare(`
+    SELECT session_id, reply_to_session_id, delegation_task,
+           delegation_ping_count, delegation_last_ping_at,
+           has_result, file_mtime, project_path
+    FROM sessions
+    WHERE delegation_status = 'pending'
+      AND reply_to_session_id IS NOT NULL
+  `).all() as Array<{
+    session_id: string;
+    reply_to_session_id: string;
+    delegation_task: string | null;
+    delegation_ping_count: number | null;
+    delegation_last_ping_at: number | null;
+    has_result: number;
+    file_mtime: number;
+    project_path: string;
+  }>;
+
+  if (candidates.length === 0) return;
+
+  const { isSessionActive } = require("./process-detector");
+  const orch = getOrchestrator();
+
+  for (const session of candidates) {
+    // Skip if child process is still running — not done yet
+    if (isSessionActive(session.session_id)) continue;
+
+    const pingCount = session.delegation_ping_count ?? 0;
+    const lastPingAt = session.delegation_last_ping_at ?? null;
+    const completedAt = session.file_mtime;
+    const timeSinceCompletion = now - completedAt;
+
+    // Respect grace period before first ping
+    if (!lastPingAt && timeSinceCompletion < INITIAL_WAIT_MS) continue;
+
+    // Respect cooldown between pings
+    if (lastPingAt && (now - lastPingAt) < PING_INTERVAL_MS) continue;
+
+    if (pingCount >= MAX_PINGS) {
+      // Auto-fail: child never reported back after MAX_PINGS attempts
+      db.prepare("UPDATE sessions SET delegation_status = 'failed' WHERE session_id = ?")
+        .run(session.session_id);
+
+      const parent = db.prepare("SELECT project_path FROM sessions WHERE session_id = ?")
+        .get(session.reply_to_session_id) as { project_path: string } | undefined;
+      if (!parent) continue;
+
+      const failMsg = [
+        `DELEGATION FAILED: Sub-session ${session.session_id} was delegated the task`,
+        `"${session.delegation_task || "your task"}" but did not report back after ${MAX_PINGS} reminders.`,
+        `The sub-session may have completed the work — check session ${session.session_id} for results.`,
+      ].join(" ");
+
+      logAction("service", "delegation_auto_failed",
+        `child:${session.session_id} no reply after ${MAX_PINGS} pings`,
+        session.reply_to_session_id);
+
+      orch.enqueue({
+        sessionId: session.reply_to_session_id,
+        type: "resume",
+        message: failMsg,
+        priority: "high",
+      });
+    } else {
+      // Ping: resume child and ask it to report back
+      const nextPing = pingCount + 1;
+      db.prepare(
+        "UPDATE sessions SET delegation_ping_count = ?, delegation_last_ping_at = ? WHERE session_id = ?"
+      ).run(nextPing, now, session.session_id);
+
+      logAction("service", "delegation_ping",
+        `ping ${nextPing}/${MAX_PINGS} child:${session.session_id}`,
+        session.reply_to_session_id);
+
+      const pingMsg = [
+        `[Delegation Contract Reminder — ping ${nextPing}/${MAX_PINGS}]`,
+        `You were delegated: "${session.delegation_task || "a task"}"`,
+        `You have completed your work but have not reported back to the requesting session.`,
+        `Please report your result NOW by running one of these curl commands:`,
+        ``,
+        `On success:`,
+        `  curl -s -X POST "${base}/api/sessions/${session.reply_to_session_id}/reply" \\`,
+        `    -H "Content-Type: application/json" \\`,
+        `    -d '{"message": "DONE: <brief summary>"}'`,
+        ``,
+        `On failure:`,
+        `  curl -s -X POST "${base}/api/sessions/${session.reply_to_session_id}/reply" \\`,
+        `    -H "Content-Type: application/json" \\`,
+        `    -d '{"message": "FAILED: <reason>"}'`,
+        ``,
+        `This is reminder ${nextPing} of ${MAX_PINGS}. After ${MAX_PINGS} missed reminders, the parent will be notified of failure automatically.`,
+      ].join("\n");
+
+      orch.enqueue({
+        sessionId: session.session_id,
+        type: "resume",
+        message: pingMsg,
+        priority: "normal",
+      });
+    }
   }
 }
 

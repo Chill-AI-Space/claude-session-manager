@@ -49,6 +49,8 @@ export interface SessionState {
   startedAt: number;
   error?: string;
   onCompleteUrl?: string; // webhook to POST when session finishes
+  replyToSessionId?: string; // parent session expecting a DONE/FAILED reply
+  delegationTask?: string; // brief description of what was delegated
 }
 
 export type TaskType =
@@ -258,6 +260,25 @@ function buildSessionContextPrompt(sessionId?: string): string | undefined {
   lines.push(`Start sub-session: POST ${base}/api/sessions/start  body: {"path":"...","message":"..."}`);
   lines.push(`Active sessions: GET ${base}/api/sessions`);
   lines.push("[End Context]");
+  return lines.join("\n");
+}
+
+/** Build the delegation contract block injected when a session is spawned with reply_to_session_id. */
+function buildDelegationPrompt(replyToSessionId: string, delegationTask: string | undefined, base: string): string {
+  const lines = [
+    "[Delegation Contract]",
+    `You were spawned to handle a delegated task${delegationTask ? `: "${delegationTask}"` : ""}.`,
+    `When your task is complete — success or failure — you MUST report back by calling:`,
+    `  curl -s -X POST "${base}/api/sessions/${replyToSessionId}/reply" \\`,
+    `    -H "Content-Type: application/json" \\`,
+    `    -d '{"message": "DONE: <brief summary of what was accomplished>"}'`,
+    `Or on failure:`,
+    `  curl -s -X POST "${base}/api/sessions/${replyToSessionId}/reply" \\`,
+    `    -H "Content-Type: application/json" \\`,
+    `    -d '{"message": "FAILED: <reason why the task could not be completed>"}'`,
+    `Do NOT finish your work without calling one of these. The parent session is waiting for your reply.`,
+    "[End Delegation Contract]",
+  ];
   return lines.join("\n");
 }
 
@@ -788,11 +809,18 @@ class SessionOrchestrator extends EventEmitter {
    * @param verbose — when true, emit extra debug events (tool inputs, tokens, thinking)
    * @param previousSessionId — ID of the session this was spawned from (context carry-over)
    * @param onCompleteUrl — optional webhook URL to POST when the session finishes
+   * @param replyToSessionId — if set, child must POST DONE/FAILED back to this session when done
+   * @param delegationTask — brief description of what was delegated (shown in pings)
    */
-  start(projectPath: string, message: string, correlationId?: string, verbose = false, model?: string, previousSessionId?: string, onCompleteUrl?: string): ReadableStream {
+  start(projectPath: string, message: string, correlationId?: string, verbose = false, model?: string, previousSessionId?: string, onCompleteUrl?: string, replyToSessionId?: string, delegationTask?: string): ReadableStream {
     let sessionId: string | null = null;
+    const base = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
     const contextPrompt = buildSessionContextPrompt(); // no sessionId yet for new sessions
-    const args = buildCliArgs({ message, model, appendSystemPrompt: contextPrompt });
+    const delegationPrompt = replyToSessionId
+      ? buildDelegationPrompt(replyToSessionId, delegationTask, base)
+      : undefined;
+    const fullSystemPrompt = [contextPrompt, delegationPrompt].filter(Boolean).join("\n\n") || undefined;
+    const args = buildCliArgs({ message, model, appendSystemPrompt: fullSystemPrompt });
     const spawnedAt = Date.now();
 
     if (correlationId) {
@@ -823,6 +851,8 @@ class SessionOrchestrator extends EventEmitter {
                 lastActivity: Date.now(),
                 startedAt: Date.now(),
                 onCompleteUrl,
+                replyToSessionId,
+                delegationTask,
               });
               this.emit("session:started", { sessionId: id, projectPath });
             }
@@ -845,6 +875,13 @@ class SessionOrchestrator extends EventEmitter {
           if (previousSessionId && sessionId) {
             try {
               getDb().prepare("UPDATE sessions SET previous_session_id = ? WHERE session_id = ?").run(previousSessionId, sessionId);
+            } catch { /* non-critical */ }
+          }
+          if (replyToSessionId && sessionId) {
+            try {
+              getDb().prepare(
+                "UPDATE sessions SET reply_to_session_id = ?, delegation_task = ?, delegation_status = 'pending' WHERE session_id = ?"
+              ).run(replyToSessionId, delegationTask ?? null, sessionId);
             } catch { /* non-critical */ }
           }
           generateTitleBatch(1).catch(() => {});
@@ -1653,7 +1690,33 @@ class SessionOrchestrator extends EventEmitter {
       state.phase = phase;
       state.lastActivity = Date.now();
       if (error) state.error = error;
+      // Auto-notify parent when a delegated session permanently fails
+      if (phase === "failed" && state.replyToSessionId) {
+        this.notifyDelegationFailed(sessionId, state.replyToSessionId, error || "session failed")
+          .catch(() => {});
+      }
     }
+  }
+
+  /** Send a FAILED reply to the parent session when the delegated child gives up. */
+  private async notifyDelegationFailed(childId: string, parentId: string, reason: string): Promise<void> {
+    try {
+      const db = getDb();
+      const row = db.prepare(
+        "SELECT delegation_task, delegation_status FROM sessions WHERE session_id = ?"
+      ).get(childId) as { delegation_task: string | null; delegation_status: string | null } | undefined;
+      if (!row || row.delegation_status !== "pending") return;
+
+      db.prepare("UPDATE sessions SET delegation_status = 'failed' WHERE session_id = ?").run(childId);
+
+      const parent = db.prepare("SELECT project_path FROM sessions WHERE session_id = ?")
+        .get(parentId) as { project_path: string } | undefined;
+      if (!parent) return;
+
+      const failMsg = `DELEGATION FAILED: Sub-session ${childId} could not complete the task "${row.delegation_task || "delegated task"}". Reason: ${reason}`;
+      logAction("service", "delegation_failed_notified", `child:${childId} reason:${reason}`, parentId);
+      this.enqueue({ sessionId: parentId, type: "resume", message: failMsg, priority: "high" });
+    } catch { /* non-critical */ }
   }
 
   /**
