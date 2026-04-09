@@ -326,12 +326,36 @@ When writing new code, follow these rules to keep Windows compatibility:
 
 You are running inside Claude Session Manager. The babysitter watches all sessions and auto-retries crashes and stalls — but you can take control yourself using two tools: **self-alarm** and **delegation**.
 
+### When to split into a new session
+
+If you notice a session starting to cover two separate projects or themes — delegate one immediately. Signs that it's time to split:
+
+- The conversation touches **two different repos** (`~/project-a` and `~/project-b`)
+- There are **parallel independent tasks** that don't need to wait for each other
+- The thread is getting long and a new topic is starting that will generate its own 10+ messages
+
+**How to split:** spin up a delegated sub-session with the full context it needs, then continue your current thread. Don't try to hold both in one session — context gets polluted and neither task gets clean focus.
+
+```bash
+curl -s -X POST "http://localhost:3000/api/sessions/start" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "/abs/path/to/other-project",
+    "message": "<full context the new session needs to start independently>",
+    "reply_to_session_id": "YOUR_SESSION_ID",
+    "delegation_task": "brief label"
+  }'
+```
+
+Pass enough context in `message` that the new session can work independently — don't assume it has any shared memory with you.
+
 ### When to use what
 
 | Situation | Tool |
 |-----------|------|
 | About to do something risky (deploy, migration, long build) and might crash | **Self-alarm** |
 | Need work done in a different folder / with different permissions | **Delegation** |
+| Two topics diverging in one session | **Delegation** — split immediately |
 | Want to signal another already-running session | **Orchestrator enqueue** |
 
 ### Finding your session ID
