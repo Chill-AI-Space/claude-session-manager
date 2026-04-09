@@ -324,141 +324,104 @@ When writing new code, follow these rules to keep Windows compatibility:
 
 ## Sessions Choreography
 
-When multiple Claude sessions work in parallel, proper coordination keeps everyone moving and avoids conflicts. Without discipline: sessions overwrite each other's code, deploy conflicting versions, tasks get stuck.
+You are running inside Claude Session Manager. The babysitter watches all sessions and auto-retries crashes and stalls — but you can take control yourself using two tools: **self-alarm** and **delegation**.
 
-### Rule 1 — all running/deployed code lives in files and git
+### When to use what
 
-Any code that runs or deploys **must be committed** (at least to a branch). Not in git — doesn't exist. Not ready for main — open a branch, it'll be visible in `git branch`. This is the only way two sessions don't step on each other.
+| Situation | Tool |
+|-----------|------|
+| About to do something risky (deploy, migration, long build) and might crash | **Self-alarm** |
+| Need work done in a different folder / with different permissions | **Delegation** |
+| Want to signal another already-running session | **Orchestrator enqueue** |
 
-### Rule 2 — sessions can see each other
+### Finding your session ID
 
-All active sessions are visible in real time via Session Manager. Find active sessions in the same repo:
+If started via Session Manager (web UI or API) — your ID is in the `[Session Manager Context]` block at the top of your system prompt. Use it directly.
 
+If running directly in a terminal:
 ```bash
-# Who's working in the same repo?
-curl -s "http://localhost:3000/api/sessions/peers?path=/abs/path/to/repo" | jq .
+# By project dir (fastest)
+curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq '.peers[0].session_id'
 
-# All active sessions across all repos
-curl -s "http://localhost:3000/api/sessions?limit=50&include_remote=false" | \
-  jq '[.sessions[] | select(.is_active) | {session_id, project_path, generated_title}]'
-```
-
-**Важно:** `/api/sessions` возвращает объект `{sessions: [...], ...}`, не массив. Типичные ошибки:
-```bash
-# Неправильно — Cannot index object with object
-curl -s http://localhost:3000/api/sessions | jq '.[0:5]'
-
-# Правильно
-curl -s http://localhost:3000/api/sessions | jq '.sessions[0:5]'
-
-# Python pipe — stdin должен быть из curl, не heredoc
-curl -s http://localhost:3000/api/sessions | python3 -c "import json,sys; d=json.load(sys.stdin); ..."
-```
-
-### Rule 3 — check for siblings before touching a repo
-
-Before starting work in a repo, check if another session is already there. If yes: coordinate (different branches, different files, or sequence the work). A task shouldn't get stuck because of a conflict with a parallel session.
-
-### Rule 4 — pass the baton via orchestrator
-
-Finished a task, deployed — check if another session is active in a related repo. If yes: send it context via the orchestrator (fire-and-forget, returns immediately):
-
-```bash
-# Send a message to another session — fire-and-forget
-curl -s -X POST "http://localhost:3000/api/orchestrator" \
-  -H "Content-Type: application/json" \
-  -d '{"type":"resume","sessionId":"SESSION_UUID","message":"deploy complete — please run smoke tests","priority":"high"}'
-# Returns: {"taskId":"resume:SESSION_UUID","ok":true}
-
-# Find the target session_id first
-curl -s "http://localhost:3000/api/sessions/peers?path=/path/to/repo" | jq '.[\"peers\"][0].session_id'
-```
-
-Use `/api/sessions/{id}/reply` only when you want to stream the response back (SSE). For cross-session signals, always use `/api/orchestrator` — it enqueues and returns instantly.
-
-### Why orchestrator, not /reply
-
-`/reply` returns an SSE stream — curl hangs until Claude finishes responding. `/api/orchestrator` with `type: "resume"` enqueues the message and returns `{taskId, ok: true}` immediately. Use orchestrator for inter-session events; use `/reply` only when you need to stream the response back to a UI or terminal.
-
-### Self-alarm — "wake me if I die"
-
-A session can arm itself so the babysitter resumes it with a specific message if it goes inactive. While the alarm is active, **babysitter skips all normal crash/stall/incomplete-exit handling** for that session — the alarm owns the recovery.
-
-**All sessions are tracked** — Claude CLI sessions, Codex TUI sessions, Forge sessions. Every session that appears in the Session Manager UI has a `session_id` and can use the alarm. The session manager scans `~/.claude/projects/`, `~/.codex/`, and `~/forge/` automatically.
-
-**Finding your session ID:**
-
-If you were started via Session Manager (web UI or API), your session ID is in the `[Session Manager Context]` block in your system prompt — use it directly.
-
-If you're running directly in a terminal (not started via CSM), find your ID:
-```bash
-# Find your session by project directory
-curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq '.peers[] | {session_id, is_active}'
-
-# Without path — returns all active sessions across all projects
+# All active sessions (if you don't know your path)
 curl -s "http://localhost:3000/api/sessions/peers" | jq '.peers[] | {session_id, project_path}'
 ```
 
+**All session types are tracked** — Claude CLI, Codex TUI, Forge. If you appear in the Session Manager UI, you have a `session_id` and can use both tools below.
+
+---
+
+### Self-alarm — "if I die, resume me with this message"
+
+Set before any risky operation. While the alarm is active, **babysitter skips normal crash/stall handling** for your session — the alarm owns recovery.
+
 ```bash
-# Set alarm — babysitter will resume you with this message if inactive for check_after_ms
+# Arm — babysitter resumes you with this message if you go inactive for check_after_ms
 curl -s -X POST "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm" \
   -H "Content-Type: application/json" \
-  -d '{
-    "message": "Continue with step 3: run smoke tests and deploy",
-    "check_after_ms": 180000
-  }'
+  -d '{"message": "Continue from step 3: run smoke tests, then deploy", "check_after_ms": 180000}'
 
-# Check current alarm
-curl -s "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
-
-# Cancel alarm
+# Cancel after successful completion
 curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
 ```
 
-Defaults: `check_after_ms = 180000` (3 min), generic "continue from where you left off" message.
+Default timeout: 3 min. Default message: generic "continue from where you left off".
 
-**When to use:** Before a long risky operation (deploy, migration, external API call) — set an alarm with the next step. If you crash or the process is killed, you'll be resumed with context about what to do next. Cancel the alarm when the operation completes successfully.
+**Pattern:**
+```bash
+# 1. Arm
+curl -s -X POST ".../alarm" -d '{"message": "retry the migration from step 2"}'
+# 2. Do the risky thing
+npm run migrate
+# 3. Disarm on success
+curl -s -X DELETE ".../alarm"
+```
 
-### Delegation contract — spawn a sub-session and get results back
+---
 
-When you need to delegate work to a session in a **different project folder**, use the delegation contract. The spawned session is contractually required to report back with DONE or FAILED.
+### Delegation — "do this in another folder and report back"
+
+Use when you need work done in a different project directory (different permissions, different repo, parallel work).
 
 ```bash
-# Spawn a delegated sub-session in another project folder
 curl -s -X POST "http://localhost:3000/api/sessions/start" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "/abs/path/to/other/project",
     "message": "Fix the auth bug in login.ts and deploy",
     "reply_to_session_id": "YOUR_SESSION_ID",
-    "delegation_task": "fix auth bug in /other/project",
+    "delegation_task": "fix auth bug",
     "agent": "claude"
   }'
-# Returns SSE stream. Read session_id from it, or fire-and-forget.
 ```
 
-**What happens next:**
-- The spawned session receives a `[Delegation Contract]` block in its system prompt with exact curl commands to report back
-- When done, it calls `POST /api/sessions/YOUR_SESSION_ID/reply` with `{"message": "DONE: <summary>"}` or `{"message": "FAILED: <reason>"}`
-- If it crashes and exhausts retries → babysitter auto-sends `FAILED:` to you
-- If it finishes but forgets to report → babysitter pings it every 10 min (up to 3×), then auto-sends `FAILED:` to you
-
-**Agent types** (pass as `"agent"` field):
-- `"claude"` — Claude Code CLI (default, omit field)
-- `"codex"` — OpenAI Codex TUI
-- `"forge"` — Forge agent
-
-**Reporting back from inside a delegated session:**
+The spawned session gets a `[Delegation Contract]` block with exact curl commands to report back. When done it calls:
 ```bash
-# Success
+# From inside the delegated session:
 curl -s -X POST "http://localhost:3000/api/sessions/PARENT_SESSION_ID/reply" \
   -H "Content-Type: application/json" \
-  -d '{"message": "DONE: fixed auth bug, committed to branch fix/auth-token"}'
-
-# Failure
-curl -s -X POST "http://localhost:3000/api/sessions/PARENT_SESSION_ID/reply" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "FAILED: cannot reproduce the bug — login.ts has no auth logic"}'
+  -d '{"message": "DONE: fixed auth bug, committed to fix/auth-token"}'
+# or: "FAILED: <reason>"
 ```
 
-**Your session ID** is always injected into your system prompt under `[Session Manager Context]` → `Session ID: <uuid>`. Use it when reporting back so the system can track the delegation.
+If the child crashes or forgets to report → babysitter auto-sends `FAILED:` to you after 3 reminders.
+
+**Agent types:** `"claude"` (default), `"codex"`, `"forge"`.
+
+---
+
+### Signaling another session
+
+```bash
+# Fire-and-forget message to another session (returns immediately)
+curl -s -X POST "http://localhost:3000/api/orchestrator" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"resume","sessionId":"TARGET_SESSION_ID","message":"deploy done, run smoke tests","priority":"high"}'
+# → {"taskId":"resume:TARGET_SESSION_ID","ok":true}
+```
+
+Use orchestrator (not `/reply`) for inter-session signals — `/reply` blocks until Claude finishes responding.
+
+### Git discipline (multi-session)
+
+Any code that runs or deploys **must be committed** first. Not in git — doesn't exist from other sessions' perspective. Use branches for in-progress work — they're visible in `git branch`.
