@@ -3,7 +3,7 @@ import fs from "fs";
 import { getDb } from "@/lib/db";
 import { readSessionMessages, readSessionMessagesPaginated } from "@/lib/session-reader";
 import { SessionRow } from "@/lib/types";
-import { isSessionActive } from "@/lib/process-detector";
+import { isSessionActive, getSessionVitals } from "@/lib/process-detector";
 import { hasResultEvent } from "@/lib/orchestrator";
 import { resolveNode, proxyJSON } from "@/lib/remote-compute";
 
@@ -144,6 +144,7 @@ export async function GET(
 
   let active = false;
   let fileAgeMs = Infinity;
+  const vitals = getSessionVitals(sessionId);
   try {
     active = isSessionActive(sessionId);
     const mtime = fs.statSync(session.jsonl_path).mtimeMs;
@@ -176,6 +177,7 @@ export async function GET(
     is_active: active,
     has_result: sessionHasResult,
     file_age_ms: fileAgeMs === Infinity ? null : Math.round(fileAgeMs),
+    process_vitals: vitals,
   });
 }
 

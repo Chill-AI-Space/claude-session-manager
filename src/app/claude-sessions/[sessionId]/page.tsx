@@ -102,6 +102,15 @@ function FocusErrorBanner({ error }: { error: string }): React.ReactElement {
   );
 }
 
+interface ProcessVitals {
+  pid: number;
+  cpu_percent: number;
+  mem_mb: number;
+  has_established_tcp: boolean;
+  tcp_connections: string[];
+  elapsed_secs: number;
+}
+
 interface SessionDetailData {
   session_id: string;
   project_path: string;
@@ -112,6 +121,7 @@ interface SessionDetailData {
   is_active: boolean;
   has_result?: boolean;
   file_age_ms?: number;
+  process_vitals?: ProcessVitals | null;
 }
 
 export default function SessionDetailPage({
@@ -1336,6 +1346,34 @@ export default function SessionDetailPage({
               <span className="text-[11px] font-medium text-green-600 dark:text-green-400 shrink-0 flex items-center gap-1.5">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 Working...
+              </span>
+            )}
+            {isRunning && data.process_vitals && (
+              <span className="flex items-center gap-2 shrink-0 font-mono text-[10px]">
+                <span
+                  className={`px-1.5 py-0.5 rounded ${
+                    data.process_vitals.cpu_percent > 5
+                      ? "bg-green-500/15 text-green-600 dark:text-green-400"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                  title="CPU usage of the Claude process"
+                >
+                  CPU {data.process_vitals.cpu_percent.toFixed(0)}%
+                </span>
+                <span
+                  className={`px-1.5 py-0.5 rounded ${
+                    data.process_vitals.has_established_tcp
+                      ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                  title={
+                    data.process_vitals.has_established_tcp
+                      ? `API active: ${data.process_vitals.tcp_connections.join(", ")}`
+                      : "No active API connection"
+                  }
+                >
+                  {data.process_vitals.has_established_tcp ? "API ↓" : "API idle"}
+                </span>
               </span>
             )}
             {isInterrupted && (

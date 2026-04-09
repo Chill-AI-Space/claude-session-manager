@@ -15,6 +15,20 @@ export interface ActiveProcess {
   command: string;
 }
 
+export interface ProcessVitals {
+  pid: number;
+  cpu_percent: number;
+  mem_mb: number;
+  has_established_tcp: boolean;
+  /** remote addresses of ESTABLISHED TCP connections, e.g. "1.2.3.4:443" */
+  tcp_connections: string[];
+  elapsed_secs: number;
+}
+
+// Short-lived cache for vitals (2 seconds) — fresh enough for UI polling at 4s
+const vitalsCache = new Map<number, { vitals: ProcessVitals; ts: number }>();
+const VITALS_TTL_MS = 2000;
+
 // Cache active sessions for 5 seconds
 let cachedResult: { processes: ActiveProcess[]; timestamp: number } | null = null;
 const CACHE_TTL_MS = 5000;
@@ -178,6 +192,76 @@ export function getActiveSessionIds(): Set<string> {
       .map((p) => p.sessionId)
       .filter((id): id is string => id !== null)
   );
+}
+
+/** Parse ps etime format [[dd-]hh:]mm:ss into seconds */
+function parseElapsedTime(etime: string): number {
+  const parts = etime.split(":");
+  if (parts.length === 2) return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  if (parts.length === 3) {
+    const [h, m, s] = parts;
+    // hh may include dd- prefix
+    const hParts = h.split("-");
+    const days = hParts.length === 2 ? parseInt(hParts[0]) * 86400 : 0;
+    const hours = parseInt(hParts[hParts.length - 1]);
+    return days + hours * 3600 + parseInt(m) * 60 + parseInt(s);
+  }
+  return 0;
+}
+
+/** Get CPU%, memory, and TCP connection vitals for a running process (Unix only).
+ *  Returns null on Windows or if process is not found. */
+export function getProcessVitals(pid: number): ProcessVitals | null {
+  if (isWin) return null;
+  const cached = vitalsCache.get(pid);
+  if (cached && Date.now() - cached.ts < VITALS_TTL_MS) return cached.vitals;
+
+  try {
+    // Single ps call: pid, cpu%, rss (KB), elapsed time
+    const psOut = execFileSync("ps", ["-p", String(pid), "-o", "pid=,pcpu=,rss=,etime="], {
+      encoding: "utf-8",
+      timeout: 2000,
+    }).trim();
+    if (!psOut) return null;
+
+    const parts = psOut.trim().split(/\s+/);
+    if (parts.length < 4) return null;
+    const cpu_percent = parseFloat(parts[1]) || 0;
+    const mem_mb = Math.round((parseInt(parts[2]) || 0) / 1024);
+    const elapsed_secs = parseElapsedTime(parts[3]);
+
+    // TCP connections via lsof — look for ESTABLISHED
+    let has_established_tcp = false;
+    const tcp_connections: string[] = [];
+    try {
+      const lsofOut = execSync(
+        `${LSOF} -n -p ${pid} -i TCP 2>/dev/null || true`,
+        { encoding: "utf-8", timeout: 2000 }
+      );
+      for (const line of lsofOut.split("\n")) {
+        if (!line.includes("ESTABLISHED")) continue;
+        has_established_tcp = true;
+        // Last field is "local->remote (STATE)" — extract remote part
+        const fields = line.trim().split(/\s+/);
+        const addrField = fields[fields.length - 2] || ""; // e.g. "host:port->remote:port"
+        const remote = addrField.includes("->") ? addrField.split("->")[1] : addrField;
+        if (remote) tcp_connections.push(remote);
+      }
+    } catch { /* lsof may fail */ }
+
+    const vitals: ProcessVitals = { pid, cpu_percent, mem_mb, has_established_tcp, tcp_connections, elapsed_secs };
+    vitalsCache.set(pid, { vitals, ts: Date.now() });
+    return vitals;
+  } catch {
+    return null;
+  }
+}
+
+/** Get vitals for a session by its ID. Returns null if session is not active or on Windows. */
+export function getSessionVitals(sessionId: string): ProcessVitals | null {
+  const proc = detectActiveClaudeSessions().find((p) => p.sessionId === sessionId);
+  if (!proc) return null;
+  return getProcessVitals(proc.pid);
 }
 
 export function killSessionProcesses(sessionId: string): number[] {
