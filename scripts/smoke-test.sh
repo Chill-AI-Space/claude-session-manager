@@ -92,7 +92,8 @@ print(t[:80] if t else 'EMPTY')
   echo "6. Summary & learnings"
   SUM_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 -X POST "$BASE/api/sessions/$TOP_SESSION/summary" 2>/dev/null)
   SUM_STATUS="${SUM_STATUS:-000}"
-  check "Summary endpoint responds ($SUM_STATUS)" "$SUM_STATUS" "200"
+  # 200 = generated, 400 = not supported (codex/forge sessions) — both OK
+  check "Summary endpoint responds ($SUM_STATUS)" "$SUM_STATUS" "^[24]0[0]$"
 
   LEARN_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X POST "$BASE/api/sessions/$TOP_SESSION/learnings" 2>/dev/null)
   LEARN_STATUS="${LEARN_STATUS:-000}"
