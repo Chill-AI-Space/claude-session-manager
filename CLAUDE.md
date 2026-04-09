@@ -343,6 +343,18 @@ curl -s "http://localhost:3000/api/sessions?limit=50&include_remote=false" | \
   jq '[.sessions[] | select(.is_active) | {session_id, project_path, generated_title}]'
 ```
 
+**Важно:** `/api/sessions` возвращает объект `{sessions: [...], ...}`, не массив. Типичные ошибки:
+```bash
+# Неправильно — Cannot index object with object
+curl -s http://localhost:3000/api/sessions | jq '.[0:5]'
+
+# Правильно
+curl -s http://localhost:3000/api/sessions | jq '.sessions[0:5]'
+
+# Python pipe — stdin должен быть из curl, не heredoc
+curl -s http://localhost:3000/api/sessions | python3 -c "import json,sys; d=json.load(sys.stdin); ..."
+```
+
 ### Rule 3 — check for siblings before touching a repo
 
 Before starting work in a repo, check if another session is already there. If yes: coordinate (different branches, different files, or sequence the work). A task shouldn't get stuck because of a conflict with a parallel session.
