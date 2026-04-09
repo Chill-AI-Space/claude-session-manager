@@ -384,7 +384,21 @@ Use `/api/sessions/{id}/reply` only when you want to stream the response back (S
 
 A session can arm itself so the babysitter resumes it with a specific message if it goes inactive. While the alarm is active, **babysitter skips all normal crash/stall/incomplete-exit handling** for that session — the alarm owns the recovery.
 
-Your session ID and the alarm endpoint are always in your system prompt under `[Session Manager Context]`.
+**All sessions are tracked** — Claude CLI sessions, Codex TUI sessions, Forge sessions. Every session that appears in the Session Manager UI has a `session_id` and can use the alarm. The session manager scans `~/.claude/projects/`, `~/.codex/`, and `~/forge/` automatically.
+
+**Finding your session ID:**
+
+If you were started via Session Manager (web UI or API), your session ID is in the `[Session Manager Context]` block in your system prompt — use it directly.
+
+If you're running directly in a terminal (not started via CSM), find your ID:
+```bash
+# Find your session by project directory
+curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq '.peers[] | {session_id, is_active}'
+
+# Or scan recent active sessions
+curl -s "http://localhost:3000/api/sessions?limit=10" | \
+  jq '[.sessions[] | select(.is_active) | {session_id, project_path}]'
+```
 
 ```bash
 # Set alarm — babysitter will resume you with this message if inactive for check_after_ms

@@ -210,7 +210,12 @@ curl -s -X DELETE "http://localhost:3000/api/sessions/SESSION_ID/alarm"
 - When time expires AND process is dead → babysitter resumes session with the alarm message
 - If process is still alive when time expires → alarm stays armed, fires when it eventually dies
 
-**Sessions get their own alarm URL automatically** via the `[Session Manager Context]` block injected into every session's system prompt — no need to look up the session ID manually.
+**All sessions are tracked** — Claude CLI, Codex TUI, Forge. Every session visible in the UI has a `session_id` and can use the alarm regardless of how it was started.
+
+Sessions started via CSM get their ID injected automatically in `[Session Manager Context]`. Sessions started directly in terminal can find their ID:
+```bash
+curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq '.peers[0].session_id'
+```
 
 The active alarm is visible in the session detail UI (⏰ indicator with remaining time + cancel button).
 
