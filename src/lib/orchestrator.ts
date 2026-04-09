@@ -1429,7 +1429,9 @@ class SessionOrchestrator extends EventEmitter {
     const userContext = session.last_message
       ? `\nUser's last message: "${session.last_message.slice(0, 200)}"`
       : "";
-    const retryPrompt = `You crashed mid-tool-execution. Continue where you left off — do NOT summarize what happened, just keep working.${taskContext}${userContext}`;
+    const base = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
+    const disableHint = `\n\n[Babysitter] To stop auto-resume for this session: curl -s -X DELETE "${base}/api/sessions/${sessionId}/alarm"`;
+    const retryPrompt = `You crashed mid-tool-execution. Continue where you left off — do NOT summarize what happened, just keep working.${taskContext}${userContext}${disableHint}`;
 
     const args = buildCliArgs({ sessionId, message: retryPrompt, includeMaxTurns: true });
     const proc = spawn(
@@ -1523,7 +1525,9 @@ class SessionOrchestrator extends EventEmitter {
     const userContext = session.last_message
       ? `\nUser's last message: "${session.last_message.slice(0, 200)}"`
       : "";
-    const stallPrompt = `You stalled — no output for over 5 minutes. Continue where you left off. Do NOT summarize what happened, just keep working on the task.${taskContext}${userContext}`;
+    const stallBase = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
+    const stallDisableHint = `\n\n[Babysitter] To stop auto-resume for this session: curl -s -X DELETE "${stallBase}/api/sessions/${sessionId}/alarm"`;
+    const stallPrompt = `You stalled — no output for over 5 minutes. Continue where you left off. Do NOT summarize what happened, just keep working on the task.${taskContext}${userContext}${stallDisableHint}`;
 
     const args = buildCliArgs({ sessionId, message: stallPrompt, includeMaxTurns: true });
     const proc = spawn(
@@ -1626,7 +1630,9 @@ class SessionOrchestrator extends EventEmitter {
     const userContext = session.last_message
       ? `\nUser's last message: "${session.last_message.slice(0, 200)}"`
       : "";
-    const resumePrompt = `Your process exited unexpectedly. You were mid-task when it died. Continue where you left off — do NOT summarize what happened, just keep working.${taskContext}${userContext}`;
+    const resumeBase = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
+    const resumeDisableHint = `\n\n[Babysitter] To stop auto-resume for this session: curl -s -X DELETE "${resumeBase}/api/sessions/${sessionId}/alarm"`;
+    const resumePrompt = `Your process exited unexpectedly. You were mid-task when it died. Continue where you left off — do NOT summarize what happened, just keep working.${taskContext}${userContext}${resumeDisableHint}`;
 
     const args = buildCliArgs({ sessionId, message: resumePrompt, includeMaxTurns: true });
     const proc = spawn(

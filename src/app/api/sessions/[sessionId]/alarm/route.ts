@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getSessionAlarm, setSessionAlarm, clearSessionAlarm } from "@/lib/db";
+import { getSessionAlarm, setSessionAlarm, disableSessionAlarm, isBabysitterDisabled } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,8 @@ export async function GET(
 ) {
   const { sessionId } = await params;
   const alarm = getSessionAlarm(sessionId);
-  return Response.json(alarm ?? { alarm: null });
+  const disabled = !alarm && isBabysitterDisabled(sessionId);
+  return Response.json(alarm ?? { alarm: null, babysitter_disabled: disabled });
 }
 
 export async function POST(
@@ -39,10 +40,18 @@ export async function POST(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   const { sessionId } = await params;
-  clearSessionAlarm(sessionId);
-  return Response.json({ ok: true });
+  // ?clear=true — fully removes the record (re-enables babysitter)
+  const fullyRemove = request.nextUrl.searchParams.get("clear") === "true";
+  if (fullyRemove) {
+    const { clearSessionAlarm } = await import("@/lib/db");
+    clearSessionAlarm(sessionId);
+    return Response.json({ ok: true, babysitter_disabled: false });
+  }
+  // Default: set disabled=1 — tells babysitter to leave this session alone
+  disableSessionAlarm(sessionId);
+  return Response.json({ ok: true, babysitter_disabled: true });
 }

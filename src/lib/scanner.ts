@@ -1,4 +1,4 @@
-import { getDb, getSetting, indexSessionContent, logAction, getSessionAlarm, clearSessionAlarm, getExpiredAlarms } from "./db";
+import { getDb, getSetting, indexSessionContent, logAction, getSessionAlarm, clearSessionAlarm, getExpiredAlarms, isBabysitterDisabled } from "./db";
 import { glob } from "glob";
 import fs from "fs";
 import path from "path";
@@ -376,8 +376,8 @@ export async function scanSessions(
             const { isSessionActive } = require("./process-detector");
             // Process still alive = Claude is executing, not crashed — skip
             if (isSessionActive(sessionId)) return;
-            // Session has a self-alarm — it manages its own resume, skip babysitter
-            if (getSessionAlarm(sessionId)) return;
+            // Session has a self-alarm or disabled babysitter — skip
+            if (getSessionAlarm(sessionId) || isBabysitterDisabled(sessionId)) return;
             logAction("service", capturedIsRepeated ? "repeated_crash_detected" : "crash_detected", `jsonl:${capturedPath}`, sessionId);
             getOrchestrator().enqueueCrashRetry(sessionId, capturedPath);
           });
@@ -399,8 +399,8 @@ export async function scanSessions(
           const capturedHasResult = metadata.hasResult;
           postTxActions.push(() => {
             const { isSessionActive } = require("./process-detector");
-            // Session has a self-alarm — it manages its own resume, skip babysitter
-            if (getSessionAlarm(capturedSessionId)) return;
+            // Session has a self-alarm or disabled babysitter — skip
+            if (getSessionAlarm(capturedSessionId) || isBabysitterDisabled(capturedSessionId)) return;
             // Check for permission wait (tool_use pending) OR test word trigger
             const testWord = getSetting("permission_escalation_test_word");
             const isTestTrigger = testWord && testWord.length > 3 && detectTestWordInLastAssistant(capturedPath, testWord);
@@ -581,8 +581,8 @@ function detectIncompleteExits(db: ReturnType<typeof getDb>): void {
     // Skip if process is still alive (that's a stall, not incomplete exit)
     if (isSessionActive(session.session_id)) continue;
 
-    // Skip if session has a self-alarm — it manages its own resume
-    if (getSessionAlarm(session.session_id)) continue;
+    // Skip if session has a self-alarm or disabled babysitter
+    if (getSessionAlarm(session.session_id) || isBabysitterDisabled(session.session_id)) continue;
 
     // Skip if orchestrator is already handling this session
     const state = orch.status(session.session_id);

@@ -203,7 +203,8 @@ function initTables(db: Database.Database) {
       session_id TEXT PRIMARY KEY,
       message TEXT NOT NULL,
       check_after_ms INTEGER NOT NULL DEFAULT 180000,
-      set_at INTEGER NOT NULL
+      set_at INTEGER NOT NULL,
+      disabled INTEGER NOT NULL DEFAULT 0
     );
   `);
 
@@ -261,6 +262,12 @@ function initTables(db: Database.Database) {
   const actionColNames = new Set(actionCols.map((c) => c.name));
   if (!actionColNames.has("payload")) {
     db.exec("ALTER TABLE actions_log ADD COLUMN payload TEXT");
+  }
+  // session_alarms migrations
+  const alarmCols = db.prepare("PRAGMA table_info(session_alarms)").all() as { name: string }[];
+  const alarmColNames = new Set(alarmCols.map((c) => c.name));
+  if (!alarmColNames.has("disabled")) {
+    db.exec("ALTER TABLE session_alarms ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0");
   }
 }
 
@@ -651,25 +658,45 @@ export function insertPendingForgeSession(
 
 // ── Session Alarms ───────────────────────────────────────────────────────────────
 // A session can set a self-alarm: "if I'm inactive for X ms, resume me with this message."
-// While an alarm is active, the babysitter skips normal crash/stall handling for that session.
+// While an alarm is active (or disabled), the babysitter skips normal crash/stall handling.
+// DELETE /alarm sets disabled=1 — a permanent "leave me alone" signal until cleared.
 
 export interface SessionAlarm {
   session_id: string;
   message: string;
   check_after_ms: number;
   set_at: number;
+  disabled: number; // 1 = babysitter disabled for this session
 }
 
 export function setSessionAlarm(sessionId: string, message: string, checkAfterMs = 180_000): void {
   getDb()
-    .prepare(`INSERT OR REPLACE INTO session_alarms (session_id, message, check_after_ms, set_at) VALUES (?, ?, ?, ?)`)
+    .prepare(`INSERT OR REPLACE INTO session_alarms (session_id, message, check_after_ms, set_at, disabled) VALUES (?, ?, ?, ?, 0)`)
     .run(sessionId, message, checkAfterMs, Date.now());
 }
 
+/** Returns the alarm if active (not disabled). */
 export function getSessionAlarm(sessionId: string): SessionAlarm | null {
-  return (getDb()
+  const row = getDb()
     .prepare("SELECT * FROM session_alarms WHERE session_id = ?")
-    .get(sessionId) as SessionAlarm | undefined) ?? null;
+    .get(sessionId) as SessionAlarm | undefined;
+  if (!row || row.disabled) return null;
+  return row;
+}
+
+/** Returns true if babysitter is disabled for this session (disabled=1). */
+export function isBabysitterDisabled(sessionId: string): boolean {
+  const row = getDb()
+    .prepare("SELECT disabled FROM session_alarms WHERE session_id = ?")
+    .get(sessionId) as { disabled: number } | undefined;
+  return row?.disabled === 1;
+}
+
+/** Disable babysitter for this session. Persists until clearSessionAlarm(). */
+export function disableSessionAlarm(sessionId: string): void {
+  getDb()
+    .prepare(`INSERT OR REPLACE INTO session_alarms (session_id, message, check_after_ms, set_at, disabled) VALUES (?, '', 0, ?, 1)`)
+    .run(sessionId, Date.now());
 }
 
 export function clearSessionAlarm(sessionId: string): void {
@@ -678,6 +705,6 @@ export function clearSessionAlarm(sessionId: string): void {
 
 export function getExpiredAlarms(): SessionAlarm[] {
   return getDb()
-    .prepare("SELECT * FROM session_alarms WHERE set_at + check_after_ms <= ?")
+    .prepare("SELECT * FROM session_alarms WHERE disabled = 0 AND set_at + check_after_ms <= ?")
     .all(Date.now()) as SessionAlarm[];
 }

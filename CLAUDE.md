@@ -361,9 +361,14 @@ curl -s -X POST "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm" \
   -H "Content-Type: application/json" \
   -d '{"message": "Continue from step 3: run smoke tests, then deploy", "check_after_ms": 180000}'
 
-# Cancel after successful completion
+# Disable babysitter entirely for this session (use when you're done / waiting for user)
 curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
+
+# Re-enable babysitter (fully remove the disabled marker)
+curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm?clear=true"
 ```
+
+Every babysitter message already contains this disable curl — just copy and run it.
 
 Default timeout: 3 min. Default message: generic "continue from where you left off".
 
