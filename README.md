@@ -214,7 +214,10 @@ curl -s -X DELETE "http://localhost:3000/api/sessions/SESSION_ID/alarm"
 
 Sessions started via CSM get their ID injected automatically in `[Session Manager Context]`. Sessions started directly in terminal can find their ID:
 ```bash
+# by project dir
 curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq '.peers[0].session_id'
+# or just list all active sessions
+curl -s "http://localhost:3000/api/sessions/peers" | jq '.peers[] | {session_id, project_path}'
 ```
 
 The active alarm is visible in the session detail UI (⏰ indicator with remaining time + cancel button).

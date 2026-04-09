@@ -395,9 +395,8 @@ If you're running directly in a terminal (not started via CSM), find your ID:
 # Find your session by project directory
 curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq '.peers[] | {session_id, is_active}'
 
-# Or scan recent active sessions
-curl -s "http://localhost:3000/api/sessions?limit=10" | \
-  jq '[.sessions[] | select(.is_active) | {session_id, project_path}]'
+# Without path — returns all active sessions across all projects
+curl -s "http://localhost:3000/api/sessions/peers" | jq '.peers[] | {session_id, project_path}'
 ```
 
 ```bash

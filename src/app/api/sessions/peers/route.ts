@@ -9,10 +9,11 @@ export const dynamic = "force-dynamic";
  * GET /api/sessions/peers?path=/abs/path/to/repo
  *
  * Returns sessions in the same project_path as the given path.
+ * Without `path` — returns all active sessions across all projects.
  * Used for inter-session coordination (sessions choreography).
  *
  * Query params:
- *   path        — (required) absolute project_path to match
+ *   path        — (optional) absolute project_path to filter by
  *   exclude     — session_id to exclude (e.g. the caller itself)
  *   active_only — "false" to include inactive sessions (default: true)
  */
@@ -21,10 +22,6 @@ export async function GET(request: NextRequest) {
   const path = searchParams.get("path");
   const exclude = searchParams.get("exclude");
   const activeOnly = searchParams.get("active_only") !== "false";
-
-  if (!path) {
-    return NextResponse.json({ error: "path is required" }, { status: 400 });
-  }
 
   const db = getDb();
 
@@ -35,17 +32,29 @@ export async function GET(request: NextRequest) {
     activeIds = new Set();
   }
 
-  const rows = db
-    .prepare(
-      `SELECT session_id, project_path, project_dir, generated_title, custom_name,
-              git_branch, model, SUBSTR(last_message, 1, 200) as last_message,
-              modified_at, created_at, message_count, last_message_role
-       FROM sessions
-       WHERE project_path = ? AND archived = 0
-       ORDER BY modified_at DESC
-       LIMIT 20`
-    )
-    .all(path) as SessionRow[];
+  const rows = path
+    ? (db
+        .prepare(
+          `SELECT session_id, project_path, project_dir, generated_title, custom_name,
+                  git_branch, model, SUBSTR(last_message, 1, 200) as last_message,
+                  modified_at, created_at, message_count, last_message_role
+           FROM sessions
+           WHERE project_path = ? AND archived = 0
+           ORDER BY modified_at DESC
+           LIMIT 20`
+        )
+        .all(path) as SessionRow[])
+    : (db
+        .prepare(
+          `SELECT session_id, project_path, project_dir, generated_title, custom_name,
+                  git_branch, model, SUBSTR(last_message, 1, 200) as last_message,
+                  modified_at, created_at, message_count, last_message_role
+           FROM sessions
+           WHERE archived = 0
+           ORDER BY modified_at DESC
+           LIMIT 50`
+        )
+        .all() as SessionRow[]);
 
   const peers = rows
     .map((row) => ({
