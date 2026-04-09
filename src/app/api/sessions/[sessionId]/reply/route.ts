@@ -53,14 +53,27 @@ export async function POST(
 
   logAction("service", "reply", `msg_len:${message.length}`, sessionId);
 
-  // If a delegated child session is reporting back, mark its delegation as replied
-  if (delegatingSessionId) {
-    try {
+  // Mark delegation as replied.
+  // If the child passed delegating_session_id explicitly — use it directly.
+  // Otherwise auto-detect: any pending child that points to this session as parent.
+  try {
+    if (delegatingSessionId) {
       db.prepare(
         "UPDATE sessions SET delegation_status = 'replied' WHERE session_id = ? AND delegation_status = 'pending'"
       ).run(delegatingSessionId);
-    } catch { /* non-critical */ }
-  }
+    } else {
+      // Auto-detect: mark the oldest pending child of this parent as replied
+      db.prepare(`
+        UPDATE sessions SET delegation_status = 'replied'
+        WHERE session_id = (
+          SELECT session_id FROM sessions
+          WHERE reply_to_session_id = ? AND delegation_status = 'pending'
+          ORDER BY created_at ASC
+          LIMIT 1
+        )
+      `).run(sessionId);
+    }
+  } catch { /* non-critical */ }
 
   const agentType = (session as typeof session & { agent_type?: string }).agent_type ?? "claude";
 

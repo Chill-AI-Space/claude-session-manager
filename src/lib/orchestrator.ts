@@ -273,14 +273,13 @@ function buildDelegationPrompt(replyToSessionId: string, delegationTask: string 
     `On success:`,
     `  curl -s -X POST "${base}/api/sessions/${replyToSessionId}/reply" \\`,
     `    -H "Content-Type: application/json" \\`,
-    `    -d '{"message": "DONE: <brief summary of what was accomplished>", "delegating_session_id": "YOUR_SESSION_ID"}'`,
+    `    -d '{"message": "DONE: <brief summary of what was accomplished>"}'`,
     ``,
     `On failure:`,
     `  curl -s -X POST "${base}/api/sessions/${replyToSessionId}/reply" \\`,
     `    -H "Content-Type: application/json" \\`,
-    `    -d '{"message": "FAILED: <reason why the task could not be completed>", "delegating_session_id": "YOUR_SESSION_ID"}'`,
+    `    -d '{"message": "FAILED: <reason why the task could not be completed>"}'`,
     ``,
-    `Replace YOUR_SESSION_ID with your actual session ID (visible in [Session Manager Context] above as "Session ID: ...").`,
     `Do NOT finish your work without calling one of these. The parent session is waiting for your reply.`,
     "[End Delegation Contract]",
   ];
@@ -859,6 +858,30 @@ class SessionOrchestrator extends EventEmitter {
                 replyToSessionId,
                 delegationTask,
               });
+              // Insert a placeholder row immediately so the session is visible in /api/sessions
+              // while it's still running (full data is filled in by scanSessions on close)
+              try {
+                const db = getDb();
+                const now = new Date().toISOString();
+                const projectDir = projectPath.replace(/[\\/]/g, "-");
+                db.prepare(`
+                  INSERT OR IGNORE INTO sessions (
+                    session_id, jsonl_path, project_dir, project_path,
+                    first_prompt, created_at, modified_at, file_mtime, file_size, last_scanned_at,
+                    reply_to_session_id, delegation_task, delegation_status
+                  ) VALUES (
+                    ?, '', ?, ?,
+                    ?, ?, ?, ?, 0, ?,
+                    ?, ?, ?
+                  )
+                `).run(
+                  id, projectDir, projectPath,
+                  message.slice(0, 500), now, now, Date.now(), now,
+                  replyToSessionId ?? null,
+                  delegationTask ?? null,
+                  replyToSessionId ? "pending" : null,
+                );
+              } catch { /* non-critical — full data comes from scan on close */ }
               this.emit("session:started", { sessionId: id, projectPath });
             }
           },
@@ -880,13 +903,6 @@ class SessionOrchestrator extends EventEmitter {
           if (previousSessionId && sessionId) {
             try {
               getDb().prepare("UPDATE sessions SET previous_session_id = ? WHERE session_id = ?").run(previousSessionId, sessionId);
-            } catch { /* non-critical */ }
-          }
-          if (replyToSessionId && sessionId) {
-            try {
-              getDb().prepare(
-                "UPDATE sessions SET reply_to_session_id = ?, delegation_task = ?, delegation_status = 'pending' WHERE session_id = ?"
-              ).run(replyToSessionId, delegationTask ?? null, sessionId);
             } catch { /* non-critical */ }
           }
           generateTitleBatch(1).catch(() => {});
