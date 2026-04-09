@@ -15,7 +15,7 @@ import { EventEmitter } from "events";
 import spawn from "cross-spawn";
 import { getDb, getSetting, logAction } from "./db";
 import { getClaudePath } from "./claude-bin";
-import { getCleanEnv } from "./utils";
+import { getCleanEnv, claudeProjectsDir } from "./utils";
 import { createSSEStream, sseResponse } from "./claude-runner";
 import { killSessionProcesses, isSessionActive } from "./process-detector";
 import { openInTerminal } from "./terminal-launcher";
@@ -25,6 +25,7 @@ import * as dlog from "./debug-logger";
 import type { SessionRow } from "./types";
 import { initRelayIfEnabled } from "./relay-client";
 import fs from "fs";
+import path from "path";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -290,7 +291,7 @@ function buildDelegationPrompt(replyToSessionId: string, delegationTask: string 
 export function parseStreamLine(
   obj: Record<string, unknown>,
   send: (data: Record<string, unknown>) => void,
-  callbacks?: { onSessionId?: (id: string) => void; verbose?: boolean }
+  callbacks?: { onSessionId?: (id: string) => void; onText?: (text: string) => void; verbose?: boolean }
 ): void {
   const sid = (obj.session_id ?? obj.sessionId) as string | undefined;
   if (sid) callbacks?.onSessionId?.(sid);
@@ -306,6 +307,7 @@ export function parseStreamLine(
       for (const block of msg.content) {
         if (block.type === "text" && block.text) {
           send({ type: "text", text: block.text });
+          callbacks?.onText?.(block.text);
         } else if (block.type === "tool_use") {
           send({ type: "status", text: `Using tool: ${block.name}` });
           if (verbose && block.input) {
@@ -818,6 +820,7 @@ class SessionOrchestrator extends EventEmitter {
    */
   start(projectPath: string, message: string, correlationId?: string, verbose = false, model?: string, previousSessionId?: string, onCompleteUrl?: string, replyToSessionId?: string, delegationTask?: string): ReadableStream {
     let sessionId: string | null = null;
+    let lastMessageUpdate = 0; // throttle DB writes
     const base = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
     const contextPrompt = buildSessionContextPrompt(); // no sessionId yet for new sessions
     const delegationPrompt = replyToSessionId
@@ -837,6 +840,18 @@ class SessionOrchestrator extends EventEmitter {
       onLine: (obj, send) => {
         parseStreamLine(obj, send, {
           verbose,
+          onText: (text) => {
+            // Live-update last_message in DB so running sessions show current activity
+            const now = Date.now();
+            if (sessionId && now - lastMessageUpdate > 2000) {
+              lastMessageUpdate = now;
+              try {
+                getDb().prepare(
+                  "UPDATE sessions SET last_message = ?, modified_at = ? WHERE session_id = ?"
+                ).run(text.slice(0, 500), new Date().toISOString(), sessionId);
+              } catch { /* non-critical */ }
+            }
+          },
           onSessionId: (id) => {
             if (!sessionId) {
               sessionId = id;
@@ -864,18 +879,19 @@ class SessionOrchestrator extends EventEmitter {
                 const db = getDb();
                 const now = new Date().toISOString();
                 const projectDir = projectPath.replace(/[\\/]/g, "-");
+                const jsonlPath = path.join(claudeProjectsDir(), projectDir, `${id}.jsonl`);
                 db.prepare(`
                   INSERT OR IGNORE INTO sessions (
                     session_id, jsonl_path, project_dir, project_path,
                     first_prompt, created_at, modified_at, file_mtime, file_size, last_scanned_at,
                     reply_to_session_id, delegation_task, delegation_status
                   ) VALUES (
-                    ?, '', ?, ?,
+                    ?, ?, ?, ?,
                     ?, ?, ?, ?, 0, ?,
                     ?, ?, ?
                   )
                 `).run(
-                  id, projectDir, projectPath,
+                  id, jsonlPath, projectDir, projectPath,
                   message.slice(0, 500), now, now, Date.now(), now,
                   replyToSessionId ?? null,
                   delegationTask ?? null,
