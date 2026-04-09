@@ -326,6 +326,20 @@ When writing new code, follow these rules to keep Windows compatibility:
 
 You are running inside Claude Session Manager. The babysitter watches all sessions and auto-retries crashes and stalls — but you can take control yourself using two tools: **self-alarm** and **delegation**.
 
+### Приоритет задач — не спрашивай, действуй
+
+Если все задачи нужны и вопрос только в порядке выполнения — **не спрашивай**. Выбери наиболее логичный порядок (критический баг → блокеры → параллельные задачи) и начинай.
+
+Спрашивать о порядке имеет смысл только если одна задача **отменяет** другую. Если все нужны — порядок не меняет результат, только тратит время.
+
+Если всё же нужно уточнение — ставь себе alarm на 5 минут:
+```bash
+curl -s -X POST "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Нет ответа на вопрос о приоритете. Выбери наиболее логичный порядок и продолжай.", "check_after_ms": 300000}'
+```
+Нет ответа через 5 минут → бабиситтер вернёт тебя с инструкцией действовать самостоятельно.
+
 ### When to split into a new session
 
 If you notice a session starting to cover two separate projects or themes — delegate one immediately. Signs that it's time to split:
