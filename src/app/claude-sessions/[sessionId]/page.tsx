@@ -1331,22 +1331,6 @@ export default function SessionDetailPage({
             "border-border"
           }`}>
             <StatusBadge status={activityStatus} />
-            {isRunning && (
-              <span className="text-[11px] font-medium text-green-600 dark:text-green-400 shrink-0 flex items-center gap-1.5">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Working...
-              </span>
-            )}
-            {isInterrupted && (
-              <span className="text-[11px] font-medium text-orange-600 dark:text-orange-400 shrink-0">
-                Crashed — retrying
-              </span>
-            )}
-            {isWaiting && (
-              <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400 shrink-0">
-                Waiting for reply
-              </span>
-            )}
             <h2 className="text-sm font-medium flex-1 min-w-0 line-clamp-2">
               {data.metadata.custom_name ||
               data.metadata.first_prompt?.slice(0, 200) ||
