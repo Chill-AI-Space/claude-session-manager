@@ -191,6 +191,29 @@ Each web reply spawns a **one-shot** `claude -p` process. Claude receives your m
 - **Quick follow-ups** — web UI works great
 - **Autonomous web work** — enable Skip Permissions + set Max turns to 100-200
 
+## Session Self-Alarm
+
+Sessions can arm themselves with a wake-up alarm — useful for long-running or risky tasks where a crash or stall would lose context.
+
+```bash
+# Set alarm: if I'm inactive for 3 min, resume me with this message
+curl -s -X POST "http://localhost:3000/api/sessions/SESSION_ID/alarm" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Continue with the deploy — run smoke tests next", "check_after_ms": 180000}'
+
+# Cancel alarm
+curl -s -X DELETE "http://localhost:3000/api/sessions/SESSION_ID/alarm"
+```
+
+**How it works:**
+- While alarm is active → babysitter skips crash/stall auto-retry for that session
+- When time expires AND process is dead → babysitter resumes session with the alarm message
+- If process is still alive when time expires → alarm stays armed, fires when it eventually dies
+
+**Sessions get their own alarm URL automatically** via the `[Session Manager Context]` block injected into every session's system prompt — no need to look up the session ID manually.
+
+The active alarm is visible in the session detail UI (⏰ indicator with remaining time + cancel button).
+
 ## Architecture
 
 ```
