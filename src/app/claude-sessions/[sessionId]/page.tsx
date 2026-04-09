@@ -117,6 +117,7 @@ interface SessionDetailData {
   has_result?: boolean;
   file_age_ms?: number;
   process_vitals?: ProcessVitals | null;
+  alarm?: { session_id: string; message: string; check_after_ms: number; set_at: number } | null;
 }
 
 export default function SessionDetailPage({
@@ -1996,6 +1997,26 @@ export default function SessionDetailPage({
                 <span className="flex-1">{contextGuardError}</span>
                 <button className="text-red-400 hover:text-red-300 shrink-0" onClick={() => setContextGuardError(null)}>
                   <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+
+            {/* Self-alarm indicator */}
+            {data.alarm && (
+              <div className="font-mono text-[10px] flex items-center gap-1.5 text-amber-600 dark:text-amber-400" title={`Alarm message: ${data.alarm.message}`}>
+                <span>⏰</span>
+                <span>
+                  alarm in {Math.max(0, Math.round((data.alarm.check_after_ms - (Date.now() - data.alarm.set_at)) / 60_000))}m
+                </span>
+                <button
+                  className="opacity-50 hover:opacity-100 ml-0.5"
+                  title="Cancel alarm"
+                  onClick={async () => {
+                    await fetch(apiUrl(`/api/sessions/${sessionId}/alarm`), { method: "DELETE" });
+                    fetchSession();
+                  }}
+                >
+                  ✕
                 </button>
               </div>
             )}

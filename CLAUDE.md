@@ -380,6 +380,32 @@ Use `/api/sessions/{id}/reply` only when you want to stream the response back (S
 
 `/reply` returns an SSE stream — curl hangs until Claude finishes responding. `/api/orchestrator` with `type: "resume"` enqueues the message and returns `{taskId, ok: true}` immediately. Use orchestrator for inter-session events; use `/reply` only when you need to stream the response back to a UI or terminal.
 
+### Self-alarm — "wake me if I die"
+
+A session can arm itself so the babysitter resumes it with a specific message if it goes inactive. While the alarm is active, **babysitter skips all normal crash/stall/incomplete-exit handling** for that session — the alarm owns the recovery.
+
+Your session ID and the alarm endpoint are always in your system prompt under `[Session Manager Context]`.
+
+```bash
+# Set alarm — babysitter will resume you with this message if inactive for check_after_ms
+curl -s -X POST "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Continue with step 3: run smoke tests and deploy",
+    "check_after_ms": 180000
+  }'
+
+# Check current alarm
+curl -s "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
+
+# Cancel alarm
+curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
+```
+
+Defaults: `check_after_ms = 180000` (3 min), generic "continue from where you left off" message.
+
+**When to use:** Before a long risky operation (deploy, migration, external API call) — set an alarm with the next step. If you crash or the process is killed, you'll be resumed with context about what to do next. Cancel the alarm when the operation completes successfully.
+
 ### Delegation contract — spawn a sub-session and get results back
 
 When you need to delegate work to a session in a **different project folder**, use the delegation contract. The spawned session is contractually required to report back with DONE or FAILED.
