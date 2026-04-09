@@ -117,11 +117,9 @@ function detectWindows(): ActiveProcess[] {
     // Skip session manager's own processes
     if (command.includes("claude-session-manager") || command.includes("next dev")) continue;
 
-    // Extract --resume session ID (ASCII UUID — unaffected by encoding)
+    // Extract --resume UUID (Claude) or resume UUID (Codex)
     let sessionId: string | null = null;
-    const resumeMatch = command.match(
-      /--resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/
-    );
+    const resumeMatch = command.match(RESUME_RE);
     if (resumeMatch) sessionId = resumeMatch[1];
 
     processes.push({ pid, sessionId, cwd: null, command });
@@ -130,10 +128,13 @@ function detectWindows(): ActiveProcess[] {
   return processes;
 }
 
-/** Unix: use ps + lsof to find claude processes and their CWDs */
+/** Regex matching both `--resume UUID` (Claude) and `resume UUID` (Codex) */
+const RESUME_RE = /(?:--)?resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/;
+
+/** Unix: use ps + lsof to find claude/codex processes and their CWDs */
 function detectUnix(): ActiveProcess[] {
   const psOutput = execSync(
-    'ps axo pid,command | grep -E "(/| |^)claude( |$)" | grep -v grep | grep -v "claude-session-manager" | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
+    'ps axo pid,command | grep -E "(/| |^)(claude|codex)( |$)" | grep -v grep | grep -v "claude-session-manager" | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
     { encoding: "utf-8", timeout: 3000 }
   ).trim();
 
@@ -147,9 +148,7 @@ function detectUnix(): ActiveProcess[] {
     const command = match[2];
 
     let sessionId: string | null = null;
-    const resumeMatch = command.match(
-      /--resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/
-    );
+    const resumeMatch = command.match(RESUME_RE);
     if (resumeMatch) sessionId = resumeMatch[1];
 
     processes.push({ pid, sessionId, cwd: null, command });

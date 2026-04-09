@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import fs from "fs";
-import { getDb } from "@/lib/db";
+import { getDb, getSessionAlarm } from "@/lib/db";
 import { readSessionMessages, readSessionMessagesPaginated } from "@/lib/session-reader";
 import { SessionRow } from "@/lib/types";
 import { isSessionActive, getSessionVitals } from "@/lib/process-detector";
@@ -84,6 +84,7 @@ export async function GET(
       is_active: active,
       has_result: codexMessages.some(m => m.type === "assistant"),
       file_age_ms: Math.round(fileAgeMs),
+      process_vitals: getSessionVitals(sessionId),
     });
   }
 
@@ -178,6 +179,7 @@ export async function GET(
     has_result: sessionHasResult,
     file_age_ms: fileAgeMs === Infinity ? null : Math.round(fileAgeMs),
     process_vitals: vitals,
+    alarm: getSessionAlarm(sessionId),
   });
 }
 
