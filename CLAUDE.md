@@ -355,6 +355,53 @@ curl -s "http://localhost:3000/api/sessions/peers" | jq '.peers[] | {session_id,
 
 Set before any risky operation. While the alarm is active, **babysitter skips normal crash/stall handling** for your session — the alarm owns recovery.
 
+**Required use:**
+
+- If your session is visible in Session Manager UI, treat it as alarm-capable.
+- Before any long-running or failure-prone phase, either set a self-alarm or explicitly decide not to and know why.
+- Long multi-step work without either arming an alarm or stating a concrete reason not to is a process failure.
+
+**Set a self-alarm when all are true:**
+
+- the task is likely to continue for more than roughly 10 minutes
+- losing the current thread would slow recovery materially
+- the next useful step after a crash is already known
+
+Examples:
+
+- multi-repo implementation
+- deploy
+- migration
+- long debugging or regression pass
+- delegated orchestration work
+
+**Do not set a self-alarm when:**
+
+- the session is about to end normally
+- continuation would require fresh user input or approval
+- the next step is still ambiguous
+
+**Alarm message rule:**
+
+The alarm message should always include:
+
+- current repo or repos
+- current step
+- exact next action
+- critical safety constraints
+
+Template:
+
+```text
+Resume in <repo>. Current step: <what was being done>. Next: <exact next action>. Constraints: <important limits>.
+```
+
+Example:
+
+```text
+Resume in recruiting-agent / recruiting-ci-cd. Current step: stabilize recruiter query flow and regression docs. Next: inspect delegated findings, run targeted regression for vacancies/candidates/funnel/profile, and keep testing read-only. Constraints: do not send anything to candidates and do not perform irreversible actions.
+```
+
 ```bash
 # Arm — babysitter resumes you with this message if you go inactive for check_after_ms
 curl -s -X POST "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm" \
@@ -381,6 +428,12 @@ npm run migrate
 # 3. Disarm on success
 curl -s -X DELETE ".../alarm"
 ```
+
+Cancel the self-alarm immediately after:
+
+- the risky phase completed successfully
+- the session is intentionally handing control back to the user
+- the next continuation would require a different alarm message
 
 ---
 

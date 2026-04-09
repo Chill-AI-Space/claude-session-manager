@@ -1782,7 +1782,7 @@ export default function SessionDetailPage({
             </button>
           </div>
         )}
-        <div className={`shrink-0 border-l border-border flex flex-col bg-muted/30 transition-[width] duration-200 ease-in-out overflow-hidden ${rightPanelOpen ? "w-96" : "w-0 border-l-0"}`}>
+        <div className={`border-l border-border flex flex-col bg-muted/30 transition-[width] duration-200 ease-in-out overflow-hidden ${rightPanelOpen ? "w-96" : "shrink-0 w-0 border-l-0"}`}>
           {/* Panel header with collapse button */}
           <div className="flex items-center justify-end px-2 pt-1.5 shrink-0">
             <button
