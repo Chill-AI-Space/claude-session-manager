@@ -367,3 +367,47 @@ Use `/api/sessions/{id}/reply` only when you want to stream the response back (S
 ### Why orchestrator, not /reply
 
 `/reply` returns an SSE stream — curl hangs until Claude finishes responding. `/api/orchestrator` with `type: "resume"` enqueues the message and returns `{taskId, ok: true}` immediately. Use orchestrator for inter-session events; use `/reply` only when you need to stream the response back to a UI or terminal.
+
+### Delegation contract — spawn a sub-session and get results back
+
+When you need to delegate work to a session in a **different project folder**, use the delegation contract. The spawned session is contractually required to report back with DONE or FAILED.
+
+```bash
+# Spawn a delegated sub-session in another project folder
+curl -s -X POST "http://localhost:3000/api/sessions/start" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "/abs/path/to/other/project",
+    "message": "Fix the auth bug in login.ts and deploy",
+    "reply_to_session_id": "YOUR_SESSION_ID",
+    "delegation_task": "fix auth bug in /other/project",
+    "agent": "claude"
+  }'
+# Returns SSE stream. Read session_id from it, or fire-and-forget.
+```
+
+**What happens next:**
+- The spawned session receives a `[Delegation Contract]` block in its system prompt with exact curl commands to report back
+- When done, it calls `POST /api/sessions/YOUR_SESSION_ID/reply` with `{"message": "DONE: <summary>"}` or `{"message": "FAILED: <reason>"}`
+- If it crashes and exhausts retries → babysitter auto-sends `FAILED:` to you
+- If it finishes but forgets to report → babysitter pings it every 10 min (up to 3×), then auto-sends `FAILED:` to you
+
+**Agent types** (pass as `"agent"` field):
+- `"claude"` — Claude Code CLI (default, omit field)
+- `"codex"` — OpenAI Codex TUI
+- `"forge"` — Forge agent
+
+**Reporting back from inside a delegated session:**
+```bash
+# Success
+curl -s -X POST "http://localhost:3000/api/sessions/PARENT_SESSION_ID/reply" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "DONE: fixed auth bug, committed to branch fix/auth-token"}'
+
+# Failure
+curl -s -X POST "http://localhost:3000/api/sessions/PARENT_SESSION_ID/reply" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "FAILED: cannot reproduce the bug — login.ts has no auth logic"}'
+```
+
+**Your session ID** is always injected into your system prompt under `[Session Manager Context]` → `Session ID: <uuid>`. Use it when reporting back so the system can track the delegation.
