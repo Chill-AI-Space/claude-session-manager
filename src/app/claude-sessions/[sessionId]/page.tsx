@@ -2013,7 +2013,8 @@ export default function SessionDetailPage({
                   <span className="opacity-40">·</span>
                   <span title="Resident memory">RAM {data.process_vitals.mem_mb} MB</span>
                   <span className="opacity-40">·</span>
-                  <span title="Process uptime">
+                  <span title="Process uptime (how long the claude process has been running)">
+                    {"up "}
                     {data.process_vitals.elapsed_secs < 60
                       ? `${data.process_vitals.elapsed_secs}s`
                       : data.process_vitals.elapsed_secs < 3600
@@ -2021,15 +2022,30 @@ export default function SessionDetailPage({
                         : `${Math.floor(data.process_vitals.elapsed_secs / 3600)}h`}
                   </span>
                 </div>
-                <div
-                  className={data.process_vitals.has_established_tcp ? "text-blue-600 dark:text-blue-400" : "opacity-40"}
-                  title={data.process_vitals.has_established_tcp
-                    ? `${data.process_vitals.tcp_connections.length} ESTABLISHED TCP connections`
-                    : "No active TCP connections"}
-                >
-                  {data.process_vitals.has_established_tcp
-                    ? `API: ${data.process_vitals.tcp_connections.length} conn`
-                    : "API: idle"}
+                <div className="flex items-center gap-2">
+                  <span
+                    className={data.process_vitals.has_established_tcp ? "text-blue-600 dark:text-blue-400" : "opacity-40"}
+                    title={data.process_vitals.has_established_tcp
+                      ? `${data.process_vitals.tcp_connections.length} ESTABLISHED TCP connections`
+                      : "No active TCP connections"}
+                  >
+                    {data.process_vitals.has_established_tcp
+                      ? `API: ${data.process_vitals.tcp_connections.length} conn`
+                      : "API: idle"}
+                  </span>
+                  {data.file_age_ms != null && (
+                    <>
+                      <span className="opacity-40">·</span>
+                      <span title="Time since Claude last wrote to the JSONL log (last tool call / message output)">
+                        {"write "}
+                        {data.file_age_ms < 60_000
+                          ? `${Math.round(data.file_age_ms / 1000)}s ago`
+                          : data.file_age_ms < 3_600_000
+                            ? `${Math.floor(data.file_age_ms / 60_000)}m ago`
+                            : `${Math.floor(data.file_age_ms / 3_600_000)}h ago`}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             )}
