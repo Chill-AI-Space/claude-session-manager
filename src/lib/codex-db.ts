@@ -147,20 +147,22 @@ function trimToolOutput(output: string): string {
 
 interface Turn {
   timestamp: string;
-  textBlocks: string[];
-  /** tool_use + matching tool_result blocks interleaved */
-  toolBlocks: import("./types").ContentBlock[];
-  /** call_id → index in toolBlocks for pairing outputs */
-  callIndex: Map<string, number>;
+  /** All blocks in chronological order — text and tools interleaved as they appeared */
+  blocks: import("./types").ContentBlock[];
+  /** Tracks already-added text to avoid duplicates from parallel event streams */
+  seenText: Set<string>;
 }
 
 /** Read Codex session messages from the rollout JSONL file.
  *
  * Groups by turn (task_started → task_complete):
  *  - user_message  → right-aligned user bubble
- *  - agent_message → text block in assistant bubble
- *  - function_call → tool_use block (with ToolUseBlock rendering)
- *  - function_call_output → tool_result block paired by call_id
+ *  - agent_message → text block, interleaved with tools in chronological order
+ *  - function_call → tool_use block
+ *  - function_call_output → tool_result block
+ *
+ * Blocks are kept in arrival order so the final summary text appears at the
+ * bottom of the assistant bubble (after all tool calls), matching the terminal.
  */
 export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
   if (!rolloutPath || !fs.existsSync(rolloutPath)) return [];
@@ -178,18 +180,10 @@ export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
 
   function emitTurn() {
     if (!turn) return;
-    const hasText = turn.textBlocks.some(t => t.trim());
-    const hasTools = turn.toolBlocks.length > 0;
-    if (!hasText && !hasTools) { turn = null; return; }
-
-    const content: import("./types").ContentBlock[] = [];
-    // Text first, then tools (mirrors Claude rendering order)
-    for (const t of turn.textBlocks) {
-      if (t.trim()) content.push({ type: "text", text: t });
-    }
-    for (const b of turn.toolBlocks) {
-      content.push(b);
-    }
+    const content = turn.blocks.filter(
+      b => b.type !== "text" || (b as { type: "text"; text: string }).text.trim()
+    );
+    if (content.length === 0) { turn = null; return; }
     messages.push({
       uuid: `codex-${idx++}`,
       type: "assistant",
@@ -225,61 +219,47 @@ export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
           content: msg,
         });
       } else if (pt === "task_started") {
-        // Begin accumulating a new agent turn
         emitTurn();
-        turn = { timestamp: ts, textBlocks: [], toolBlocks: [], callIndex: new Map() };
+        turn = { timestamp: ts, blocks: [], seenText: new Set() };
       } else if (pt === "agent_message") {
         const msg = p.message as string | undefined;
         if (!msg) continue;
         // Auto-create turn if user_message arrived without a new task_started
-        if (!turn) turn = { timestamp: ts, textBlocks: [], toolBlocks: [], callIndex: new Map() };
-        // Deduplicate: skip if this text already added in turn
-        if (!turn.textBlocks.includes(msg)) {
-          turn.textBlocks.push(msg);
+        if (!turn) turn = { timestamp: ts, blocks: [], seenText: new Set() };
+        if (!turn.seenText.has(msg)) {
+          turn.seenText.add(msg);
+          turn.blocks.push({ type: "text", text: msg });
         }
       } else if (pt === "task_complete") {
         emitTurn();
       }
     } else if (type === "response_item") {
       if (pt === "function_call") {
-        if (!turn) turn = { timestamp: ts, textBlocks: [], toolBlocks: [], callIndex: new Map() };
+        if (!turn) turn = { timestamp: ts, blocks: [], seenText: new Set() };
         const name = p.name as string | undefined;
         const argsStr = (p.arguments as string | undefined) ?? "{}";
         const callId = (p.call_id as string | undefined) ?? `call-${idx}`;
         if (!name) continue;
         const { name: normName, input } = normalizeCodexTool(name, argsStr);
-        const toolUseIdx = turn.toolBlocks.length;
-        turn.callIndex.set(callId, toolUseIdx);
-        turn.toolBlocks.push({ type: "tool_use", id: callId, name: normName, input });
+        turn.blocks.push({ type: "tool_use", id: callId, name: normName, input });
       } else if (pt === "function_call_output") {
         if (!turn) continue;
         const callId = p.call_id as string | undefined;
         const output = trimToolOutput((p.output as string | undefined) ?? "");
-        // Append a tool_result block — MessageBubble matches it by tool_use_id
-        turn.toolBlocks.push({
-          type: "tool_result",
-          tool_use_id: callId ?? "",
-          content: output,
-        });
+        turn.blocks.push({ type: "tool_result", tool_use_id: callId ?? "", content: output });
       } else if (pt === "custom_tool_call") {
-        // MCP tool calls
-        if (!turn) turn = { timestamp: ts, textBlocks: [], toolBlocks: [], callIndex: new Map() };
+        if (!turn) turn = { timestamp: ts, blocks: [], seenText: new Set() };
         const name = (p.name as string | undefined) ?? "mcp_tool";
         const input = (p.input ?? {}) as Record<string, unknown>;
         const callId = (p.call_id as string | undefined) ?? `mcp-${idx}`;
-        turn.callIndex.set(callId, turn.toolBlocks.length);
-        turn.toolBlocks.push({ type: "tool_use", id: callId, name, input });
+        turn.blocks.push({ type: "tool_use", id: callId, name, input });
       } else if (pt === "custom_tool_call_output") {
         if (!turn) continue;
         const callId = p.call_id as string | undefined;
         const output = trimToolOutput(
           typeof p.output === "string" ? p.output : JSON.stringify(p.output ?? "")
         );
-        turn.toolBlocks.push({
-          type: "tool_result",
-          tool_use_id: callId ?? "",
-          content: output,
-        });
+        turn.blocks.push({ type: "tool_result", tool_use_id: callId ?? "", content: output });
       }
     }
   }
