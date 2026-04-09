@@ -198,6 +198,13 @@ function initTables(db: Database.Database) {
       FOREIGN KEY (group_id) REFERENCES context_source_groups(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_context_sources_group ON context_sources(group_id);
+
+    CREATE TABLE IF NOT EXISTS session_alarms (
+      session_id TEXT PRIMARY KEY,
+      message TEXT NOT NULL,
+      check_after_ms INTEGER NOT NULL DEFAULT 180000,
+      set_at INTEGER NOT NULL
+    );
   `);
 
   // Migrations: add columns that may not exist in older DBs
@@ -640,4 +647,37 @@ export function insertPendingForgeSession(
       now, now, Date.now(), now
     );
   } catch { /* non-critical — real data arrives via scanner */ }
+}
+
+// ── Session Alarms ───────────────────────────────────────────────────────────────
+// A session can set a self-alarm: "if I'm inactive for X ms, resume me with this message."
+// While an alarm is active, the babysitter skips normal crash/stall handling for that session.
+
+export interface SessionAlarm {
+  session_id: string;
+  message: string;
+  check_after_ms: number;
+  set_at: number;
+}
+
+export function setSessionAlarm(sessionId: string, message: string, checkAfterMs = 180_000): void {
+  getDb()
+    .prepare(`INSERT OR REPLACE INTO session_alarms (session_id, message, check_after_ms, set_at) VALUES (?, ?, ?, ?)`)
+    .run(sessionId, message, checkAfterMs, Date.now());
+}
+
+export function getSessionAlarm(sessionId: string): SessionAlarm | null {
+  return (getDb()
+    .prepare("SELECT * FROM session_alarms WHERE session_id = ?")
+    .get(sessionId) as SessionAlarm | undefined) ?? null;
+}
+
+export function clearSessionAlarm(sessionId: string): void {
+  getDb().prepare("DELETE FROM session_alarms WHERE session_id = ?").run(sessionId);
+}
+
+export function getExpiredAlarms(): SessionAlarm[] {
+  return getDb()
+    .prepare("SELECT * FROM session_alarms WHERE set_at + check_after_ms <= ?")
+    .all(Date.now()) as SessionAlarm[];
 }

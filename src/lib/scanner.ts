@@ -1,4 +1,4 @@
-import { getDb, getSetting, indexSessionContent, logAction } from "./db";
+import { getDb, getSetting, indexSessionContent, logAction, getSessionAlarm, clearSessionAlarm, getExpiredAlarms } from "./db";
 import { glob } from "glob";
 import fs from "fs";
 import path from "path";
@@ -376,6 +376,8 @@ export async function scanSessions(
             const { isSessionActive } = require("./process-detector");
             // Process still alive = Claude is executing, not crashed — skip
             if (isSessionActive(sessionId)) return;
+            // Session has a self-alarm — it manages its own resume, skip babysitter
+            if (getSessionAlarm(sessionId)) return;
             logAction("service", capturedIsRepeated ? "repeated_crash_detected" : "crash_detected", `jsonl:${capturedPath}`, sessionId);
             getOrchestrator().enqueueCrashRetry(sessionId, capturedPath);
           });
@@ -397,6 +399,8 @@ export async function scanSessions(
           const capturedHasResult = metadata.hasResult;
           postTxActions.push(() => {
             const { isSessionActive } = require("./process-detector");
+            // Session has a self-alarm — it manages its own resume, skip babysitter
+            if (getSessionAlarm(capturedSessionId)) return;
             // Check for permission wait (tool_use pending) OR test word trigger
             const testWord = getSetting("permission_escalation_test_word");
             const isTestTrigger = testWord && testWord.length > 3 && detectTestWordInLastAssistant(capturedPath, testWord);
@@ -524,6 +528,9 @@ export async function scanSessions(
   // Post-scan: detect incomplete exits from DB (catches files skipped by incremental scan)
   detectIncompleteExits(db);
 
+  // Post-scan: fire expired session self-alarms
+  checkExpiredAlarms(db);
+
   // Post-scan: ping delegated sessions that haven't reported back
   detectStalledDelegations(db);
 
@@ -573,6 +580,9 @@ function detectIncompleteExits(db: ReturnType<typeof getDb>): void {
   for (const session of candidates) {
     // Skip if process is still alive (that's a stall, not incomplete exit)
     if (isSessionActive(session.session_id)) continue;
+
+    // Skip if session has a self-alarm — it manages its own resume
+    if (getSessionAlarm(session.session_id)) continue;
 
     // Skip if orchestrator is already handling this session
     const state = orch.status(session.session_id);
@@ -700,6 +710,35 @@ function detectStalledDelegations(db: ReturnType<typeof getDb>): void {
         priority: "normal",
       });
     }
+  }
+}
+
+/**
+ * Fire expired session self-alarms.
+ * When a session sets an alarm, it means: "if I'm inactive for check_after_ms, resume me."
+ * Fires only when: time elapsed AND session process is dead AND orchestrator is idle for it.
+ */
+function checkExpiredAlarms(db: ReturnType<typeof getDb>): void {
+  const { isSessionActive } = require("./process-detector");
+  const orch = getOrchestrator();
+  const alarms = getExpiredAlarms();
+
+  for (const alarm of alarms) {
+    // Session still alive — don't interrupt it, alarm stays active
+    if (isSessionActive(alarm.session_id)) continue;
+
+    // Orchestrator already handling this session
+    const state = orch.status(alarm.session_id);
+    if (state && !["idle", "completed", "failed"].includes(state.phase)) continue;
+
+    logAction("service", "alarm_fired", alarm.message.slice(0, 100), alarm.session_id);
+    orch.enqueue({
+      sessionId: alarm.session_id,
+      type: "resume",
+      message: alarm.message,
+      priority: "high",
+    });
+    clearSessionAlarm(alarm.session_id);
   }
 }
 
