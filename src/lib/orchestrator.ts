@@ -254,6 +254,10 @@ function buildSessionContextPrompt(sessionId?: string): string | undefined {
   if (sessionId) {
     lines.push(`Session ID: ${sessionId}`);
     lines.push(`Callback URL: POST ${base}/api/sessions/${sessionId}/reply  body: {"message":"..."}`);
+    lines.push(`Self-alarm: POST ${base}/api/sessions/${sessionId}/alarm  body: {"message":"<what to do when resumed>","check_after_ms":180000}`);
+    lines.push(`  — If you set an alarm and then die/stall, babysitter will resume you with your message after check_after_ms.`);
+    lines.push(`  — While alarm is active, babysitter skips normal crash/stall handling for your session.`);
+    lines.push(`  — Cancel: DELETE ${base}/api/sessions/${sessionId}/alarm`);
   } else {
     lines.push(`Callback URL pattern: POST ${base}/api/sessions/{SESSION_ID}/reply  body: {"message":"..."}`);
     lines.push("(Your SESSION_ID is assigned at session start and visible in your conversation metadata.)");
