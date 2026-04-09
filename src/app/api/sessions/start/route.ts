@@ -62,10 +62,12 @@ export async function POST(request: NextRequest) {
     const { getCodexPath } = await import("@/lib/codex-bin");
     const { openInTerminal } = await import("@/lib/terminal-launcher");
     const { listCodexThreads } = await import("@/lib/codex-db");
+    const { getSetting } = await import("@/lib/db");
     const bin = getCodexPath();
+    const codexSkipFlag = getSetting("dangerously_skip_permissions") === "true" ? " --dangerously-bypass-approvals-and-sandbox" : "";
     const modelFlag = model ? ` -c model="${model}"` : "";
     const safeMsg = message.trim().replace(/"/g, '\\"');
-    const shellCmd = `cd "${projectPath}" && "${bin}"${modelFlag} "${safeMsg}"`;
+    const shellCmd = `cd "${projectPath}" && "${bin}"${codexSkipFlag}${modelFlag} "${safeMsg}"`;
     const stream = new ReadableStream({
       async start(controller) {
         try {

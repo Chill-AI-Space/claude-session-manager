@@ -66,9 +66,11 @@ export async function POST(
     // Codex is a TUI — open terminal with `codex resume SESSION_ID "message"`
     const { getCodexPath } = await import("@/lib/codex-bin");
     const { openInTerminal } = await import("@/lib/terminal-launcher");
+    const { getSetting } = await import("@/lib/db");
     const bin = getCodexPath();
+    const codexSkipFlag = getSetting("dangerously_skip_permissions") === "true" ? " --dangerously-bypass-approvals-and-sandbox" : "";
     const safeMsg = message.replace(/"/g, '\\"');
-    const shellCmd = `cd "${session.project_path}" && "${bin}" resume "${sessionId}" "${safeMsg}"`;
+    const shellCmd = `cd "${session.project_path}" && "${bin}"${codexSkipFlag} resume "${sessionId}" "${safeMsg}"`;
     const stream = new ReadableStream({
       async start(controller) {
         try {

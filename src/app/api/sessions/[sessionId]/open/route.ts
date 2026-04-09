@@ -34,7 +34,8 @@ export async function POST(
   let shellCmd: string;
   if (isCodex) {
     const bin = getCodexPath();
-    shellCmd = `cd "${cwd}" && "${bin}" resume "${sessionId}"`;
+    const codexSkipFlag = skipPermissions ? " --dangerously-bypass-approvals-and-sandbox" : "";
+    shellCmd = `cd "${cwd}" && "${bin}"${codexSkipFlag} resume "${sessionId}"`;
   } else if (isForge) {
     const bin = getForgePath();
     const model = (session as typeof session & { model?: string | null }).model || null;
