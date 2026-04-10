@@ -215,10 +215,11 @@ function babysitterLabel(on) {
 
 // --- Tray (best-effort: if GUI is unavailable, skip silently) ---
 let tray = null;
-// seq_id mapping: 0=Open, 1=Babysitter, 2=separator, 3=Quit
+// seq_id mapping: 0=Open, 1=Open by ID, 2=Babysitter, 3=separator, 4=Quit
 const MENU_OPEN = 0;
-const MENU_BABYSITTER = 1;
-const MENU_QUIT = 3;
+const MENU_OPEN_BY_ID = 1;
+const MENU_BABYSITTER = 2;
+const MENU_QUIT = 4;
 
 let trayAttempts = 0;
 const MAX_TRAY_ATTEMPTS = 5;
@@ -235,6 +236,7 @@ function startTray() {
         tooltip: 'Claude Session Manager',
         items: [
           { title: 'Open Session Manager', tooltip: 'Open in browser', checked: false, enabled: true },
+          { title: 'Open session by ID…', tooltip: 'Paste session ID to open it', checked: false, enabled: true },
           { title: babysitterLabel(true), tooltip: 'Toggle auto-retry & auto-continue', checked: true, enabled: true },
           Systray.separator,
           { title: 'Quit', tooltip: 'Stop server and quit', checked: false, enabled: true },
@@ -256,6 +258,23 @@ function startTray() {
           execSync(openCmd);
         } catch (e) {
           logErr(`Open failed: ${e.message}`);
+        }
+      } else if (action.seq_id === MENU_OPEN_BY_ID) {
+        if (isWin) return; // osascript is macOS-only
+        try {
+          const result = execSync(
+            `osascript -e 'set sid to text returned of (display dialog "Paste session ID:" default answer "" with title "Open Session")'`,
+            { encoding: 'utf8' }
+          ).trim();
+          if (!result) return;
+          const sessionUrl = `http://localhost:${PORT}/claude-sessions/${result.trim()}`;
+          execSync(`open "${sessionUrl}"`);
+          log(`Opened session: ${result.trim()}`);
+        } catch (e) {
+          // User cancelled the dialog — that's fine
+          if (!e.message.includes('User canceled')) {
+            logErr(`Open by ID failed: ${e.message}`);
+          }
         }
       } else if (action.seq_id === MENU_BABYSITTER) {
         try {
