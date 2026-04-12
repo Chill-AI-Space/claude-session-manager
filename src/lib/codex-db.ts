@@ -269,3 +269,23 @@ export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
 
   return messages;
 }
+
+/**
+ * Returns true if the Codex JSONL rollout file ends with a task_complete event.
+ * Used to reliably detect when Codex has finished its task (process may still linger).
+ */
+export function codexSessionCompleted(rolloutPath: string): boolean {
+  if (!rolloutPath || !fs.existsSync(rolloutPath)) return false;
+  try {
+    const content = fs.readFileSync(rolloutPath, "utf-8");
+    const lines = content.split("\n").filter(l => l.trim());
+    // Scan last 10 lines for task_complete (it's usually one of the last events)
+    for (let i = Math.max(0, lines.length - 10); i < lines.length; i++) {
+      try {
+        const ev = JSON.parse(lines[i]);
+        if (ev?.payload?.type === "task_complete") return true;
+      } catch { /* skip malformed */ }
+    }
+  } catch { /* ignore */ }
+  return false;
+}

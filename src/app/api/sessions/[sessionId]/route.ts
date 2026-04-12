@@ -65,7 +65,7 @@ export async function GET(
   // ── Codex sessions: read from JSONL rollout file ─────────────────────────
   const agentType = (session as SessionRow & { agent_type?: string }).agent_type ?? "claude";
   if (agentType === "codex") {
-    const { readCodexMessages } = await import("@/lib/codex-db");
+    const { readCodexMessages, codexSessionCompleted } = await import("@/lib/codex-db");
     const codexMessages = readCodexMessages(session.jsonl_path);
     let fileMtime = session.file_mtime;
     try {
@@ -73,7 +73,9 @@ export async function GET(
       fileMtime = fs2.statSync(session.jsonl_path).mtimeMs;
     } catch { /* use cached */ }
     const fileAgeMs = Date.now() - (fileMtime || 0);
-    const active = fileAgeMs < 5 * 60 * 1000;
+    // task_complete in JSONL = session definitively done, regardless of file age or process state
+    const completed = codexSessionCompleted(session.jsonl_path);
+    const active = !completed && fileAgeMs < 5 * 60 * 1000;
     return Response.json({
       session_id: session.session_id,
       project_path: session.project_path,
@@ -84,7 +86,7 @@ export async function GET(
       is_active: active,
       has_result: codexMessages.some(m => m.type === "assistant"),
       file_age_ms: Math.round(fileAgeMs),
-      process_vitals: getSessionVitals(sessionId) ?? getSessionVitalsByCwd(session.project_path),
+      process_vitals: active ? (getSessionVitals(sessionId) ?? getSessionVitalsByCwd(session.project_path)) : null,
     });
   }
 
