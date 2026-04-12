@@ -374,12 +374,18 @@ Pass enough context in `message` that the new session can work independently —
 
 ### Finding your session ID
 
-If started via Session Manager (web UI or API) — your ID is in the `[Session Manager Context]` block at the top of your system prompt. Use it directly.
+If started via Session Manager (web UI or API) — your ID is in the `[Session Manager Context]` block at the top of your system prompt. Use it directly. **Do not get it from API responses or conversation history — those may be other sessions' IDs.**
 
-If running directly in a terminal:
+To verify your ID programmatically (e.g. before setting an alarm):
 ```bash
-# By project dir (fastest)
-curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq '.peers[0].session_id'
+# Returns {"session_id":"...", "ok":true} — compare with [Session Manager Context]
+curl -s "http://localhost:3000/api/sessions/my-id?path=$(pwd)"
+```
+
+If running directly in a terminal (no `[Session Manager Context]` block):
+```bash
+# Dedicated endpoint (simplest)
+curl -s "http://localhost:3000/api/sessions/my-id?path=$(pwd)" | jq -r '.session_id'
 
 # All active sessions (if you don't know your path)
 curl -s "http://localhost:3000/api/sessions/peers" | jq '.peers[] | {session_id, project_path}'

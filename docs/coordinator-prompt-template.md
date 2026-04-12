@@ -22,10 +22,10 @@ My plan file: /abs/path/to/PLAN.md
 
 Не бери ID из переписки, из ответов API, из делегированных сессий — только из `[Session Manager Context]`.
 
-Сначала убедись что взял правильный ID:
+Если хочешь быстро проверить ID программно:
 ```bash
-# Должен вернуть ТВОЙ session_id — сравни с тем что в [Session Manager Context]
-curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | python3 -c "import json,sys; [print(p['session_id']) for p in json.load(sys.stdin).get('peers',[])]"
+# Возвращает {"session_id":"...", "ok":true} — должен совпасть с [Session Manager Context]
+curl -s "http://localhost:3000/api/sessions/my-id?path=$(pwd)"
 ```
 
 Теперь выполни alarm **с ТВОИМ ID**:
