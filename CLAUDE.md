@@ -518,6 +518,38 @@ curl -s -X POST "http://localhost:3000/api/orchestrator" \
 
 Use orchestrator (not `/reply`) for inter-session signals — `/reply` blocks until Claude finishes responding.
 
+### Codex и другие TUI-агенты — как работать с делегированием
+
+Codex (и другие TUI-агенты) **не получают `[Session Manager Context]` автоматически** — этот блок инжектируется только в Claude-сессии через `--append-system-prompt`. Поэтому:
+
+- Codex не знает свой `session_id` автоматически
+- Codex не умеет ставить себе alarm
+- Babysitter не пингует Codex-сессии при зависании
+
+**Но это не проблема для отчётности** — callback для Codex тот же самый механизм: просто HTTP POST наружу. Codex умеет делать curl, значит умеет отчитываться.
+
+**Как передать Codex инструкции по делегированию:**
+
+Скажи Codex явно в начале задачи:
+```
+Read /Users/vova/Documents/GitHub/claude-session-manager/CLAUDE.md
+section "Sessions Choreography" → "Delegation contract".
+
+If you need to delegate work to another session, use agent: "claude" (not "codex")
+to ensure Claude Code is launched.
+
+Your callback URL for reporting back: POST http://localhost:3000/api/sessions/PARENT_ID/reply
+body: {"message": "DONE: <summary>"} or {"message": "FAILED: <reason>"}
+```
+
+**Как Codex находит свой session_id** (если нужен):
+```bash
+curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq '.peers[0].session_id'
+```
+
+**Почему `agent: "claude"` важно при делегировании из Codex:**
+Codex → запускает Claude (не Codex) → Claude получает контекст автоматически, умеет alarm, умеет delegation contract. Цепочка Codex → Claude даёт полный набор инструментов дочерней сессии.
+
 ### Git discipline (multi-session)
 
 Any code that runs or deploys **must be committed** first. Not in git — doesn't exist from other sessions' perspective. Use branches for in-progress work — they're visible in `git branch`.
