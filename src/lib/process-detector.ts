@@ -263,6 +263,19 @@ export function getSessionVitals(sessionId: string): ProcessVitals | null {
   return getProcessVitals(proc.pid);
 }
 
+/**
+ * Fallback for agents started without --resume (e.g. fresh Codex sessions).
+ * Finds any detected process whose CWD matches projectPath and returns its vitals.
+ */
+export function getSessionVitalsByCwd(projectPath: string): ProcessVitals | null {
+  if (isWin) return null;
+  const proc = detectActiveClaudeSessions().find(
+    (p) => p.cwd && (p.cwd === projectPath || p.cwd === projectPath.replace(/\\/g, "/"))
+  );
+  if (!proc) return null;
+  return getProcessVitals(proc.pid);
+}
+
 export function killSessionProcesses(sessionId: string): number[] {
   cachedResult = null;
   const matching = detectActiveClaudeSessions().filter((p) => p.sessionId === sessionId);

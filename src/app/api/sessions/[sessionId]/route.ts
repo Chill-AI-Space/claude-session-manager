@@ -3,7 +3,7 @@ import fs from "fs";
 import { getDb, getSessionAlarm } from "@/lib/db";
 import { readSessionMessages, readSessionMessagesPaginated } from "@/lib/session-reader";
 import { SessionRow } from "@/lib/types";
-import { isSessionActive, getSessionVitals } from "@/lib/process-detector";
+import { isSessionActive, getSessionVitals, getSessionVitalsByCwd } from "@/lib/process-detector";
 import { hasResultEvent } from "@/lib/orchestrator";
 import { resolveNode, proxyJSON } from "@/lib/remote-compute";
 
@@ -84,7 +84,7 @@ export async function GET(
       is_active: active,
       has_result: codexMessages.some(m => m.type === "assistant"),
       file_age_ms: Math.round(fileAgeMs),
-      process_vitals: getSessionVitals(sessionId),
+      process_vitals: getSessionVitals(sessionId) ?? getSessionVitalsByCwd(session.project_path),
     });
   }
 
