@@ -140,7 +140,7 @@ function normalizeCodexTool(
 
 /** Trim function_call_output to a reasonable display size */
 function trimToolOutput(output: string): string {
-  const MAX = 3000;
+  const MAX = 12000;
   if (output.length <= MAX) return output;
   return output.slice(0, MAX) + `\n…(${output.length} chars total)`;
 }
