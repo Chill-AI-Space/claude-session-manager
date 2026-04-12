@@ -55,27 +55,48 @@ cat /abs/path/to/PLAN.md
 
 ---
 
-### ШАГ 2 — Запускай воркера
+### ШАГ 2 — Запускай воркеров по схеме: Codex пишет → Claude ревьюит
 
-Для каждой итерации — запускай одного воркера. Сам код не пиши.
+**Каждая итерация состоит из двух последовательных шагов.** Сам код не пиши.
 
-**Claude-воркер** (решения, архитектура, отладка):
+#### Шаг 2.1 — Codex-воркер (пишет код)
+
 ```bash
 curl -s -X POST "http://localhost:3000/api/sessions/start" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "/abs/path/to/project",
-    "message": "Context: <что сделано до>. Your task: <конкретная задача итерации>. Constraints: <ограничения>. Report DONE or FAILED when done.",
+    "message": "Context: <что сделано до>. Your task: <конкретная задача — что именно реализовать>. Constraints: <ограничения, например: не трогай prod, не деплой>. Report DONE: <что сделал, какие файлы изменил> or FAILED: <причина>.",
     "reply_to_session_id": "YOUR_SESSION_ID",
-    "delegation_task": "iteration N: <описание>",
+    "delegation_task": "iteration N: implement <описание>",
+    "agent": "codex"
+  }'
+```
+
+**Жди ответа Codex.** Когда Codex ответит DONE — переходи к шагу 2.2.
+
+Если Codex ответил FAILED — запиши в PLAN.md, реши: retry или skip, двигайся дальше.
+
+#### Шаг 2.2 — Claude-воркер (ревьюит)
+
+Запускай только после DONE от Codex. Передавай в message полный ответ Codex.
+
+```bash
+curl -s -X POST "http://localhost:3000/api/sessions/start" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "/abs/path/to/project",
+    "message": "Context: Codex just implemented iteration N. Codex report: <полный текст DONE-ответа от Codex>. Your task: review the changes. Check: correctness, edge cases, regressions, code quality. Do NOT write code — only review. Report DONE: <findings, verdict: OK or NEEDS_FIX + what to fix> or FAILED: <critical blocker>.",
+    "reply_to_session_id": "YOUR_SESSION_ID",
+    "delegation_task": "iteration N: review",
     "agent": "claude"
   }'
 ```
 
-**Codex-воркер** (большие рефакторы, механические изменения файлов):
-```bash
-# то же самое, agent: "codex"
-```
+**Жди ответа ревьюера.** Когда ревьюер ответит:
+- `DONE: verdict OK` → итерация закрыта, переходи к следующей
+- `DONE: verdict NEEDS_FIX` → запусти новый Codex-воркер с описанием правок
+- `FAILED` → запиши в PLAN.md, реши: retry или skip
 
 ---
 
@@ -86,9 +107,9 @@ curl -s -X POST "http://localhost:3000/api/sessions/start" \
 Когда воркер ответит `DONE` или `FAILED` — Session Manager автоматически тебя разбудит.
 
 При каждом пробуждении:
-1. Обнови alarm (новый контекст итерации)
+1. Обнови alarm (новый контекст: номер итерации, текущий шаг — implement или review)
 2. Запиши результат воркера в PLAN.md
-3. Запусти следующую итерацию
+3. Запусти следующий шаг по схеме
 4. Заверши тёрн
 
 ---
@@ -108,10 +129,26 @@ curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
 ### Правила
 
 - **Не пиши код сам** — только делегируй
-- **Alarm обновляй после каждой итерации** с актуальным состоянием
+- **Codex пишет, Claude ревьюит** — никогда не наоборот, никогда не один агент делает оба шага
+- **Ревьюер не пишет код** — только анализирует и выносит вердикт (OK / NEEDS_FIX)
+- **Alarm обновляй после каждого шага** с актуальным состоянием (implement или review, итерация N)
 - **Каждому воркеру передавай полный контекст** — у него нет памяти предыдущих сессий
 - **Если воркер ответил FAILED** — реши: retry или skip, запиши в PLAN.md, двигайся дальше
-- **Используй `agent: "claude"` по умолчанию**, `"codex"` для механических задач
+
+---
+
+### Шаблон alarm-сообщения
+
+Обновляй после каждого шага:
+
+```
+Ты координатор. Итерация N из M.
+Текущий шаг: [implement / review].
+Последнее от воркера: <одна строка summary>.
+Следующее действие: запустить [Codex на task X / Claude-ревьюер с результатом Codex].
+Папка проекта: /abs/path/to/project.
+Ограничения: <если есть>.
+```
 
 ---
 
@@ -121,3 +158,4 @@ curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
 - `reply_to_session_id` = воркер разбудит тебя сам когда закончит
 - Бабиситтер не трогает тебя пока ты ждёшь (text-only last message = no auto-resume)
 - Если воркер умрёт без ответа — бабиситтер пинганёт его 3 раза, потом пришлёт тебе FAILED автоматически
+- Два агента на каждую итерацию = Codex не пропустит своих ошибок мимо ревью
