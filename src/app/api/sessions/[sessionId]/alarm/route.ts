@@ -22,19 +22,20 @@ export async function POST(
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   const { sessionId } = await params;
-  let body: { message?: string; check_after_ms?: number } = {};
+  let body: { message?: string; check_after_ms?: number; mode?: string } = {};
   try {
     body = await request.json();
   } catch { /* empty body is fine */ }
 
   const message = body.message || DEFAULT_MESSAGE;
   const checkAfterMs = body.check_after_ms ?? DEFAULT_CHECK_AFTER_MS;
+  const mode = body.mode === "once" ? "once" : "persistent";
 
   if (typeof checkAfterMs !== "number" || checkAfterMs < 1000) {
     return Response.json({ error: "check_after_ms must be a number >= 1000" }, { status: 400 });
   }
 
-  setSessionAlarm(sessionId, message, checkAfterMs);
+  setSessionAlarm(sessionId, message, checkAfterMs, mode);
   const alarm = getSessionAlarm(sessionId);
   return Response.json({ ok: true, alarm });
 }

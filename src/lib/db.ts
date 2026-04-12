@@ -269,6 +269,9 @@ function initTables(db: Database.Database) {
   if (!alarmColNames.has("disabled")) {
     db.exec("ALTER TABLE session_alarms ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0");
   }
+  if (!alarmColNames.has("mode")) {
+    db.exec("ALTER TABLE session_alarms ADD COLUMN mode TEXT NOT NULL DEFAULT 'persistent'");
+  }
 }
 
 export interface ActionLogEntry {
@@ -660,6 +663,13 @@ export function insertPendingForgeSession(
 // A session can set a self-alarm: "if I'm inactive for X ms, resume me with this message."
 // While an alarm is active (or disabled), the babysitter skips normal crash/stall handling.
 // DELETE /alarm sets disabled=1 — a permanent "leave me alone" signal until cleared.
+//
+// Two modes:
+//   "persistent" (default) — fires when the session has been idle for check_after_ms
+//     since its last activity (file_mtime). After firing, re-arms itself automatically.
+//     Use this for coordinators: set once, never needs to be re-set.
+//   "once" — fires once when set_at + check_after_ms elapses, then deletes itself.
+//     Use for explicit one-shot reminders.
 
 export interface SessionAlarm {
   session_id: string;
@@ -667,12 +677,25 @@ export interface SessionAlarm {
   check_after_ms: number;
   set_at: number;
   disabled: number; // 1 = babysitter disabled for this session
+  mode: "persistent" | "once";
 }
 
-export function setSessionAlarm(sessionId: string, message: string, checkAfterMs = 180_000): void {
+export function setSessionAlarm(
+  sessionId: string,
+  message: string,
+  checkAfterMs = 180_000,
+  mode: "persistent" | "once" = "persistent"
+): void {
   getDb()
-    .prepare(`INSERT OR REPLACE INTO session_alarms (session_id, message, check_after_ms, set_at, disabled) VALUES (?, ?, ?, ?, 0)`)
-    .run(sessionId, message, checkAfterMs, Date.now());
+    .prepare(`INSERT OR REPLACE INTO session_alarms (session_id, message, check_after_ms, set_at, disabled, mode) VALUES (?, ?, ?, ?, 0, ?)`)
+    .run(sessionId, message, checkAfterMs, Date.now(), mode);
+}
+
+/** Reset the clock on a persistent alarm after it fires (so it won't fire again immediately). */
+export function rearmPersistentAlarm(sessionId: string): void {
+  getDb()
+    .prepare("UPDATE session_alarms SET set_at = ? WHERE session_id = ? AND mode = 'persistent'")
+    .run(Date.now(), sessionId);
 }
 
 /** Returns the alarm if active (not disabled). */
@@ -695,7 +718,7 @@ export function isBabysitterDisabled(sessionId: string): boolean {
 /** Disable babysitter for this session. Persists until clearSessionAlarm(). */
 export function disableSessionAlarm(sessionId: string): void {
   getDb()
-    .prepare(`INSERT OR REPLACE INTO session_alarms (session_id, message, check_after_ms, set_at, disabled) VALUES (?, '', 0, ?, 1)`)
+    .prepare(`INSERT OR REPLACE INTO session_alarms (session_id, message, check_after_ms, set_at, disabled, mode) VALUES (?, '', 0, ?, 1, 'once')`)
     .run(sessionId, Date.now());
 }
 
@@ -703,8 +726,32 @@ export function clearSessionAlarm(sessionId: string): void {
   getDb().prepare("DELETE FROM session_alarms WHERE session_id = ?").run(sessionId);
 }
 
+/**
+ * Returns alarms that should fire now.
+ *
+ * "once" alarms: fire when set_at + check_after_ms <= now (time since set).
+ * "persistent" alarms: fire when MAX(file_mtime, set_at) + check_after_ms <= now
+ *   i.e. the session has been idle for check_after_ms since its last activity.
+ *   file_mtime is the JSONL file's last modification time — best proxy for "session last did something".
+ */
 export function getExpiredAlarms(): SessionAlarm[] {
+  const now = Date.now();
   return getDb()
-    .prepare("SELECT * FROM session_alarms WHERE disabled = 0 AND set_at + check_after_ms <= ?")
-    .all(Date.now()) as SessionAlarm[];
+    .prepare(`
+      SELECT sa.*
+      FROM session_alarms sa
+      LEFT JOIN sessions s ON s.session_id = sa.session_id
+      WHERE sa.disabled = 0
+        AND (
+          (sa.mode = 'once' AND sa.set_at + sa.check_after_ms <= ?)
+          OR
+          (sa.mode = 'persistent' AND
+            CASE WHEN COALESCE(s.file_mtime, sa.set_at) > sa.set_at
+              THEN COALESCE(s.file_mtime, sa.set_at)
+              ELSE sa.set_at
+            END + sa.check_after_ms <= ?
+          )
+        )
+    `)
+    .all(now, now) as SessionAlarm[];
 }

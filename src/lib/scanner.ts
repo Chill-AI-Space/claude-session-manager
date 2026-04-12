@@ -1,4 +1,4 @@
-import { getDb, getSetting, indexSessionContent, logAction, getSessionAlarm, clearSessionAlarm, getExpiredAlarms, isBabysitterDisabled } from "./db";
+import { getDb, getSetting, indexSessionContent, logAction, getSessionAlarm, clearSessionAlarm, rearmPersistentAlarm, getExpiredAlarms, isBabysitterDisabled } from "./db";
 import { glob } from "glob";
 import fs from "fs";
 import path from "path";
@@ -731,14 +731,20 @@ function checkExpiredAlarms(db: ReturnType<typeof getDb>): void {
     const state = orch.status(alarm.session_id);
     if (state && !["idle", "completed", "failed"].includes(state.phase)) continue;
 
-    logAction("service", "alarm_fired", alarm.message.slice(0, 100), alarm.session_id);
+    logAction("service", "alarm_fired", `[${alarm.mode}] ${alarm.message.slice(0, 100)}`, alarm.session_id);
     orch.enqueue({
       sessionId: alarm.session_id,
       type: "resume",
       message: alarm.message,
       priority: "high",
     });
-    clearSessionAlarm(alarm.session_id);
+    if (alarm.mode === "once") {
+      // One-shot: consume the alarm
+      clearSessionAlarm(alarm.session_id);
+    } else {
+      // Persistent: re-arm the clock so it won't fire again until session goes idle for check_after_ms
+      rearmPersistentAlarm(alarm.session_id);
+    }
   }
 }
 
