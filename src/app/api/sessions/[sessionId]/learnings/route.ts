@@ -120,6 +120,8 @@ export async function POST(
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return Response.json({ error: msg }, { status: 500 });
+    // Pass through 4xx errors from the AI API (e.g., location not supported, invalid key)
+    const clientErr = /(?:error|status)\s+4\d\d/i.test(msg);
+    return Response.json({ error: msg }, { status: clientErr ? 400 : 500 });
   }
 }

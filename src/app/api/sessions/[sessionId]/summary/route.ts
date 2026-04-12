@@ -94,6 +94,7 @@ export async function POST(
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return Response.json({ error: msg }, { status: 500 });
+    const clientErr = /(?:error|status)\s+4\d\d/i.test(msg);
+    return Response.json({ error: msg }, { status: clientErr ? 400 : 500 });
   }
 }

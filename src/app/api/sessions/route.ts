@@ -3,10 +3,14 @@ import { getDb } from "@/lib/db";
 import { getActiveSessionIds } from "@/lib/process-detector";
 import { SessionRow, SessionListItem } from "@/lib/types";
 import { fetchAllRemoteSessions } from "@/lib/remote-compute";
+import { ensureCodexBackgroundScanner } from "@/lib/codex-background-scanner";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  // Ensure Codex sessions are scanned periodically (no-op if already running)
+  ensureCodexBackgroundScanner();
+
   const searchParams = request.nextUrl.searchParams;
   const project = searchParams.get("project");
   const search = searchParams.get("search");

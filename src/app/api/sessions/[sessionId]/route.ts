@@ -53,6 +53,56 @@ export async function GET(
     .get(sessionId) as SessionRow | undefined;
 
   if (!session) {
+    // Fallback: session may be running but not yet scanned — check Codex DB directly
+    const { getCodexThread, readCodexMessages, codexSessionCompleted } = await import("@/lib/codex-db");
+    const codexThread = getCodexThread(sessionId);
+    if (codexThread) {
+      const codexMessages = readCodexMessages(codexThread.rollout_path);
+      let fileMtime = codexThread.updated_at * 1000;
+      try {
+        fileMtime = fs.statSync(codexThread.rollout_path).mtimeMs;
+      } catch { /* use DB timestamp */ }
+      const fileAgeMs = Date.now() - fileMtime;
+      const completed = codexSessionCompleted(codexThread.rollout_path);
+      const active = !completed && fileAgeMs < 5 * 60 * 1000;
+      // Index it now so it appears in the session list (fire-and-forget)
+      import("@/lib/codex-background-scanner").then(({ ensureCodexBackgroundScanner }) => {
+        ensureCodexBackgroundScanner();
+      }).catch(() => {});
+      return Response.json({
+        session_id: sessionId,
+        project_path: codexThread.cwd,
+        messages: codexMessages,
+        messages_start: 0,
+        messages_total: codexMessages.length,
+        metadata: {
+          session_id: sessionId,
+          project_path: codexThread.cwd,
+          jsonl_path: codexThread.rollout_path,
+          agent_type: "codex",
+          generated_title: codexThread.title || null,
+          model: codexThread.model || null,
+          created_at: new Date(codexThread.created_at * 1000).toISOString(),
+          modified_at: new Date(fileMtime).toISOString(),
+          file_mtime: fileMtime,
+          first_prompt: codexThread.first_user_message || null,
+          last_message_role: null,
+          tags: "[]",
+          pinned: 0,
+          archived: 0,
+          custom_name: null,
+          has_result: 0,
+          delegation_status: null,
+          reply_to_session_id: null,
+        },
+        is_active: active,
+        has_result: codexMessages.some((m) => m.type === "assistant"),
+        file_age_ms: Math.round(fileAgeMs),
+        process_vitals: active
+          ? (getSessionVitals(sessionId) ?? getSessionVitalsByCwd(codexThread.cwd))
+          : null,
+      });
+    }
     return Response.json(
       { error: "Session not found" },
       { status: 404 }
