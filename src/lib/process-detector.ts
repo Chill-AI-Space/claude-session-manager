@@ -41,8 +41,9 @@ function pathToProjectDir(cwdPath: string): string {
   return cwdPath.replace(/[\\/]/g, "-");
 }
 
-/** Find the most recently modified JSONL session file in a project dir */
-function findMostRecentSession(projectDir: string): string | null {
+/** Find the most recently modified JSONL session file in a project dir.
+ *  Skips session IDs in `exclude` (already claimed by another process). */
+function findMostRecentSession(projectDir: string, exclude?: Set<string>): string | null {
   const dir = path.join(CLAUDE_DIR, projectDir);
   try {
     const files = fs.readdirSync(dir).filter((f) =>
@@ -52,6 +53,8 @@ function findMostRecentSession(projectDir: string): string | null {
 
     let newest: { name: string; mtime: number } | null = null;
     for (const file of files) {
+      const sessionId = file.replace(".jsonl", "");
+      if (exclude?.has(sessionId)) continue;
       const mtime = fs.statSync(path.join(dir, file)).mtimeMs;
       if (!newest || mtime > newest.mtime) {
         newest = { name: file, mtime };
@@ -71,11 +74,17 @@ export function detectActiveClaudeSessions(): ActiveProcess[] {
   try {
     const processes = isWin ? detectWindows() : detectUnix();
 
-    // For processes without a session ID, find via most-recently-modified JSONL
+    // For processes without a session ID, find via most-recently-modified JSONL.
+    // Build exclusion set from sessions already claimed by --resume processes so that
+    // -p sessions in the same directory don't collide with an active --resume session.
+    const claimed = new Set<string>(
+      processes.filter((p) => p.sessionId).map((p) => p.sessionId!)
+    );
     for (const proc of processes) {
       if (proc.sessionId || !proc.cwd) continue;
       const projectDir = pathToProjectDir(proc.cwd);
-      proc.sessionId = findMostRecentSession(projectDir);
+      proc.sessionId = findMostRecentSession(projectDir, claimed);
+      if (proc.sessionId) claimed.add(proc.sessionId);
     }
 
     // Deduplicate: if multiple PIDs resolved to same session, keep one
