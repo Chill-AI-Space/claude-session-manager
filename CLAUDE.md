@@ -550,6 +550,85 @@ curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq '.peers[0].s
 **Почему `agent: "claude"` важно при делегировании из Codex:**
 Codex → запускает Claude (не Codex) → Claude получает контекст автоматически, умеет alarm, умеет delegation contract. Цепочка Codex → Claude даёт полный набор инструментов дочерней сессии.
 
+### Длинный ping-pong между сессиями (Codex ↔ Claude)
+
+Когда нужно гонять большой план итерациями между агентами — используй паттерн **координатор + эстафета**.
+
+#### Почему не прямой ping-pong
+
+Прямой ping-pong (A запускает B, B запускает A, ...) хрупкий: если одна сессия падает — цепочка рвётся, и никто не знает где остановились. Вместо этого:
+
+#### Паттерн: координатор держит план, воркеры делают итерации
+
+```
+Coordinator (Claude, долгоживущий)
+  └── запускает Codex-воркер с задачей на итерацию
+        └── Codex работает, отчитывается DONE/FAILED
+  └── смотрит результат, запускает следующую итерацию
+        └── Claude-воркер или снова Codex
+  └── ... пока план не закрыт
+```
+
+**Координатор** — Claude-сессия с alarm. Он знает весь план и решает кто делает следующую итерацию.
+
+**Воркер** — делает одну итерацию, отчитывается, умирает. Stateless.
+
+#### Coordinator: что нужно сделать в начале
+
+```bash
+# 1. Вооружить alarm на весь процесс
+curl -s -X POST "http://localhost:3000/api/sessions/YOUR_ID/alarm" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Продолжай план. Текущая итерация: [N]. Следующий воркер: Codex в /path/to/project. Контекст: [краткое резюме где остановились].",
+    "check_after_ms": 600000
+  }'
+
+# 2. Запустить воркера
+curl -s -X POST "http://localhost:3000/api/sessions/start" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "/path/to/project",
+    "message": "Iteration N: [конкретная задача]. When done, report back: DONE: <summary> or FAILED: <reason>",
+    "reply_to_session_id": "YOUR_ID",
+    "delegation_task": "iteration N: [краткое описание]",
+    "agent": "claude"
+  }'
+
+# 3. Ждать reply от воркера (babysitter пинганёт если воркер молчит)
+# 4. Получив DONE/FAILED — обновить alarm, запустить следующую итерацию
+# 5. Когда план закрыт — снять alarm
+curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_ID/alarm"
+```
+
+#### Что передавать воркеру в message
+
+Воркер stateless — он должен получить в `message` всё что нужно:
+- Что было сделано до него (контекст)
+- Конкретная задача на эту итерацию
+- Где лежит код / какой бранч
+- Критические ограничения (не деплоить, не трогать прод, etc.)
+- Callback инструкция уже инжектится автоматически через Delegation Contract
+
+#### Что делать если что-то упало
+
+- **Воркер упал** → babysitter авто-отправит `FAILED:` координатору → координатор получит сообщение и решит: retry или skip
+- **Координатор упал** → его alarm сработает → babysitter резюмирует с контекстом где остановился
+- **Оба упали** → смотришь последние сессии в UI, читаешь `last_message`, восстанавливаешь контекст вручную
+
+#### Alarm-сообщение координатора — шаблон
+
+```
+Ты координатор большого плана. Текущий статус:
+- Итерация: N из ~M
+- Последнее что сделал воркер: [краткое]
+- Следующая итерация: [что нужно сделать]
+- Воркер: claude / codex, папка: /path/to/project
+- Критические ограничения: [если есть]
+
+Запусти следующего воркера и продолжай план.
+```
+
 ### Git discipline (multi-session)
 
 Any code that runs or deploys **must be committed** first. Not in git — doesn't exist from other sessions' perspective. Use branches for in-progress work — they're visible in `git branch`.
