@@ -134,7 +134,7 @@ const RESUME_RE = /(?:--)?resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 /** Unix: use ps + lsof to find claude/codex processes and their CWDs */
 function detectUnix(): ActiveProcess[] {
   const psOutput = execSync(
-    'ps axo pid,command | grep -E "(/| |^)(claude|codex)( |$)" | grep -v grep | grep -v "claude-session-manager" | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
+    'ps axo pid,command | grep -E "(/| |^)(claude|codex)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
     { encoding: "utf-8", timeout: 3000 }
   ).trim();
 
