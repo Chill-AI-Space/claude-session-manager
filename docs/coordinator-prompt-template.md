@@ -17,8 +17,18 @@ My plan file: /abs/path/to/PLAN.md
 
 ### ШАГ 0 — ALARM (выполни ПЕРВЫМ, до чего угодно)
 
-Найди свой session_id в блоке `[Session Manager Context]` вверху системного промпта.
-Выполни этот curl **прямо сейчас**:
+**Свой session_id — ТОЛЬКО из блока `[Session Manager Context]` в самом верху твоего системного промпта.**
+Строка выглядит так: `Session ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+
+Не бери ID из переписки, из ответов API, из делегированных сессий — только из `[Session Manager Context]`.
+
+Сначала убедись что взял правильный ID:
+```bash
+# Должен вернуть ТВОЙ session_id — сравни с тем что в [Session Manager Context]
+curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | python3 -c "import json,sys; [print(p['session_id']) for p in json.load(sys.stdin).get('peers',[])]"
+```
+
+Теперь выполни alarm **с ТВОИМ ID**:
 
 ```bash
 curl -s -X POST "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm" \
@@ -29,7 +39,7 @@ curl -s -X POST "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm" \
   }'
 ```
 
-Убедись что в ответе `"ok":true`. Если нет — повтори. **Не продолжай пока alarm не установлен.**
+Убедись что в ответе `"ok":true`. **Не продолжай пока alarm не установлен.**
 
 Обновляй alarm после каждой итерации с актуальным контекстом (номер итерации, что сделано).
 
