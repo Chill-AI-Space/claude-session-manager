@@ -78,10 +78,13 @@ export async function POST(request: NextRequest) {
         "",
         "[Delegation Contract]",
         `You were spawned to handle a delegated task${delegation_task ? `: "${delegation_task}"` : ""}.`,
+        `Your role: EXECUTE this task. Do NOT delegate it to another session.`,
+        `The /reply URL below is ONLY for reporting your own result back — not for forwarding tasks.`,
         `When done, report back by running ONE of these:`,
         `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "DONE: <summary>"}'`,
         `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "FAILED: <reason>"}'`,
         `Do NOT finish without calling one of these.`,
+        `Do NOT use this URL to forward tasks or messages — only DONE or FAILED reports.`,
         "[End Delegation Contract]",
       ].join("\n");
     }

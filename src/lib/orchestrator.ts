@@ -273,6 +273,7 @@ function buildDelegationPrompt(replyToSessionId: string, delegationTask: string 
   const lines = [
     "[Delegation Contract]",
     `You were spawned to handle a delegated task${delegationTask ? `: "${delegationTask}"` : ""}.`,
+    `Your role: EXECUTE this task yourself. Do NOT delegate or forward it to another session.`,
     `When your task is complete — success or failure — you MUST report back by calling one of these curl commands:`,
     ``,
     `On success:`,
@@ -285,6 +286,7 @@ function buildDelegationPrompt(replyToSessionId: string, delegationTask: string 
     `    -H "Content-Type: application/json" \\`,
     `    -d '{"message": "FAILED: <reason why the task could not be completed>"}'`,
     ``,
+    `IMPORTANT: The /reply URL above is ONLY for reporting your own result (DONE/FAILED). Do NOT use it to forward tasks or pass messages to the parent. Only DONE or FAILED.`,
     `Do NOT finish your work without calling one of these. The parent session is waiting for your reply.`,
     "[End Delegation Contract]",
   ];
