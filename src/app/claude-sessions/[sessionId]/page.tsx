@@ -2021,9 +2021,10 @@ export default function SessionDetailPage({
               </div>
             )}
 
-            {/* Process vitals */}
-            {data.is_active && data.process_vitals && (
+            {/* Process vitals — show when active (with metrics) or recently finished (< 5min, no process) */}
+            {(data.is_active || (data.file_age_ms != null && data.file_age_ms < 5 * 60_000)) && (
               <div className="font-mono text-[10px] text-muted-foreground/70 space-y-1">
+                {data.process_vitals ? (<>
                 <div className="flex items-center gap-2">
                   <span
                     className={data.process_vitals.cpu_percent > 5 ? "text-green-600 dark:text-green-400" : ""}
@@ -2068,6 +2069,23 @@ export default function SessionDetailPage({
                     </>
                   )}
                 </div>
+                </>) : (
+                /* No process found — show write time so user knows it recently ran */
+                <div className="flex items-center gap-2 opacity-50">
+                  <span title="Process exited">process ended</span>
+                  {data.file_age_ms != null && (
+                    <>
+                      <span className="opacity-40">·</span>
+                      <span title="Time since last JSONL write">
+                        {"write "}
+                        {data.file_age_ms < 60_000
+                          ? `${Math.round(data.file_age_ms / 1000)}s ago`
+                          : `${Math.floor(data.file_age_ms / 60_000)}m ago`}
+                      </span>
+                    </>
+                  )}
+                </div>
+                )}
               </div>
             )}
             <div className="text-[10px] text-muted-foreground/40 flex items-center gap-3">
