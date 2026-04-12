@@ -64,11 +64,29 @@ export async function POST(request: NextRequest) {
     const { getCodexPath } = await import("@/lib/codex-bin");
     const { openInTerminal } = await import("@/lib/terminal-launcher");
     const { listCodexThreads } = await import("@/lib/codex-db");
-    const { getSetting } = await import("@/lib/db");
+    const { getSetting, getDb } = await import("@/lib/db");
     const bin = getCodexPath();
     const codexSkipFlag = getSetting("dangerously_skip_permissions") === "true" ? " --dangerously-bypass-approvals-and-sandbox" : "";
     const modelFlag = model ? ` -c model="${model}"` : "";
-    const safeMsg = message.trim().replace(/"/g, '\\"');
+
+    // Codex has no --append-system-prompt, so inject delegation contract into the message itself
+    let fullMessage = message.trim();
+    if (reply_to_session_id) {
+      const base = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
+      fullMessage += [
+        "",
+        "",
+        "[Delegation Contract]",
+        `You were spawned to handle a delegated task${delegation_task ? `: "${delegation_task}"` : ""}.`,
+        `When done, report back by running ONE of these:`,
+        `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "DONE: <summary>"}'`,
+        `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "FAILED: <reason>"}'`,
+        `Do NOT finish without calling one of these.`,
+        "[End Delegation Contract]",
+      ].join("\n");
+    }
+
+    const safeMsg = fullMessage.replace(/"/g, '\\"');
     const shellCmd = `cd "${projectPath}" && "${bin}"${codexSkipFlag}${modelFlag} "${safeMsg}"`;
     const stream = new ReadableStream({
       async start(controller) {
@@ -88,8 +106,6 @@ export async function POST(request: NextRequest) {
             const newThread = threads.find((t) => !existingIds.has(t.id) && t.created_at >= startedAt);
             if (newThread) {
               sessionId = newThread.id;
-              // Upsert session into main DB so the UI can navigate to it
-              const { getDb } = await import("@/lib/db");
               const fsLib = await import("fs");
               const osLib = await import("os");
               const db = getDb();
@@ -105,13 +121,15 @@ export async function POST(request: NextRequest) {
                   git_branch, claude_version, model, agent_type,
                   first_prompt, last_message, last_message_role, has_result,
                   message_count, total_input_tokens, total_output_tokens,
-                  created_at, modified_at, file_mtime, file_size, last_scanned_at
+                  created_at, modified_at, file_mtime, file_size, last_scanned_at,
+                  reply_to_session_id, delegation_task, delegation_status
                 ) VALUES (
                   @session_id, @jsonl_path, @project_dir, @project_path,
                   @git_branch, NULL, @model, 'codex',
                   @first_prompt, @last_message, NULL, 1,
                   0, @total_input_tokens, 0,
-                  @created_at, @modified_at, @file_mtime, 0, @last_scanned_at
+                  @created_at, @modified_at, @file_mtime, 0, @last_scanned_at,
+                  @reply_to_session_id, @delegation_task, @delegation_status
                 ) ON CONFLICT(session_id) DO UPDATE SET
                   jsonl_path = @jsonl_path, model = @model,
                   modified_at = @modified_at, file_mtime = @file_mtime,
@@ -123,13 +141,16 @@ export async function POST(request: NextRequest) {
                 project_path: cwd,
                 git_branch: newThread.git_branch ?? null,
                 model: modelLabel,
-                first_prompt: newThread.first_user_message?.slice(0, 500) ?? null,
-                last_message: newThread.first_user_message?.slice(0, 500) ?? null,
+                first_prompt: message.trim().slice(0, 500),
+                last_message: message.trim().slice(0, 500),
                 total_input_tokens: newThread.tokens_used ?? 0,
                 created_at: new Date(newThread.created_at * 1000).toISOString(),
                 modified_at: new Date(fileMtime).toISOString(),
                 file_mtime: fileMtime,
                 last_scanned_at: now,
+                reply_to_session_id: reply_to_session_id ?? null,
+                delegation_task: delegation_task ?? null,
+                delegation_status: reply_to_session_id ? "pending" : null,
               });
               controller.enqueue(`data: ${JSON.stringify({ type: "session_id", session_id: sessionId })}\n\n`);
               break;
