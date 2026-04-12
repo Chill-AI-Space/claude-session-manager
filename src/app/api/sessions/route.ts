@@ -120,7 +120,8 @@ export async function GET(request: NextRequest) {
     modified_at: row.modified_at,
     total_input_tokens: row.total_input_tokens,
     total_output_tokens: row.total_output_tokens,
-    is_active: (row as SessionRow & { agent_type?: string }).agent_type === "forge"
+    is_active: (row as SessionRow & { agent_type?: string }).agent_type === "forge" ||
+               (row as SessionRow & { agent_type?: string }).agent_type === "codex"
       ? (Date.now() - row.file_mtime) < 5 * 60 * 1000
       : activeIds.has(row.session_id),
     last_message_role: (row as SessionRow & { last_message_role?: string }).last_message_role ?? null,
