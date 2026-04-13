@@ -108,13 +108,21 @@ export async function POST(request: NextRequest) {
           const { terminal } = await openInTerminal(shellCmd);
           controller.enqueue(`data: ${JSON.stringify({ type: "status", status: `Codex opened in ${terminal}` })}\n\n`);
 
-          // Poll for the new Codex thread (up to 15 seconds)
+          // Poll for the new Codex thread (up to 45 seconds)
           let sessionId: string | null = null;
-          for (let i = 0; i < 30; i++) {
+          for (let i = 0; i < 90; i++) {
             await new Promise((r) => setTimeout(r, 500));
             const threads = listCodexThreads();
-            const newThread = threads.find((t) => !existingIds.has(t.id) && t.created_at >= startedAt);
+            // Rely on snapshot exclusion alone — created_at filter can misfire due to clock skew
+            const newThread = threads.find((t) => !existingIds.has(t.id) && t.rollout_path);
             if (newThread) {
+              // Wait a bit more if first_user_message isn't populated yet
+              // (Codex may create the thread before recording the first prompt)
+              if (!newThread.first_user_message && i < 80) {
+                await new Promise((r) => setTimeout(r, 300));
+                const refreshed = listCodexThreads().find((t) => t.id === newThread.id);
+                if (refreshed?.first_user_message) Object.assign(newThread, refreshed);
+              }
               sessionId = newThread.id;
               const fsLib = await import("fs");
               const osLib = await import("os");
