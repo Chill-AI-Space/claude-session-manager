@@ -130,10 +130,10 @@ function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
                 text.trim().length > 5
               ) {
                 if (!firstPrompt) {
-                  firstPrompt = text.slice(0, 500);
+                  firstPrompt = text.slice(0, 1000);
                 }
                 // Always update — last one wins
-                lastMessage = text.slice(0, 300);
+                lastMessage = text.slice(-1000);
                 if (textPartsSize < MAX_FTS_TEXT) {
                   textParts.push(text);
                   textPartsSize += text.length;

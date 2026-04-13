@@ -324,11 +324,15 @@ export function indexSessionContent(sessionId: string, text: string): void {
 export function searchSessionContent(query: string): string[] {
   try {
     const db = getDb();
-    // Escape FTS5 special chars and wrap in quotes for phrase-safe matching
-    const escaped = query.replace(/"/g, '""');
+    const terms = query.match(/[\p{L}\p{N}_-]+/gu)?.filter((t) => t.length >= 2) ?? [];
+    const escaped = terms
+      .slice(0, 8)
+      .map((t) => `${t.replace(/"/g, '""')}*`)
+      .join(" AND ");
+    const ftsQuery = escaped || `"${query.replace(/"/g, '""')}"`;
     const rows = db
       .prepare("SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH ? ORDER BY rank LIMIT 100")
-      .all(`"${escaped}"`) as { session_id: string }[];
+      .all(ftsQuery) as { session_id: string }[];
     return rows.map((r) => r.session_id);
   } catch {
     return [];

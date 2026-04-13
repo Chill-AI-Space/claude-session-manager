@@ -14,6 +14,9 @@ interface SessionSearchProps {
   projects?: ProjectListItem[];
   selectedProjects?: string[];
   onProjectFilterChange?: (projectDirs: string[]) => void;
+  searchPending?: boolean;
+  contentSearching?: boolean;
+  sessionsSearching?: boolean;
 }
 
 export interface GeminiResult {
@@ -38,6 +41,9 @@ export function SessionSearch({
   projects,
   selectedProjects,
   onProjectFilterChange,
+  searchPending = false,
+  contentSearching = false,
+  sessionsSearching = false,
 }: SessionSearchProps) {
   const router = useRouter();
   const [geminiQuery, setGeminiQuery] = useState("");
@@ -53,10 +59,15 @@ export function SessionSearch({
   const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [folderFilter, setFolderFilter] = useState("");
   const searchDebounce = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [typingPending, setTypingPending] = useState(false);
 
   // Internal query tracks the actual input value at all times.
   // Parent's searchQuery is only updated when searchSessions is on.
   const [internalQuery, setInternalQuery] = useState("");
+
+  useEffect(() => {
+    setInternalQuery(searchQuery);
+  }, [searchQuery]);
 
   const handleGeminiSearch = async () => {
     if (!geminiQuery.trim()) return;
@@ -129,7 +140,9 @@ export function SessionSearch({
     // Debounce search to avoid hammering the API on every keystroke
     clearTimeout(searchDebounce.current);
     if (searchSessions) {
+      setTypingPending(!!value.trim());
       searchDebounce.current = setTimeout(() => {
+        setTypingPending(false);
         onSearchChange(value);
       }, 200);
     }
@@ -156,6 +169,14 @@ export function SessionSearch({
   const folderCount = selectedProjects?.length || 0;
   const scopeLabel = (activeScopes.length === 2 ? "All" : activeScopes[0] || "None")
     + (folderCount > 0 ? ` · ${folderCount} folder${folderCount > 1 ? "s" : ""}` : "");
+  const showSearchStatus = searchSessions && internalQuery.trim().length >= 2;
+  const searchStatus = typingPending || searchPending
+    ? "Waiting to search..."
+    : sessionsSearching
+      ? "Searching sessions..."
+      : contentSearching
+        ? "Searching message content..."
+        : null;
 
   return (
     <div className="space-y-1.5">
@@ -178,7 +199,7 @@ export function SessionSearch({
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
           {internalQuery && (
             <button
-              onClick={() => { onSearchChange(""); setInternalQuery(""); setSettingsResults([]); }}
+              onClick={() => { onSearchChange(""); setInternalQuery(""); setSettingsResults([]); setTypingPending(false); }}
               className="text-muted-foreground hover:text-foreground"
             >
               <X className="h-3.5 w-3.5" />
@@ -218,6 +239,7 @@ export function SessionSearch({
                   onClick={() => {
                     const next = !searchSessions;
                     setSearchSessions(next);
+                    setTypingPending(false);
                     // Sync parent: push query or clear
                     onSearchChange(next ? internalQuery : "");
                   }}
@@ -351,6 +373,13 @@ export function SessionSearch({
       )}
 
       {/* Settings results (inline, below search) */}
+      {showSearchStatus && searchStatus && (
+        <div className="px-1 text-[10px] text-muted-foreground/55 flex items-center gap-1">
+          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+          <span>{searchStatus}</span>
+        </div>
+      )}
+
       {searchSettings && settingsResults.length > 0 && (
         <div className="space-y-1 max-h-64 overflow-y-auto">
           <div className="text-[10px] text-muted-foreground/40 px-1 flex items-center gap-1">

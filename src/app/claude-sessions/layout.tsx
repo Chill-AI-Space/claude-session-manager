@@ -42,6 +42,8 @@ export default function SessionsLayout({
 const [sidebarOpen, setSidebarOpen] = useState(true);
   const [geminiResults, setGeminiResults] = useState<GeminiResult[]>([]);
   const [contentSearching, setContentSearching] = useState(false);
+  const [sessionsSearching, setSessionsSearching] = useState(false);
+  const [searchPending, setSearchPending] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [generatingTitles, setGeneratingTitles] = useState(false);
   const [titlesGenerated, setTitlesGenerated] = useState<number | null>(null);
@@ -199,6 +201,8 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     abortControllerRef.current?.abort("cancelled");
     const abort = new AbortController();
     abortControllerRef.current = abort;
+    const isSearchRequest = !!searchQuery || selectedProjects.length > 0;
+    if (isSearchRequest) setSessionsSearching(true);
 
     const params = new URLSearchParams();
     if (selectedProjects.length > 0) params.set("project", selectedProjects.join(","));
@@ -253,6 +257,8 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     } catch {
       // Main fetch failed — ignore, will retry on next poll
       setLoading(false);
+    } finally {
+      if (isSearchRequest) setSessionsSearching(false);
     }
   }, [selectedProjects, searchQuery]);
 
@@ -385,6 +391,16 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   // Clear content results when search query changes
   useEffect(() => {
     if (!searchQuery) setGeminiResults([]);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchPending(false);
+      return;
+    }
+    setSearchPending(true);
+    const timer = setTimeout(() => setSearchPending(false), 250);
+    return () => clearTimeout(timer);
   }, [searchQuery]);
 
   // Wrapper for Gemini results: set results AND fetch any missing sessions by ID
@@ -567,6 +583,9 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
                   projects={projects}
                   selectedProjects={selectedProjects}
                   onProjectFilterChange={setSelectedProjects}
+                  searchPending={searchPending}
+                  sessionsSearching={sessionsSearching}
+                  contentSearching={contentSearching}
                 />
               </div>
               <button
@@ -584,7 +603,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
             </div>
           </div>
 
-          <SessionList sessions={sessions} loading={loading || contentSearching} geminiResults={geminiResults} onArchive={archiveSession} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={loadMoreSessions} />
+          <SessionList sessions={sessions} loading={loading} geminiResults={geminiResults} onArchive={archiveSession} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={loadMoreSessions} />
         </div>
       </div>
 

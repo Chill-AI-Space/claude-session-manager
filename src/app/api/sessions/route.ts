@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDb, searchSessionContent } from "@/lib/db";
 import { getActiveSessionIds } from "@/lib/process-detector";
 import { SessionRow, SessionListItem } from "@/lib/types";
 import { fetchAllRemoteSessions } from "@/lib/remote-compute";
@@ -42,11 +42,32 @@ export async function GET(request: NextRequest) {
     }
   }
   if (search) {
-    // Title-only wave 1: fast scan on short fields. Full content search runs in parallel via FTS5.
+    // Broad non-LLM search: title + prompt + last message for better recall.
+    // Full content FTS still runs in parallel for deeper matches.
     conditions.push(
-      "(generated_title LIKE @search OR custom_name LIKE @search OR session_id LIKE @search)"
+      "(" +
+      "generated_title LIKE @search OR " +
+      "custom_name LIKE @search OR " +
+      "session_id LIKE @search OR " +
+      "first_prompt LIKE @search OR " +
+      "last_message LIKE @search" +
+      ")"
     );
     filterParams.search = `%${search}%`;
+  }
+  if (search && !ids) {
+    const contentIds = searchSessionContent(search);
+    if (contentIds.length > 0) {
+      const placeholders = contentIds.map((_, i) => `@searchId${i}`).join(",");
+      const contentCondition = `session_id IN (${placeholders})`;
+      if (conditions.length > 0) {
+        const prev = conditions.pop()!;
+        conditions.push(`(${prev} OR ${contentCondition})`);
+      } else {
+        conditions.push(contentCondition);
+      }
+      contentIds.forEach((id, i) => { filterParams[`searchId${i}`] = id; });
+    }
   }
   if (tag) {
     conditions.push("tags LIKE @tag");
