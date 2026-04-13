@@ -78,33 +78,11 @@ export async function POST(request: NextRequest) {
     const codexSkipFlag = getSetting("dangerously_skip_permissions") === "true" ? " --dangerously-bypass-approvals-and-sandbox" : "";
     const modelFlag = model ? ` -c model="${model}"` : "";
 
-    // Codex has no --append-system-prompt, so inject Session Manager context + delegation contract into the message itself
-    const base = "http://localhost:3000";
+    // Codex has no --append-system-prompt, so inject delegation contract into the message itself
     let fullMessage = message.trim();
 
-    // Always inject Session Manager context so Codex knows what's available
-    fullMessage += [
-      "",
-      "",
-      "[Session Manager Context]",
-      `You are running inside Session Manager. You are automatically registered and tracked.`,
-      `Find your session ID:`,
-      `  curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | python3 -c "import json,sys; peers=json.load(sys.stdin).get('peers',[]); print(peers[0]['session_id'] if peers else 'not found')"`,
-      ``,
-      `Available tools:`,
-      `  Spawn sub-session:  POST http://localhost:3000/api/sessions/start`,
-      `    body: {"path":"REPO_ROOT","message":"...","agent":"codex"|"claude","reply_to_session_id":"YOUR_ID","delegation_task":"..."}`,
-      `    ALWAYS use -N flag: CHILD=$(curl -s -N -X POST ... | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id":"\\([^"]*\\)".*/\\1/')`,
-      `  Set alarm:          POST http://localhost:3000/api/sessions/YOUR_ID/alarm`,
-      `    body: {"message":"what to do if I die","check_after_ms":180000}`,
-      `  Cancel alarm:       DELETE http://localhost:3000/api/sessions/YOUR_ID/alarm`,
-      `  Active sessions:    GET http://localhost:3000/api/sessions`,
-      ``,
-      `Full delegation guide: /Users/vova/Documents/GitHub/claude-session-manager/docs/delegation-guide.md`,
-      "[End Session Manager Context]",
-    ].join("\n");
-
     if (reply_to_session_id) {
+      const base = "http://localhost:3000";
       fullMessage += [
         "",
         "",
