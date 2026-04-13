@@ -175,36 +175,56 @@ The **CI button** in any session's detail page generates ready-to-copy snippets 
 
 ## Self-alarm — don't lose your thread if you crash
 
-Set before any risky or long-running operation:
+Sessions are not reliable. Processes die, connections drop, machines sleep. The self-alarm is the fix: before any risky operation, tell the babysitter what to do if you don't come back.
 
 ```bash
+# 1. Arm — set before the risky thing
 curl -s -X POST "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm" \
   -H "Content-Type: application/json" \
   -d '{
-    "message": "Resume in <repo>. Step: <what was in progress>. Next: <exact action>. Constraints: <limits>.",
-    "check_after_ms": 600000
+    "message": "Resume: step 3 of deploy — run smoke tests, then launchctl reload",
+    "check_after_ms": 180000
   }'
-```
 
-Alarm is **persistent by default** — fires when session has been idle for `check_after_ms` since last activity, then re-arms itself. No need to re-set on every wake-up.
+# 2. Do the thing
 
-Cancel when done:
-```bash
+# 3. Disarm on success
 curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
 ```
+
+While alarm is active, **babysitter backs off** — no crash retry, no stall poke. The alarm owns recovery.
+
+If the babysitter resumes you and you don't need it anymore:
+```bash
+# Disable babysitter for this session permanently (until you clear it)
+curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
+
+# Re-enable babysitter
+curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm?clear=true"
+```
+
+Every babysitter message already contains your disable curl — just copy and run it.
 
 ---
 
 ## Codex specifics
 
-Codex doesn't receive `[Session Manager Context]` automatically (it's a TUI, not CLI). Give it explicit instructions:
+Codex is a TUI — it doesn't receive `[Session Manager Context]` automatically via `--append-system-prompt`. But it's still fully tracked by Session Manager (via `~/.codex/state_5.sqlite` scan) and can use all the same APIs.
+
+**Give Codex its session ID and instructions in the initial task message:**
 
 ```
-Read /Users/vova/Documents/GitHub/claude-session-manager/docs/delegation-guide.md
+Your task: <task description>
 
-Your session ID: curl -s "http://localhost:3000/api/sessions/my-id?path=$(pwd)" | jq -r '.session_id'
-Callback when done: POST http://localhost:3000/api/sessions/PARENT_ID/reply
-  body: {"message": "DONE: <summary>"} or {"message": "FAILED: <reason>"}
+Session Manager context:
+- Find your session ID: curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq -r '.peers[0].session_id'
+- Self-alarm (set before risky ops): POST http://localhost:3000/api/sessions/YOUR_ID/alarm
+    body: {"message": "what to do if I die", "check_after_ms": 180000}
+- Disable babysitter: curl -s -X DELETE http://localhost:3000/api/sessions/YOUR_ID/alarm
+- Report back to parent: POST http://localhost:3000/api/sessions/PARENT_ID/reply
+    body: {"message": "DONE: <summary>"} or {"message": "FAILED: <reason>"}
+
+Read full guide: /Users/vova/Documents/GitHub/claude-session-manager/docs/delegation-guide.md
 ```
 
-When Codex needs to spawn a sub-session, it should use `agent: "claude"` — Claude sessions get full context injection automatically.
+When Codex needs to spawn a sub-session, use `agent: "claude"` — Claude sessions get full context injection automatically.
