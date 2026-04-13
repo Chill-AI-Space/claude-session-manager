@@ -238,22 +238,36 @@ Every babysitter message already contains your disable curl — just copy and ru
 
 ## Codex specifics
 
-Codex is a TUI — it doesn't receive `[Session Manager Context]` automatically via `--append-system-prompt`. But it's still fully tracked by Session Manager (via `~/.codex/state_5.sqlite` scan) and can use all the same APIs.
+Codex is a TUI — it doesn't receive `[Session Manager Context]` automatically via `--append-system-prompt`.
 
-**Give Codex its session ID and instructions in the initial task message:**
+**But every Codex session spawned via `/api/sessions/start` automatically gets `[Session Manager Context]` injected into its task message.** This means Codex already knows:
+- It's inside Session Manager
+- How to find its own session ID
+- All available APIs (spawn, alarm, reply)
+
+You don't need to manually include Session Manager instructions when spawning Codex — they're injected automatically.
+
+**What Codex receives (automatically injected):**
 
 ```
-Your task: <task description>
+[Session Manager Context]
+You are running inside Session Manager. You are automatically registered and tracked.
 
-Session Manager context:
-- Find your session ID: curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq -r '.peers[0].session_id'
-- Self-alarm (set before risky ops): POST http://localhost:3000/api/sessions/YOUR_ID/alarm
-    body: {"message": "what to do if I die", "check_after_ms": 180000}
-- Disable babysitter: curl -s -X DELETE http://localhost:3000/api/sessions/YOUR_ID/alarm
-- Report back to parent: POST http://localhost:3000/api/sessions/PARENT_ID/reply
-    body: {"message": "DONE: <summary>"} or {"message": "FAILED: <reason>"}
+Find your session ID:
+  curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | python3 -c "..."
 
-Read full guide: /Users/vova/Documents/GitHub/claude-session-manager/docs/delegation-guide.md
+Available tools:
+  Spawn sub-session:  POST http://localhost:3000/api/sessions/start
+    body: {"path":"REPO_ROOT","message":"...","agent":"codex"|"claude","reply_to_session_id":"YOUR_ID"}
+    ALWAYS use -N flag and capture session_id
+  Set alarm:          POST http://localhost:3000/api/sessions/YOUR_ID/alarm
+  Cancel alarm:       DELETE http://localhost:3000/api/sessions/YOUR_ID/alarm
+  Active sessions:    GET http://localhost:3000/api/sessions
+
+Full delegation guide: /Users/vova/Documents/GitHub/claude-session-manager/docs/delegation-guide.md
+[End Session Manager Context]
 ```
 
-When Codex needs to spawn a sub-session, use `agent: "claude"` — Claude sessions get full context injection automatically.
+If spawning with `reply_to_session_id`, Codex also gets a `[Delegation Contract]` with the callback URLs.
+
+When Codex spawns sub-sessions: use `agent: "codex"` for code, `agent: "claude"` for review.
