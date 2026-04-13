@@ -96,8 +96,20 @@ export async function POST(request: NextRequest) {
       ].join("\n");
     }
 
-    const safeMsg = fullMessage.replace(/"/g, '\\"');
-    const shellCmd = `cd "${projectPath}" && "${bin}"${codexSkipFlag}${modelFlag} "${safeMsg}"`;
+    // Use ANSI-C quoting $'...' so newlines, quotes, and other special chars are safe.
+    // Plain double-quote escaping breaks when the message contains literal newlines —
+    // the shell enters `dquote>` mode waiting for the closing quote.
+    const ansiQuote = (s: string) =>
+      "$'" +
+      s
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, "\\r")
+        .replace(/\n/g, "\\n")
+        .replace(/\t/g, "\\t")
+        .replace(/"/g, '\\"') +
+      "'";
+    const shellCmd = `cd "${projectPath}" && "${bin}"${codexSkipFlag}${modelFlag} ${ansiQuote(fullMessage)}`;
     const stream = new ReadableStream({
       async start(controller) {
         try {
