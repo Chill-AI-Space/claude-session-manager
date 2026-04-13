@@ -78,10 +78,11 @@ export async function POST(request: NextRequest) {
         "",
         "[Delegation Contract]",
         `You were spawned to handle a delegated task${delegation_task ? `: "${delegation_task}"` : ""}.`,
+        `Before reporting back, persist your work: code → commit to branch; plans/findings → save to dated file (docs/YYYY-MM-DD-name.md) and commit. Nothing in session context only — if not in git, it will be lost.`,
         `When done, report back by running ONE of these:`,
-        `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "DONE: <summary>"}'`,
-        `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "FAILED: <reason>"}'`,
-        `Do NOT finish without calling one of these.`,
+        `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "DONE: <summary> | committed: <branch>"}'`,
+        `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "FAILED: <reason> | partial work committed: <yes/no>"}'`,
+        `Do NOT finish without calling one of these AND committing your work.`,
         "[End Delegation Contract]",
       ].join("\n");
     }
