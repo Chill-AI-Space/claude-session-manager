@@ -59,7 +59,14 @@ export async function POST(request: NextRequest) {
     return sseResponse(stream);
   }
 
-  if (agent === "codex") {
+  // Default to codex when agent is not specified (or explicitly "codex")
+  // Only use claude when explicitly requested
+  if (agent === "claude") {
+    const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url, reply_to_session_id, delegation_task);
+    return sseResponse(stream);
+  }
+
+  if (agent === "codex" || !agent) {
     // Codex is a TUI — open in terminal, then poll for the new thread and return its ID
     const { getCodexPath } = await import("@/lib/codex-bin");
     const { openInTerminal } = await import("@/lib/terminal-launcher");
@@ -79,6 +86,8 @@ export async function POST(request: NextRequest) {
         "[Delegation Contract]",
         `You were spawned to handle a delegated task${delegation_task ? `: "${delegation_task}"` : ""}.`,
         `Before reporting back, persist your work: code → commit to branch; plans/findings → save to dated file (docs/YYYY-MM-DD-name.md) and commit. Nothing in session context only — if not in git, it will be lost.`,
+        `If you spawn sub-sessions, ALWAYS specify "agent" explicitly: "agent":"codex" for code, "agent":"claude" for review/analysis. Never omit "agent" — default is "claude" which is WRONG for code tasks.`,
+        `CRITICAL: use -N (no-buffer) with curl and capture session_id: CHILD_ID=$(curl -s -N -X POST ".../start" ... | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id":"\\([^"]*\\)".*/\\1/'). If CHILD_ID empty — spawn failed, retry.`,
         `When done, report back by running ONE of these:`,
         `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "DONE: <summary> | committed: <branch>"}'`,
         `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "FAILED: <reason> | partial work committed: <yes/no>"}'`,
@@ -170,7 +179,4 @@ export async function POST(request: NextRequest) {
     });
     return new Response(stream, { headers: SSE_HEADERS });
   }
-
-  const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url, reply_to_session_id, delegation_task);
-  return sseResponse(stream);
 }

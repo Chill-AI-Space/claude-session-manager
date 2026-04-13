@@ -62,8 +62,13 @@ cat /abs/path/to/PLAN.md
 
 #### Шаг 2.1 — Codex-воркер (пишет код)
 
+> **`path` = корень целевого репозитория** — всегда, без исключений.
+> Создать сессию в отдельной папке (`~/investigation/`) вместо репо → воркер не видит код, не может коммитить, не может запускать тесты.
+
+**Всегда читай SSE-ответ и сохраняй `session_id`.** Без `-N` curl буферизует стрим и ты не получишь ID — не узнаешь создалась ли сессия.
+
 ```bash
-curl -s -X POST "http://localhost:3000/api/sessions/start" \
+CODEX_ID=$(curl -s -N -X POST "http://localhost:3000/api/sessions/start" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "/abs/path/to/project",
@@ -71,8 +76,12 @@ curl -s -X POST "http://localhost:3000/api/sessions/start" \
     "reply_to_session_id": "YOUR_SESSION_ID",
     "delegation_task": "iteration N: implement <описание>",
     "agent": "codex"
-  }'
+  }' | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id":"\([^"]*\)".*/\1/')
+
+[ -z "$CODEX_ID" ] && echo "ERROR: spawn failed — retry before continuing" || echo "OK: codex $CODEX_ID"
 ```
+
+Если `CODEX_ID` пустой — сессия не создалась, повтори спавн. Не переходи дальше пока нет ID.
 
 **Жди ответа Codex.** Когда Codex ответит DONE — переходи к шагу 2.2.
 
@@ -83,7 +92,7 @@ curl -s -X POST "http://localhost:3000/api/sessions/start" \
 Запускай только после DONE от Codex. Передавай в message полный ответ Codex.
 
 ```bash
-curl -s -X POST "http://localhost:3000/api/sessions/start" \
+REVIEWER_ID=$(curl -s -N -X POST "http://localhost:3000/api/sessions/start" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "/abs/path/to/project",
@@ -91,7 +100,9 @@ curl -s -X POST "http://localhost:3000/api/sessions/start" \
     "reply_to_session_id": "YOUR_SESSION_ID",
     "delegation_task": "iteration N: review",
     "agent": "claude"
-  }'
+  }' | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id":"\([^"]*\)".*/\1/')
+
+[ -z "$REVIEWER_ID" ] && echo "ERROR: reviewer spawn failed — retry" || echo "OK: reviewer $REVIEWER_ID"
 ```
 
 **Жди ответа ревьюера.** Когда ревьюер ответит:
@@ -134,6 +145,8 @@ curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
 - **Не пиши код сам** — только делегируй
 - **Codex пишет, Claude ревьюит** — никогда не наоборот, никогда не один агент делает оба шага
 - **Ревьюер не пишет код** — только анализирует и выносит вердикт (OK / NEEDS_FIX)
+- **`agent` всегда указывай явно** — `"codex"` для написания кода, `"claude"` для ревью/исследования. Без `agent` по умолчанию `"claude"` — это НЕ то что нужно для имплементации
+- **`path` = корень репо** — всегда. Работаешь с одним репозиторием → `path` только этот репо. Создать воркера в другой папке = воркер слепой: нет кода, нет гита, нет тестов
 - **Alarm обновляй после каждого шага** с актуальным состоянием (implement или review, итерация N)
 - **Каждому воркеру передавай полный контекст** — у него нет памяти предыдущих сессий
 - **Если воркер ответил FAILED** — реши: retry или skip, запиши в PLAN.md, двигайся дальше

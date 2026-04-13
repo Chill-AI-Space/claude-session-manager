@@ -39,21 +39,48 @@ Completing work without persisting = losing the work. Don't do it.
 
 ---
 
+## Rule #1 — `path` = the repo you're working in
+
+**Always set `path` to the root of the target repository, not a scratch folder.**
+
+If you create a session in a separate investigation folder (`~/investigation/`) instead of the actual repo (`~/my-project/`), the worker:
+- Has no git context for the project
+- Can't read the codebase or run tests
+- Can't commit to the right branch
+
+One repo → `path` is always that repo's root. This is mandatory, not optional.
+
+```bash
+# WRONG — worker spawned in wrong folder
+"path": "/Users/vova/Documents/GitHub/investigation"
+
+# CORRECT — worker spawned in target repo
+"path": "/Users/vova/Documents/GitHub/my-project"
+```
+
+---
+
 ## Simple delegation — "do this and report back"
 
 Spawn a session, give it a task, wait for DONE/FAILED.
 
+**Always capture `session_id` from the SSE response** — without it you don't know if the session actually started.
+
 ```bash
-curl -s -X POST "http://localhost:3000/api/sessions/start" \
+CHILD_ID=$(curl -s -N -X POST "http://localhost:3000/api/sessions/start" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "/abs/path/to/project",
     "message": "Fix the auth bug in login.ts. Commit the fix. Report DONE or FAILED.",
     "reply_to_session_id": "YOUR_SESSION_ID",
     "delegation_task": "fix auth bug",
-    "agent": "claude"
-  }'
+    "agent": "codex"
+  }' | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id":"\([^"]*\)".*/\1/')
+
+[ -z "$CHILD_ID" ] && echo "ERROR: spawn failed" || echo "OK: $CHILD_ID"
 ```
+
+The `-N` flag (no-buffering) is required — without it curl buffers the SSE stream and you miss the `session_id` event.
 
 The child session gets a `[Delegation Contract]` injected automatically — it knows to call `/reply` with DONE/FAILED when done.
 
@@ -65,6 +92,8 @@ Verify: `curl -s "http://localhost:3000/api/sessions/my-id?path=$(pwd)"`
 **If the child crashes** without replying → babysitter pings it 3×, then auto-sends FAILED to you.
 
 **Agent types:** `"claude"` (default), `"codex"`, `"forge"`.
+
+> **Always specify `agent` explicitly.** Default is `"claude"` — but for writing code you want `"codex"`. Omitting `agent` on an implementation task creates a Claude session when you expected Codex.
 
 ---
 
