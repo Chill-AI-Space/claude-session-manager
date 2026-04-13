@@ -406,13 +406,16 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     } catch { /* ignore */ }
   }, []);
 
-  // Auto content search: when basic search returns 0 results, grep JSONL files
+  // Wave 2 content search: runs in parallel with title search via FTS5.
+  // Fires for every query >= 3 chars, merges extra results not found by title search.
   useEffect(() => {
-    if (!searchQuery || searchQuery.length < 3 || sessions.length > 0 || loading || geminiResults.length > 0) {
+    if (!searchQuery || searchQuery.length < 3 || loading || geminiResults.length > 0) {
       setContentSearching(false);
       return;
     }
-    setContentSearching(true);
+    // Show spinner only when title search also returned nothing yet
+    if (sessionsRef.current.length === 0) setContentSearching(true);
+
     const abortController = new AbortController();
     const timer = setTimeout(async () => {
       try {
@@ -423,7 +426,6 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
         const data = await res.json();
         if (abortController.signal.aborted) return;
         if (data.session_ids?.length > 0) {
-          // Fetch the matched sessions by ID (they may not be in the current sessions list)
           const idsParam = data.session_ids.join(",");
           const matchedRes = await fetch(
             `/api/sessions?ids=${idsParam}&limit=${data.session_ids.length}`,
@@ -431,22 +433,34 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
           );
           const matchedData = await matchedRes.json();
           if (abortController.signal.aborted) return;
-          // Merge matched sessions into current list
-          setSessions((prev) => {
-            const existingIds = new Set(prev.map((s) => s.session_id));
-            const newOnes = (matchedData.sessions || []).filter(
-              (s: SessionListItem) => !existingIds.has(s.session_id)
+
+          // Snapshot title-search results before merging
+          const titleIds = new Set(sessionsRef.current.map((s) => s.session_id));
+          const allMatched: SessionListItem[] = matchedData.sessions || [];
+
+          // Add sessions not already shown by title search
+          const newOnes = allMatched.filter((s) => !titleIds.has(s.session_id));
+          if (newOnes.length > 0) {
+            setSessions((prev) => {
+              const existingIds = new Set(prev.map((s) => s.session_id));
+              const toAdd = newOnes.filter((s) => !existingIds.has(s.session_id));
+              return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+            });
+          }
+
+          // Only switch SessionList into "search-result mode" when title search found nothing.
+          // Otherwise keep the normal list and just append extra content matches.
+          const badgeIds = titleIds.size === 0 ? data.session_ids : [];
+          if (badgeIds.length > 0) {
+            setGeminiResults(
+              badgeIds.map((id: string) => ({
+                session_id: id,
+                snippet: "Found in message content",
+                relevance: "content",
+                query: searchQuery,
+              }))
             );
-            return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
-          });
-          setGeminiResults(
-            data.session_ids.map((id: string) => ({
-              session_id: id,
-              snippet: "Found in message content",
-              relevance: "content",
-              query: searchQuery,
-            }))
-          );
+          }
         }
       } catch {
         /* ignore — includes AbortError */
@@ -459,7 +473,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
       abortController.abort("cancelled");
       setContentSearching(false);
     };
-  }, [searchQuery, sessions.length, loading, geminiResults.length]);
+  }, [searchQuery, loading, geminiResults.length]); // no sessions.length — avoids loop when wave 2 adds results
 
   useEffect(() => {
     if (initialLoadDone.current) fetchSessions();

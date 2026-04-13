@@ -42,8 +42,9 @@ export async function GET(request: NextRequest) {
     }
   }
   if (search) {
+    // Title-only wave 1: fast scan on short fields. Full content search runs in parallel via FTS5.
     conditions.push(
-      "(first_prompt LIKE @search OR last_message LIKE @search OR generated_title LIKE @search OR custom_name LIKE @search OR session_id LIKE @search)"
+      "(generated_title LIKE @search OR custom_name LIKE @search OR session_id LIKE @search)"
     );
     filterParams.search = `%${search}%`;
   }
@@ -136,7 +137,7 @@ export async function GET(request: NextRequest) {
   // Merge remote sessions if requested (default: true when no project filter)
   const includeRemote = searchParams.get("include_remote") !== "false";
   let allSessions: (SessionListItem | Record<string, unknown>)[] = sessions;
-  let remoteMeta: { nodeId: string; nodeName: string; count: number; error?: string }[] = [];
+  const remoteMeta: { nodeId: string; nodeName: string; count: number; error?: string }[] = [];
 
   if (includeRemote && offset === 0) {
     try {
