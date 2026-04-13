@@ -1135,7 +1135,13 @@ export default function SessionDetailPage({
       const res = await fetch(startUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: newSessionPath, message: fullMessage, previous_session_id: sessionId, ...(newSessionModel && { model: newSessionModel }), ...(newSessionAgent !== "claude" && { agent: newSessionAgent }) }),
+        body: JSON.stringify({
+          path: newSessionPath,
+          message: fullMessage,
+          previous_session_id: sessionId,
+          agent: newSessionAgent,
+          ...(newSessionModel && { model: newSessionModel }),
+        }),
       });
 
       if (!res.ok) throw new Error("Failed to start session");

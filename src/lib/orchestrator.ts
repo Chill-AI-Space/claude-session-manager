@@ -264,7 +264,7 @@ function buildSessionContextPrompt(sessionId?: string): string | undefined {
     lines.push(`Callback URL pattern: POST ${base}/api/sessions/{SESSION_ID}/reply  body: {"message":"..."}`);
     lines.push("(Your SESSION_ID is assigned at session start and visible in your conversation metadata.)");
   }
-  lines.push(`Start sub-session: POST ${base}/api/sessions/start  body: {"path":"...","message":"..."}`);
+  lines.push(`Start sub-session: POST ${base}/api/sessions/start  body: {"path":"...","message":"...","agent":"claude|codex|forge"}`);
   lines.push(`Active sessions: GET ${base}/api/sessions`);
   lines.push("[End Context]");
   return lines.join("\n");

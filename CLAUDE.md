@@ -287,7 +287,7 @@ Any process that can make HTTP requests can control sessions:
 # Start a new session
 curl -X POST http://localhost:3000/api/sessions/start \
   -H "Content-Type: application/json" \
-  -d '{"path":"/path/to/project","message":"fix the bug in auth.ts"}'
+  -d '{"path":"/path/to/project","message":"fix the bug in auth.ts","agent":"claude"}'
 
 # Resume an existing session
 curl -X POST http://localhost:3000/api/sessions/{sessionId}/reply \

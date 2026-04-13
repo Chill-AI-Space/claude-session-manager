@@ -26,6 +26,15 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "path and message required" }, { status: 400 });
   }
 
+  const normalizedAgent =
+    agent === undefined || agent === "claude" || agent === "codex" || agent === "forge"
+      ? agent
+      : null;
+
+  if (normalizedAgent === null) {
+    return Response.json({ error: `invalid agent: ${String(agent)}` }, { status: 400 });
+  }
+
   // Check if a specific node was requested, or use default compute node
   const nodeId = request.nextUrl.searchParams.get("node");
   const node = resolveNode(nodeId) || getComputeNode();
@@ -39,7 +48,7 @@ export async function POST(request: NextRequest) {
         message: message.trim(),
         correlationId,
         verbose: verbose ?? false,
-        agent,
+        agent: normalizedAgent ?? undefined,
         model,
       });
       return new Response(stream, { headers: SSE_HEADERS });
@@ -54,19 +63,12 @@ export async function POST(request: NextRequest) {
     logAction("service", "session_start_api_received", JSON.stringify({ correlationId, path: projectPath }));
   }
 
-  if (agent === "forge") {
+  if (normalizedAgent === "forge") {
     const stream = getOrchestrator().startForge(projectPath, message.trim(), model);
     return sseResponse(stream);
   }
 
-  // Default to codex when agent is not specified (or explicitly "codex")
-  // Only use claude when explicitly requested
-  if (agent === "claude") {
-    const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url, reply_to_session_id, delegation_task);
-    return sseResponse(stream);
-  }
-
-  if (agent === "codex" || !agent) {
+  if (normalizedAgent === "codex") {
     // Codex is a TUI — open in terminal, then poll for the new thread and return its ID
     const { getCodexPath } = await import("@/lib/codex-bin");
     const { openInTerminal } = await import("@/lib/terminal-launcher");
@@ -199,4 +201,8 @@ export async function POST(request: NextRequest) {
     });
     return new Response(stream, { headers: SSE_HEADERS });
   }
+
+  // Default to Claude unless another agent is explicitly requested.
+  const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url, reply_to_session_id, delegation_task);
+  return sseResponse(stream);
 }
