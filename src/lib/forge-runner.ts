@@ -95,7 +95,7 @@ export function createForgeSSEStream(opts: ForgeSSEStreamOptions): ReadableStrea
         });
         if (rotateResult.status !== 0) {
           dlog.warn("forge-runner", "pm-gemini-rotate.sh: all keys exhausted or script failed");
-          send({ type: "error", text: "All Gemini API keys exhausted. Cannot start Forge session." });
+          send({ type: "error", text: `GEMINI_QUOTA_EXHAUSTED:${model ?? ""}` });
           close();
           return;
         }

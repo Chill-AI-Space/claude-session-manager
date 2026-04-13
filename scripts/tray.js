@@ -170,6 +170,59 @@ async function ensureServerRunning() {
   return false;
 }
 
+// --- Cloudflared auto-relay ---
+let cloudflaredProc = null;
+
+function findCloudflared() {
+  try {
+    const cmd = isWin ? 'where cloudflared' : 'which cloudflared';
+    return execSync(cmd, { encoding: 'utf8' }).trim().split('\n')[0];
+  } catch { return null; }
+}
+
+async function startCloudflaredTunnel() {
+  const bin = findCloudflared();
+  if (!bin) {
+    log('cloudflared not found — skipping auto-relay tunnel');
+    return;
+  }
+
+  // Don't override a manually configured custom domain
+  const settings = await httpJson('GET', '/api/settings');
+  const current = (settings?.csm_base_url || '').trim();
+  if (current && !current.includes('localhost') && !current.includes('trycloudflare.com')) {
+    log(`csm_base_url already set to custom domain (${current}) — skipping cloudflared`);
+    return;
+  }
+
+  log('Starting cloudflared tunnel...');
+  cloudflaredProc = spawn(bin, ['tunnel', '--url', `http://localhost:${PORT}`], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+
+  let urlFound = false;
+  const parseOutput = (data) => {
+    if (urlFound) return;
+    // Real tunnel URLs always have 2+ hyphens: e.g. ada-minds-assessment-node.trycloudflare.com
+    const match = data.toString().match(/https:\/\/[a-z0-9]+(?:-[a-z0-9]+){2,}\.trycloudflare\.com/);
+    if (!match) return;
+    urlFound = true;
+    const url = match[0];
+    log(`Cloudflared tunnel ready: ${url}`);
+    httpJson('PUT', '/api/settings', { csm_base_url: url })
+      .then(() => log(`csm_base_url updated → ${url}`))
+      .catch((e) => logErr(`Failed to update csm_base_url: ${e}`));
+  };
+
+  cloudflaredProc.stdout.on('data', parseOutput);
+  cloudflaredProc.stderr.on('data', parseOutput);
+  cloudflaredProc.on('exit', (code) => {
+    log(`cloudflared exited (code ${code})`);
+    cloudflaredProc = null;
+  });
+}
+
 // --- Settings helpers (read/write via localhost API) ---
 const API_BASE = `http://localhost:${PORT}`;
 
@@ -344,6 +397,18 @@ setTimeout(() => {
   startTrayWatchdog();
 }, isWin ? 0 : 3000);
 
+// --- Start cloudflared tunnel once server is ready ---
+(async () => {
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (await checkServerHealth()) {
+      await startCloudflaredTunnel();
+      return;
+    }
+  }
+  log('Server not ready after 15s — skipping cloudflared startup');
+})();
+
 // --- Initial scan ---
 log('Server started, background scanner active');
 
@@ -351,6 +416,7 @@ function quit() {
   log('Shutting down...');
   try { if (tray) tray.kill(); } catch {}
   try { if (server) server.kill(); } catch {}
+  try { if (cloudflaredProc) cloudflaredProc.kill(); } catch {}
   process.exit(0);
 }
 

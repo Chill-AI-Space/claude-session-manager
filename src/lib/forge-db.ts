@@ -219,14 +219,19 @@ export function readForgeMessages(conversationId: string): ParsedMessage[] {
         const toolOutput = tool.output?.values?.[0]?.text ?? "";
         const isError = tool.output?.is_error ?? false;
         const toolName = (tool.name ?? "tool").replace(/^mcp_playwright_tool_/, "");
-        // Only show errors and short results (skip huge page snapshots)
-        if (isError && toolOutput) {
-          const errText = `❌ ${toolName}: ${toolOutput.slice(0, 300)}`;
+        // Skip huge page snapshots (browser DOM dumps), show everything else
+        const isHugeSnapshot = toolOutput.length > 3000 && (
+          toolName.includes("snapshot") || toolName.includes("browser_")
+        );
+        if (!isHugeSnapshot && toolOutput) {
+          const prefix = isError ? `❌ ${toolName}` : `✅ ${toolName}`;
+          const preview = toolOutput.slice(0, 500);
+          const suffix = toolOutput.length > 500 ? `\n…(${toolOutput.length} chars)` : "";
           messages.push({
             uuid: `forge-${conversationId}-${idx++}`,
             type: "assistant",
             timestamp: row.updated_at ?? row.created_at,
-            content: [{ type: "text", text: errText }],
+            content: [{ type: "text", text: `${prefix}: ${preview}${suffix}` }],
           });
         }
         continue;
@@ -257,15 +262,36 @@ export function readForgeMessages(conversationId: string): ParsedMessage[] {
             content: [{ type: "text", text }],
           });
         } else if (toolCalls?.length) {
-          // Assistant made tool calls without text — show as tool use indicator
-          const names = toolCalls
-            .map(t => t.name.replace(/^mcp_playwright_tool_/, "").replace(/_/g, " "))
-            .join(", ");
+          // Assistant made tool calls without text — show with key argument
+          const lines = toolCalls.map(t => {
+            const name = t.name.replace(/^mcp_playwright_tool_/, "");
+            const a = typeof t.arguments === "object" && t.arguments !== null
+              ? t.arguments as Record<string, unknown>
+              : {};
+            let detail = "";
+            if (name === "shell" || name === "run_command") {
+              detail = String(a.command ?? a.cmd ?? "").slice(0, 120);
+            } else if (name === "write" || name === "create_file") {
+              detail = String(a.path ?? a.file_path ?? "");
+            } else if (name === "patch" || name === "edit" || name === "str_replace") {
+              detail = String(a.path ?? a.file_path ?? "");
+            } else if (name === "read" || name === "read_file") {
+              detail = String(a.path ?? a.file_path ?? "");
+            } else if (name === "search" || name === "grep") {
+              detail = String(a.pattern ?? a.query ?? a.search ?? "").slice(0, 80);
+            } else {
+              // Generic: show first string argument value
+              const firstVal = Object.values(a).find(v => typeof v === "string");
+              detail = firstVal ? String(firstVal).slice(0, 80) : "";
+            }
+            const label = name.replace(/_/g, " ");
+            return detail ? `🔧 ${label}: ${detail}` : `🔧 ${label}`;
+          });
           messages.push({
             uuid: `forge-${conversationId}-${idx++}`,
             type: "assistant",
             timestamp: row.updated_at ?? row.created_at,
-            content: [{ type: "text", text: `🔧 ${names}` }],
+            content: [{ type: "text", text: lines.join("\n") }],
           });
         }
       }

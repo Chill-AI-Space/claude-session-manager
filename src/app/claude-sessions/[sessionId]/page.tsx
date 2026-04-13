@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud, Webhook } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -189,6 +189,10 @@ export default function SessionDetailPage({
   const [shareState, setShareState] = useState<"idle" | "loading" | "done">("idle");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // CI callback snippet
+  const [ciSnippetOpen, setCiSnippetOpen] = useState(false);
+  const [ciCopied, setCiCopied] = useState<"pr" | "action" | null>(null);
 
   // Sent message confirmation (shown in right panel)
   const [lastSentText, setLastSentText] = useState<string | null>(null);
@@ -640,6 +644,64 @@ export default function SessionDetailPage({
   }, [settings]);
 
   const triggerNotification = useTriggerNotification(notifSettings);
+
+  const { prBodySnippet, actionsSnippet, ciMode } = useMemo(() => {
+    const nodeId = settings?.relay_node_id;
+    const relayEnabled = settings?.relay_enabled === "true" && !!nodeId;
+
+    // Prefer stable WebSocket relay over ephemeral cloudflared tunnel
+    const useRelay = relayEnabled;
+    const relayHttpBase = (settings?.relay_server_url || "wss://csm-relay.chillai.workers.dev")
+      .replace(/^wss:\/\//, "https://")
+      .replace(/^ws:\/\//, "http://")
+      .replace(/\/$/, "");
+    const fallbackBase = (settings?.csm_base_url || "http://localhost:3000").replace(/\/$/, "");
+
+    const prBodySnippet = `<!-- session: ${sessionId} -->`;
+
+    let actionsSnippet: string;
+    if (useRelay) {
+      // Stable relay: POST /node/{nodeId}/resume  body: {sessionId, message}
+      actionsSnippet = [
+        `- name: Notify Claude session`,
+        `  if: always()`,
+        `  env:`,
+        `    GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}`,
+        `  run: |`,
+        `    SESSION=$(gh pr view \${{ github.event.pull_request.number }} \\`,
+        `      --json body -q '.body' | \\`,
+        `      grep -o 'session: [a-z0-9-]*' | awk '{print $2}')`,
+        `    [ -z "$SESSION" ] && exit 0`,
+        `    curl -s -X POST "${relayHttpBase}/node/${nodeId}/resume" \\`,
+        `      -H "Content-Type: application/json" \\`,
+        `      -d '{"sessionId":"'$SESSION'","message":"CI \${{ job.status }}: \${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}"}'`,
+      ].join("\n");
+    } else {
+      // Fallback: direct HTTP to csm_base_url (cloudflared or custom domain)
+      actionsSnippet = [
+        `- name: Notify Claude session`,
+        `  if: always()`,
+        `  env:`,
+        `    GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}`,
+        `  run: |`,
+        `    SESSION=$(gh pr view \${{ github.event.pull_request.number }} \\`,
+        `      --json body -q '.body' | \\`,
+        `      grep -o 'session: [a-z0-9-]*' | awk '{print $2}')`,
+        `    [ -z "$SESSION" ] && exit 0`,
+        `    curl -s -X POST "${fallbackBase}/api/sessions/$SESSION/reply" \\`,
+        `      -H "Content-Type: application/json" \\`,
+        `      -d '{"message":"CI \${{ job.status }}: \${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}"}'`,
+      ].join("\n");
+    }
+
+    return { prBodySnippet, actionsSnippet, ciMode: useRelay ? "relay" : "direct" };
+  }, [settings?.relay_enabled, settings?.relay_node_id, settings?.relay_server_url, settings?.csm_base_url, sessionId]);
+
+  const copyCi = useCallback((text: string, type: "pr" | "action") => {
+    navigator.clipboard.writeText(text);
+    setCiCopied(type);
+    setTimeout(() => setCiCopied(null), 2000);
+  }, []);
 
   // Always read from ref so effects with suppressed deps get the latest title
   const dataRef = useRef(data);
@@ -1906,7 +1968,50 @@ export default function SessionDetailPage({
                   Share
                 </Button>
               )}
+              <Button
+                size="sm"
+                variant={ciSnippetOpen ? "secondary" : "ghost"}
+                className="gap-1 text-xs h-7"
+                onClick={() => setCiSnippetOpen(v => !v)}
+                title="GitHub CI callback snippets"
+              >
+                <Webhook className="h-3.5 w-3.5" />
+                CI
+              </Button>
             </div>
+
+            {/* CI callback snippets panel */}
+            {ciSnippetOpen && (
+              <div className="mt-1 p-3 rounded-lg border border-border/50 bg-muted/30 text-xs space-y-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-muted-foreground font-medium">Add to PR description</span>
+                    <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => copyCi(prBodySnippet, "pr")} title="Copy">
+                      {ciCopied === "pr" ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                    </Button>
+                  </div>
+                  <pre className="font-mono text-[10px] bg-background/60 p-2 rounded overflow-x-auto whitespace-pre-wrap break-all select-all">{prBodySnippet}</pre>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-muted-foreground font-medium">GitHub Actions step (last step in job)</span>
+                    <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => copyCi(actionsSnippet, "action")} title="Copy">
+                      {ciCopied === "action" ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                    </Button>
+                  </div>
+                  <pre className="font-mono text-[10px] bg-background/60 p-2 rounded overflow-x-auto select-all">{actionsSnippet}</pre>
+                </div>
+                {ciMode === "relay" ? (
+                  <p className="text-green-600 dark:text-green-400 text-[10px]">
+                    ✓ Using stable relay — URL won&apos;t break on restart.
+                  </p>
+                ) : (
+                  <p className="text-amber-600 dark:text-amber-400 text-[10px]">
+                    ⚠ Using direct URL (ephemeral). Enable <strong>Remote Relay</strong> in Settings for a stable URL that survives restarts.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Status alerts: crashed > streaming > terminal active */}
             {isInterrupted && !isStreaming ? (
