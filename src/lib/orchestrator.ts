@@ -249,7 +249,9 @@ export function buildCliArgs(opts: {
 /** Build the system prompt context block injected when inject_session_context is enabled. */
 function buildSessionContextPrompt(sessionId?: string): string | undefined {
   if (getSetting("inject_session_context") !== "true") return undefined;
-  const base = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
+  // Always use localhost for session callbacks — sessions run on the same machine.
+  // csm_base_url is for external access (CI, GCP) only, and may be an ephemeral tunnel.
+  const base = "http://localhost:3000";
   const lines = ["[Session Manager Context]"];
   if (sessionId) {
     lines.push(`Session ID: ${sessionId}`);
@@ -825,7 +827,7 @@ class SessionOrchestrator extends EventEmitter {
   start(projectPath: string, message: string, correlationId?: string, verbose = false, model?: string, previousSessionId?: string, onCompleteUrl?: string, replyToSessionId?: string, delegationTask?: string): ReadableStream {
     let sessionId: string | null = null;
     let lastMessageUpdate = 0; // throttle DB writes
-    const base = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
+    const base = "http://localhost:3000"; // sessions are local — always reachable via localhost
     const contextPrompt = buildSessionContextPrompt(); // no sessionId yet for new sessions
     const delegationPrompt = replyToSessionId
       ? buildDelegationPrompt(replyToSessionId, delegationTask, base)
@@ -1429,7 +1431,7 @@ class SessionOrchestrator extends EventEmitter {
     const userContext = session.last_message
       ? `\nUser's last message: "${session.last_message.slice(0, 200)}"`
       : "";
-    const base = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
+    const base = "http://localhost:3000"; // sessions are local — always reachable via localhost
     const disableHint = `\n\n[Babysitter] To stop auto-resume for this session: curl -s -X DELETE "${base}/api/sessions/${sessionId}/alarm"`;
     const retryPrompt = `You crashed mid-tool-execution. Continue where you left off — do NOT summarize what happened, just keep working.${taskContext}${userContext}${disableHint}`;
 

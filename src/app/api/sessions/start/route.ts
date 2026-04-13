@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     // Codex has no --append-system-prompt, so inject delegation contract into the message itself
     let fullMessage = message.trim();
     if (reply_to_session_id) {
-      const base = (getSetting("csm_base_url") || "http://localhost:3000").replace(/\/$/, "");
+      const base = "http://localhost:3000"; // sessions are local — always reachable via localhost
       fullMessage += [
         "",
         "",
