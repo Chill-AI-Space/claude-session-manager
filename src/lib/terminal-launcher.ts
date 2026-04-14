@@ -1,5 +1,8 @@
 import { execFile, execFileSync, spawn } from "child_process";
 import { promisify } from "util";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +15,17 @@ export interface TerminalOptions {
 /** Wrap string for AppleScript */
 function asString(s: string): string {
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * For long shell commands, write to a temp script and return a short invocation.
+ * AppleScript `do script` / `write text` silently fails on very long strings (~2000+ chars).
+ */
+function wrapLongCommand(shellCmd: string): string {
+  if (shellCmd.length <= 1200) return shellCmd;
+  const tmpFile = path.join(os.tmpdir(), `csm-launch-${Date.now()}.sh`);
+  fs.writeFileSync(tmpFile, `#!/bin/bash\n${shellCmd}\n`, { mode: 0o755 });
+  return `bash ${tmpFile}`;
 }
 
 /** Check if a binary exists on the system */
@@ -61,20 +75,21 @@ export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | 
     return openMacAutoClose(shellCmd, useIterm);
   }
 
+  const safeCmd = wrapLongCommand(shellCmd);
   const script = useIterm
     ? [
         'tell application "iTerm2"',
         "  activate",
         "  set newWindow to (create window with default profile)",
         "  tell current session of newWindow",
-        `    write text ${asString(shellCmd)}`,
+        `    write text ${asString(safeCmd)}`,
         "  end tell",
         "end tell",
       ].join("\n")
     : [
         'tell application "Terminal"',
         "  activate",
-        `  do script ${asString(shellCmd)}`,
+        `  do script ${asString(safeCmd)}`,
         "end tell",
       ].join("\n");
 
