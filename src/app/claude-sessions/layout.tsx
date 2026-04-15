@@ -43,7 +43,6 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   const [geminiResults, setGeminiResults] = useState<GeminiResult[]>([]);
   const [contentSearching, setContentSearching] = useState(false);
   const [sessionsSearching, setSessionsSearching] = useState(false);
-  const [searchPending, setSearchPending] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [generatingTitles, setGeneratingTitles] = useState(false);
   const [titlesGenerated, setTitlesGenerated] = useState<number | null>(null);
@@ -393,16 +392,6 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     if (!searchQuery) setGeminiResults([]);
   }, [searchQuery]);
 
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchPending(false);
-      return;
-    }
-    setSearchPending(true);
-    const timer = setTimeout(() => setSearchPending(false), 250);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
   // Wrapper for Gemini results: set results AND fetch any missing sessions by ID
   const handleGeminiResults = useCallback(async (results: GeminiResult[]) => {
     setGeminiResults(results);
@@ -583,7 +572,6 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
                   projects={projects}
                   selectedProjects={selectedProjects}
                   onProjectFilterChange={setSelectedProjects}
-                  searchPending={searchPending}
                   sessionsSearching={sessionsSearching}
                   contentSearching={contentSearching}
                 />

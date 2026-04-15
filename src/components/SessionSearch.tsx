@@ -14,7 +14,6 @@ interface SessionSearchProps {
   projects?: ProjectListItem[];
   selectedProjects?: string[];
   onProjectFilterChange?: (projectDirs: string[]) => void;
-  searchPending?: boolean;
   contentSearching?: boolean;
   sessionsSearching?: boolean;
 }
@@ -41,7 +40,6 @@ export function SessionSearch({
   projects,
   selectedProjects,
   onProjectFilterChange,
-  searchPending = false,
   contentSearching = false,
   sessionsSearching = false,
 }: SessionSearchProps) {
@@ -169,7 +167,11 @@ export function SessionSearch({
   const scopeLabel = (activeScopes.length === 2 ? "All" : activeScopes[0] || "None")
     + (folderCount > 0 ? ` · ${folderCount} folder${folderCount > 1 ? "s" : ""}` : "");
   const showSearchStatus = searchSessions && internalQuery.trim().length >= 2;
-  const searchStatus = typingPending || searchPending
+  const waitingToSearch =
+    searchSessions &&
+    internalQuery.trim().length >= 2 &&
+    internalQuery !== searchQuery;
+  const searchStatus = typingPending || waitingToSearch
     ? "Waiting to search..."
     : sessionsSearching
       ? "Searching sessions..."
