@@ -2,6 +2,43 @@ import fs from "fs";
 import { ParsedMessage, ContentBlock } from "./types";
 import { iterateLinesSync } from "./utils-server";
 
+function extractToolResultBlocks(content: unknown): ContentBlock[] | null {
+  if (!Array.isArray(content) || content.length === 0) return null;
+
+  const blocks = content.filter(
+    (b): b is { type: string; tool_use_id?: string; content?: string | ContentBlock[] } =>
+      !!b && typeof b === "object" && "type" in b && (b as { type: string }).type === "tool_result"
+  );
+
+  if (blocks.length !== content.length) return null;
+
+  return blocks.map((block) => ({
+    type: "tool_result",
+    tool_use_id: block.tool_use_id ?? "",
+    content: block.content ?? "",
+  }));
+}
+
+function appendToolResults(
+  messages: ParsedMessage[],
+  toolResults: ContentBlock[],
+  fallbackTimestamp: string,
+  fallbackUuid: string
+): void {
+  const last = messages[messages.length - 1];
+  if (last?.type === "assistant" && Array.isArray(last.content)) {
+    last.content = [...last.content, ...toolResults];
+    return;
+  }
+
+  messages.push({
+    uuid: fallbackUuid,
+    type: "assistant",
+    timestamp: fallbackTimestamp,
+    content: toolResults,
+  });
+}
+
 export function readSessionMessages(
   jsonlPath: string,
   options?: { limit?: number; offset?: number }
@@ -58,8 +95,16 @@ export function readSessionMessagesPaginated(
       } else if (obj.type === "user" && obj.message?.role === "user") {
         if (obj.isMeta) continue;
         const content = obj.message.content;
-        const isToolResultOnly = Array.isArray(content) && content.every((b: { type: string }) => b.type === "tool_result");
-        if (isToolResultOnly) continue;
+        const toolResults = extractToolResultBlocks(content);
+        if (toolResults) {
+          appendToolResults(
+            allMessages,
+            toolResults,
+            obj.timestamp || "",
+            obj.uuid || obj.messageId || ""
+          );
+          continue;
+        }
 
         msg = {
           uuid: obj.uuid || obj.messageId || "",
@@ -130,15 +175,17 @@ function parseLines(lines: Iterable<string>): ParsedMessage[] {
       } else if (obj.type === "user" && obj.message?.role === "user") {
         // Skip SDK meta-messages ("Continue from where you left off." injected on --resume)
         if (obj.isMeta) continue;
-        // Skip tool_result-only messages (they're part of assistant flow)
         const content = obj.message.content;
-        const isToolResultOnly =
-          Array.isArray(content) &&
-          content.every(
-            (b: { type: string }) =>
-              b.type === "tool_result"
+        const toolResults = extractToolResultBlocks(content);
+        if (toolResults) {
+          appendToolResults(
+            messages,
+            toolResults,
+            obj.timestamp || "",
+            obj.uuid || obj.messageId || ""
           );
-        if (isToolResultOnly) continue;
+          continue;
+        }
 
         messages.push({
           uuid: obj.uuid || obj.messageId || "",
