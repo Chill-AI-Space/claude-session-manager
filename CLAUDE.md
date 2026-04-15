@@ -77,6 +77,16 @@ To update later: `scripts\update.bat`
 Always test on dev first, then deploy to production.
 **MANDATORY: After every deploy, run the health checks (step 3). If any check fails — fix and redeploy. Do NOT consider the deploy done until all checks pass.**
 
+### Hotfix rule for this repo
+
+For this repository, default to hotfixing safe, atomic, user-visible issues immediately:
+- fix the issue locally
+- verify with the smallest meaningful test or smoke check
+- commit and push to `main`
+- restart production or the local production-like server right away
+
+Do not leave a confirmed hotfix sitting only in the working tree unless the change is risky, broad, or explicitly blocked by the user.
+
 ### 1. Start dev server and verify
 
 ```bash

@@ -114,7 +114,6 @@ export function SessionSearch({
     }, 300);
     return () => {
       clearTimeout(settingsDebounce.current);
-      clearTimeout(searchDebounce.current);
     };
   }, [internalQuery, searchSettings]);
 
