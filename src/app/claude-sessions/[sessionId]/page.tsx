@@ -410,7 +410,7 @@ export default function SessionDetailPage({
       // Cleanup on unmount or session change
       abortRef.current?.abort("cancelled");
     };
-  }, [sessionId, fetchSession]);
+  }, [apiUrl, sessionId, fetchSession, startBackoff]);
 
   // Auto-poll for new messages when session is active in terminal (not via web).
   // During streaming, poll at a slower rate just for liveness detection so the
@@ -945,7 +945,9 @@ export default function SessionDetailPage({
         setStreamError(null);
         fetchSession({ clearExtras: true }).catch(() => {});
       } else {
-        // No response — start backoff poll so session data refreshes eventually
+        // Status-only flows (e.g. Codex resume) still update session metadata immediately.
+        fetchSession().catch(() => {});
+        // No assistant text yet — start backoff poll so session data refreshes eventually
         startBackoff();
       }
     } catch (err) {
@@ -968,7 +970,7 @@ export default function SessionDetailPage({
       // Schedule next message asynchronously to avoid concurrent streaming
       setTimeout(() => processQueueRef.current(), 0);
     }
-  }, [sessionId, fetchSession]);
+  }, [apiUrl, sessionId, fetchSession, startBackoff]);
   processQueueRef.current = processQueue;
 
   // Auto-find matching message for highlight query, loading earlier batches if needed

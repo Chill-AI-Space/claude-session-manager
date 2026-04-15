@@ -3,10 +3,24 @@ import { getDb, getSetting, logAction } from "@/lib/db";
 import type { SessionRow } from "@/lib/types";
 import { killSessionProcesses } from "@/lib/process-detector";
 import { getOrchestrator } from "@/lib/orchestrator";
+import { getCodexPath } from "@/lib/codex-bin";
+import { openInTerminal } from "@/lib/terminal-launcher";
 import { sseResponse, SSE_HEADERS } from "@/lib/claude-runner";
 import { resolveNode, proxySSE } from "@/lib/remote-compute";
 
 export const dynamic = "force-dynamic";
+
+function ansiQuote(s: string): string {
+  return "$'" +
+    s
+      .replace(/\\/g, "\\\\")
+      .replace(/'/g, "\\'")
+      .replace(/\r/g, "\\r")
+      .replace(/\n/g, "\\n")
+      .replace(/\t/g, "\\t")
+      .replace(/"/g, '\\"') +
+    "'";
+}
 
 export async function POST(
   request: NextRequest,
@@ -93,14 +107,39 @@ export async function POST(
   }
 
   if (agentType === "codex") {
-    // Codex is a TUI — we can't inject messages directly.
-    // Store the reply as last_message so it's visible in the UI and in future Codex resume.
-    // If Codex is still open, user will see it; if closed, it's preserved for next open.
+    // Codex cannot be driven over the Claude SSE runner, so we resume the session
+    // in a terminal with the reply as the initial prompt.
     db.prepare(
       "UPDATE sessions SET last_message = ?, last_message_role = 'user', modified_at = ? WHERE session_id = ?"
-    ).run(message.slice(0, 500), new Date().toISOString(), sessionId);
-    logAction("service", "codex_reply_stored", `msg_len:${message.length}`, sessionId);
-    return Response.json({ ok: true, status: "stored", note: "Codex session — reply stored in last_message, will appear when Codex is next opened" });
+    ).run(message.slice(0, 1000), new Date().toISOString(), sessionId);
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        const send = (data: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        };
+
+        try {
+          const bin = getCodexPath();
+          const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
+          const codexSkipFlag = skipPermissions ? " --dangerously-bypass-approvals-and-sandbox" : "";
+          const shellCmd = `cd "${session.project_path}" && "${bin}"${codexSkipFlag} resume "${sessionId}" ${ansiQuote(message)}`;
+          const { terminal } = await openInTerminal(shellCmd);
+          logAction("service", "codex_reply_opened", `${terminal} msg_len:${message.length}`, sessionId);
+          send({ type: "status", text: `Codex resumed in ${terminal}` });
+          send({ type: "done", result: "Codex resumed", is_error: false });
+        } catch (err) {
+          const text = err instanceof Error ? err.message : String(err);
+          logAction("service", "codex_reply_error", text, sessionId);
+          send({ type: "error", text });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, { headers: SSE_HEADERS });
   }
 
   // Auto-kill terminal sessions if setting is enabled
