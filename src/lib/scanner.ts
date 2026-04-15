@@ -33,6 +33,14 @@ interface JsonlMetadata {
   fullText: string;
 }
 
+export function shouldSkipSessionIncremental(
+  existingMtime: number,
+  fileMtime: number,
+  hasFtsIndex: boolean
+): boolean {
+  return Math.abs(existingMtime - fileMtime) < 1000 && hasFtsIndex;
+}
+
 function extractMetadataFromJsonl(filePath: string): JsonlMetadata | null {
   try {
     let stat: fs.Stats;
@@ -228,12 +236,20 @@ export async function scanSessions(
 
   // Get existing mtimes for incremental scan
   const existingMtimes = new Map<string, number>();
+  const existingFtsIds = new Set<string>();
   if (mode === "incremental") {
     const rows = db
       .prepare("SELECT session_id, file_mtime FROM sessions")
       .all() as { session_id: string; file_mtime: number }[];
     for (const row of rows) {
       existingMtimes.set(row.session_id, row.file_mtime);
+    }
+
+    const ftsRows = db
+      .prepare("SELECT session_id FROM sessions_fts")
+      .all() as { session_id: string }[];
+    for (const row of ftsRows) {
+      existingFtsIds.add(row.session_id);
     }
   }
 
@@ -316,7 +332,8 @@ export async function scanSessions(
 
       if (mode === "incremental" && existingMtimes.has(sessionId)) {
         const existingMtime = existingMtimes.get(sessionId)!;
-        if (Math.abs(existingMtime - fileMtime) < 1000) {
+        const hasFtsIndex = existingFtsIds.has(sessionId);
+        if (shouldSkipSessionIncremental(existingMtime, fileMtime, hasFtsIndex)) {
           sessionsSkipped++;
           projectDirs.add(path.basename(path.dirname(filePath)));
           continue;
@@ -349,6 +366,7 @@ export async function scanSessions(
       // Handle utility sessions — delete from DB
       if (metadata.firstPrompt?.startsWith("Generate a short descriptive title")) {
         db.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
+        db.prepare("DELETE FROM sessions_fts WHERE session_id = ?").run(sessionId);
         continue;
       }
 
