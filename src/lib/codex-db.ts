@@ -289,3 +289,44 @@ export function codexSessionCompleted(rolloutPath: string): boolean {
   } catch { /* ignore */ }
   return false;
 }
+
+export function extractCodexSearchText(rolloutPath: string): string {
+  if (!rolloutPath || !fs.existsSync(rolloutPath)) return "";
+
+  const textParts: string[] = [];
+  let textPartsSize = 0;
+  const MAX_FTS_TEXT = 20_000;
+
+  try {
+    const content = fs.readFileSync(rolloutPath, "utf-8");
+    const lines = content.split(/\r?\n/);
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+
+      try {
+        const ev = JSON.parse(line) as {
+          type?: string;
+          payload?: { type?: string; message?: unknown };
+        };
+        if (ev.type !== "event_msg") continue;
+
+        const eventType = ev.payload?.type;
+        if (eventType !== "user_message" && eventType !== "agent_message") continue;
+
+        const message = typeof ev.payload?.message === "string" ? ev.payload.message.trim() : "";
+        if (!message) continue;
+
+        textParts.push(message);
+        textPartsSize += message.length;
+        if (textPartsSize >= MAX_FTS_TEXT) break;
+      } catch {
+        // Skip malformed lines
+      }
+    }
+  } catch {
+    return "";
+  }
+
+  return textParts.join("\n");
+}

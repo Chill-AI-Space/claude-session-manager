@@ -4,6 +4,7 @@ import { getActiveSessionIds } from "@/lib/process-detector";
 import { SessionRow, SessionListItem } from "@/lib/types";
 import { fetchAllRemoteSessions } from "@/lib/remote-compute";
 import { ensureCodexBackgroundScanner } from "@/lib/codex-background-scanner";
+import { codexSessionCompleted } from "@/lib/codex-db";
 
 export const dynamic = "force-dynamic";
 
@@ -122,34 +123,44 @@ export async function GET(request: NextRequest) {
     activeIds = new Set();
   }
 
-  const sessions: SessionListItem[] = rows.map((row) => ({
-    session_id: row.session_id,
-    project_dir: row.project_dir,
-    project_path: row.project_path,
-    display_name:
-      row.project_path.split(/[\\/]/).pop() || row.project_dir,
-    first_prompt: row.first_prompt,
-    last_message: row.last_message,
-    generated_title: row.generated_title,
-    custom_name: row.custom_name,
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    pinned: row.pinned === 1,
-    archived: row.archived === 1,
-    message_count: row.message_count,
-    model: row.model,
-    git_branch: row.git_branch,
-    created_at: row.created_at,
-    modified_at: row.modified_at,
-    total_input_tokens: row.total_input_tokens,
-    total_output_tokens: row.total_output_tokens,
-    is_active: (row as SessionRow & { agent_type?: string }).agent_type === "forge" ||
-               (row as SessionRow & { agent_type?: string }).agent_type === "codex"
-      ? (Date.now() - row.file_mtime) < 5 * 60 * 1000
-      : activeIds.has(row.session_id),
-    last_message_role: (row as SessionRow & { last_message_role?: string }).last_message_role ?? null,
-    has_result: !!row.has_result,
-    agent_type: (row as SessionRow & { agent_type?: string }).agent_type ?? "claude",
-  }));
+  const sessions: SessionListItem[] = rows.map((row) => {
+    const agentType = (row as SessionRow & { agent_type?: string }).agent_type ?? "claude";
+    const fileAgeMs = Date.now() - row.file_mtime;
+    let isActive: boolean;
+    if (agentType === "codex") {
+      isActive = !codexSessionCompleted(row.jsonl_path) && fileAgeMs < 5 * 60 * 1000;
+    } else if (agentType === "forge") {
+      isActive = fileAgeMs < 5 * 60 * 1000;
+    } else {
+      isActive = activeIds.has(row.session_id);
+    }
+
+    return {
+      session_id: row.session_id,
+      project_dir: row.project_dir,
+      project_path: row.project_path,
+      display_name:
+        row.project_path.split(/[\\/]/).pop() || row.project_dir,
+      first_prompt: row.first_prompt,
+      last_message: row.last_message,
+      generated_title: row.generated_title,
+      custom_name: row.custom_name,
+      tags: row.tags ? JSON.parse(row.tags) : [],
+      pinned: row.pinned === 1,
+      archived: row.archived === 1,
+      message_count: row.message_count,
+      model: row.model,
+      git_branch: row.git_branch,
+      created_at: row.created_at,
+      modified_at: row.modified_at,
+      total_input_tokens: row.total_input_tokens,
+      total_output_tokens: row.total_output_tokens,
+      is_active: isActive,
+      last_message_role: (row as SessionRow & { last_message_role?: string }).last_message_role ?? null,
+      has_result: !!row.has_result,
+      agent_type: agentType,
+    };
+  });
 
   const totalCount = db
     .prepare(`SELECT COUNT(*) as count FROM sessions ${whereClause}`)

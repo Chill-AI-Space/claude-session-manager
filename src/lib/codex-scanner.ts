@@ -6,9 +6,10 @@
 import type Database from "better-sqlite3";
 import fs from "fs";
 import os from "os";
-import path from "path";
-import { logAction } from "./db";
+import { indexSessionContent } from "./db";
 import { listCodexThreads } from "./codex-db";
+import { codexSessionCompleted, extractCodexSearchText } from "./codex-db";
+import { shouldSkipSessionIncremental } from "./scanner";
 import * as dlog from "./debug-logger";
 
 /** Convert a filesystem path to a project_dir key (same convention as Claude) */
@@ -27,6 +28,18 @@ export async function scanCodexSessions(
 
   let scanned = 0;
   let skipped = 0;
+  const existingFtsIds = new Set<string>();
+
+  if (mode === "incremental") {
+    const ftsRows = db
+      .prepare("SELECT session_id FROM sessions_fts")
+      .all() as { session_id: string }[];
+    for (const row of ftsRows) {
+      existingFtsIds.add(row.session_id);
+    }
+  }
+
+  const ftsQueue: Array<{ sessionId: string; text: string }> = [];
 
   const insertBatch = db.transaction(() => {
     for (const thread of threads) {
@@ -49,7 +62,8 @@ export async function scanCodexSessions(
       // Incremental scan: skip if unchanged
       if (mode === "incremental" && existingMtimes.has(threadId)) {
         const existing = existingMtimes.get(threadId)!;
-        if (Math.abs(existing - fileMtime) < 1000) {
+        const hasFtsIndex = existingFtsIds.has(threadId);
+        if (shouldSkipSessionIncremental(existing, fileMtime, hasFtsIndex)) {
           skipped++;
           continue;
         }
@@ -68,6 +82,8 @@ export async function scanCodexSessions(
 
       const firstPrompt = thread.first_user_message?.slice(0, 500) || null;
       const title = thread.title || null;
+      const hasResult = codexSessionCompleted(rolloutPath);
+      const fullText = extractCodexSearchText(rolloutPath);
 
       upsertSession.run({
         session_id: threadId,
@@ -80,7 +96,7 @@ export async function scanCodexSessions(
         first_prompt: firstPrompt,
         last_message: firstPrompt,
         last_message_role: null,
-        has_result: 1,
+        has_result: hasResult ? 1 : 0,
         message_count: 0,
         total_input_tokens: thread.tokens_used ?? 0,
         total_output_tokens: 0,
@@ -96,11 +112,15 @@ export async function scanCodexSessions(
         `UPDATE sessions SET agent_type = 'codex', model = ?${title ? ", generated_title = COALESCE(generated_title, ?)" : ""} WHERE session_id = ?`
       ).run(...(title ? [model, title, threadId] : [model, threadId]));
 
+      ftsQueue.push({ sessionId: threadId, text: fullText });
       scanned++;
     }
   });
 
   insertBatch();
+  for (const { sessionId, text } of ftsQueue) {
+    indexSessionContent(sessionId, text);
+  }
 
   if (scanned > 0 || skipped > 0) {
     dlog.info("codex-scanner", `codex scan: ${scanned} scanned, ${skipped} skipped`);
