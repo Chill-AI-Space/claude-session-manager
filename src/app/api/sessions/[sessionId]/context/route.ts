@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getDb, getSetting } from "@/lib/db";
 import { SessionRow } from "@/lib/types";
 import { readSessionMessages, messagesToText } from "@/lib/session-reader";
+import { resolveNode, proxyJSON } from "@/lib/remote-compute";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,21 @@ export async function POST(
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   const { sessionId } = await params;
+
+  const nodeId = req.nextUrl.searchParams.get("node");
+  const node = resolveNode(nodeId);
+  if (node) {
+    try {
+      const body = await req.json();
+      const res = await proxyJSON(node, `/api/sessions/${sessionId}/context`, "POST", body);
+      const data = await res.json();
+      return Response.json(data, { status: res.status });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return Response.json({ error: `Remote context fetch failed: ${msg}` }, { status: 502 });
+    }
+  }
+
   const body = await req.json();
   const question = body.question;
 
@@ -19,14 +35,14 @@ export async function POST(
 
   const db = getDb();
   const session = db
-    .prepare("SELECT jsonl_path, generated_title, custom_name FROM sessions WHERE session_id = ?")
+    .prepare("SELECT session_id, jsonl_path, generated_title, custom_name, agent_type FROM sessions WHERE session_id = ?")
     .get(sessionId) as Pick<SessionRow, "jsonl_path" | "generated_title" | "custom_name"> | undefined;
 
   if (!session) {
     return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
-  const messages = readSessionMessages(session.jsonl_path);
+  const messages = await readMessagesForContext(sessionId, session as Pick<SessionRow, "jsonl_path" | "agent_type">);
   if (messages.length === 0) {
     return Response.json({ error: "Could not read session file" }, { status: 500 });
   }
@@ -105,6 +121,22 @@ Return a concise summary (500-2000 chars) of ONLY the relevant context. If nothi
     const fallback = smartTruncate(transcript, 4000);
     return Response.json({ context: fallback, method: "truncated", gemini_configured: true });
   }
+}
+
+async function readMessagesForContext(
+  sessionId: string,
+  session: Pick<SessionRow, "jsonl_path" | "agent_type">
+) {
+  const agentType = session.agent_type ?? "claude";
+  if (agentType === "codex") {
+    const { readCodexMessages } = await import("@/lib/codex-db");
+    return readCodexMessages(session.jsonl_path);
+  }
+  if (agentType === "forge") {
+    const { readForgeMessages } = await import("@/lib/forge-db");
+    return readForgeMessages(sessionId);
+  }
+  return readSessionMessages(session.jsonl_path);
 }
 
 /** Smart truncation: first message + last messages (more useful than head-only) */

@@ -101,6 +101,7 @@ export async function GET(
         process_vitals: active
           ? (getSessionVitals(sessionId) ?? getSessionVitalsByCwd(codexThread.cwd))
           : null,
+        alarm: getSessionAlarm(sessionId),
       });
     }
     return Response.json(
@@ -117,6 +118,23 @@ export async function GET(
   if (agentType === "codex") {
     const { readCodexMessages, codexSessionCompleted } = await import("@/lib/codex-db");
     const codexMessages = readCodexMessages(session.jsonl_path);
+    let liveLastMessageRole: string | null = session.last_message_role ?? null;
+    for (let i = codexMessages.length - 1; i >= 0; i--) {
+      const msg = codexMessages[i];
+      if (msg.type === "assistant") {
+        liveLastMessageRole = "assistant";
+        break;
+      }
+      if (msg.type === "user") {
+        const content = msg.content;
+        const isToolResult =
+          Array.isArray(content) &&
+          content.length > 0 &&
+          content.every((b) => (b as { type: string }).type === "tool_result");
+        liveLastMessageRole = isToolResult ? "tool_result" : "user";
+        break;
+      }
+    }
     let fileMtime = session.file_mtime;
     try {
       const fs2 = await import("fs");
@@ -132,11 +150,12 @@ export async function GET(
       messages: codexMessages,
       messages_start: 0,
       messages_total: codexMessages.length,
-      metadata: session,
+      metadata: { ...session, last_message_role: liveLastMessageRole },
       is_active: active,
       has_result: codexMessages.some(m => m.type === "assistant"),
       file_age_ms: Math.round(fileAgeMs),
       process_vitals: active ? (getSessionVitals(sessionId) ?? getSessionVitalsByCwd(session.project_path)) : null,
+      alarm: getSessionAlarm(sessionId),
     });
   }
 
@@ -161,6 +180,7 @@ export async function GET(
       is_active: active,
       has_result: forgeMessages.some(m => m.type === "assistant"),
       file_age_ms: Math.round(fileAgeMs),
+      alarm: getSessionAlarm(sessionId),
     });
   }
 

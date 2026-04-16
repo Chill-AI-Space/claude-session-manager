@@ -1,6 +1,7 @@
 "use client";
 
 import { Brain } from "lucide-react";
+import type { AgentType } from "@/components/AgentToggleButton";
 
 export interface ModelPreset {
   id: string;
@@ -78,11 +79,41 @@ export const MODEL_PRESETS: ModelPreset[] = [
   },
 ];
 
+export function getModelPresetsForAgent(agent: AgentType): ModelPreset[] {
+  if (agent === "forge") {
+    return MODEL_PRESETS.filter(
+      (preset) => preset.model.startsWith("models/gemini") || preset.model.startsWith("gemini"),
+    );
+  }
+
+  if (agent === "codex") {
+    return MODEL_PRESETS.filter((preset) => preset.model.startsWith("gpt"));
+  }
+
+  return MODEL_PRESETS.filter((preset) => preset.model.startsWith("claude"));
+}
+
+export function getDefaultModelForAgent(agent: AgentType, claudeModel?: string): string {
+  if (agent === "forge") {
+    if (claudeModel && (claudeModel.startsWith("models/gemini") || claudeModel.startsWith("gemini"))) {
+      return claudeModel;
+    }
+    return "models/gemini-2.5-flash";
+  }
+
+  if (agent === "codex") {
+    return "gpt-5.4";
+  }
+
+  return claudeModel || "claude-sonnet-4-6";
+}
+
 interface ModelSelectorProps {
   settingKey: string;
   currentModel: string;
   onUpdate: (key: string, value: string) => void;
   label?: string;
+  presets?: ModelPreset[];
 }
 
 export function ModelSelector({
@@ -90,9 +121,10 @@ export function ModelSelector({
   currentModel,
   onUpdate,
   label = "AI Model",
+  presets = MODEL_PRESETS,
 }: ModelSelectorProps) {
   // Find current preset or use custom
-  const currentPreset = MODEL_PRESETS.find((p) => p.model === currentModel);
+  const currentPreset = presets.find((p) => p.model === currentModel);
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     onUpdate(settingKey, e.target.value);
@@ -108,7 +140,7 @@ export function ModelSelector({
           onChange={handleChange}
           className="pl-8 pr-8 py-1.5 text-xs h-7 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground cursor-pointer min-w-[200px] appearance-none"
         >
-          {MODEL_PRESETS.map((preset) => (
+          {presets.map((preset) => (
             <option key={preset.id} value={preset.model}>
               {preset.name} {preset.description && `- ${preset.description}`}
             </option>

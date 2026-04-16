@@ -87,6 +87,18 @@ For this repository, default to hotfixing safe, atomic, user-visible issues imme
 
 Do not leave a confirmed hotfix sitting only in the working tree unless the change is risky, broad, or explicitly blocked by the user.
 
+### Commit and push rule
+
+For this repository, do not leave completed feature work only in the working tree.
+
+After a feature or hotfix is verified locally with the smallest meaningful check:
+- commit it immediately
+- push directly to `main`
+- run the required health check or focused verification for the changed behavior
+- report the commit hash and what was verified
+
+Do not accumulate multiple finished changes in one uncommitted batch unless the user explicitly asks for that.
+
 ### 1. Start dev server and verify
 
 ```bash
@@ -178,6 +190,40 @@ curl -s -X POST http://localhost:3000/api/debug/ping | python3 -c "import json,s
 - **`spawn claude ENOENT`** — launchd PATH doesn't include `/Users/vova/.local/bin`. Fix: edit `~/Library/LaunchAgents/com.vova.claude-sessions.plist`, add `/Users/vova/.local/bin` to PATH, reload launchd.
 - **Tray icon not appearing** — run `node scripts/tray.js` manually to debug. If `tray_darwin_release` gets EACCES: `find ~/.cache/node-systray -name 'tray_darwin_*' -exec chmod +x {} \;`
 - **launchd keeps restarting/dying** — check `launchctl list com.vova.claude-sessions` for LastExitStatus; check both log files.
+
+### Scheduled jobs for Codex
+
+Use the built-in scheduler helper when you want Codex to "set up a cron job" without editing `crontab` manually.
+
+Install the minute-runner once:
+
+```bash
+node scripts/cron-runner.js install
+```
+
+Add a scheduled job:
+
+```bash
+node scripts/cron-runner.js add \
+  --name morning-review \
+  --cron "0 9 * * 1-5" \
+  --cwd /absolute/project/path \
+  --command "codex 'review the repo, summarize blockers, and update STATUS.md'"
+```
+
+Inspect jobs:
+
+```bash
+node scripts/cron-runner.js list
+```
+
+Remove a job:
+
+```bash
+node scripts/cron-runner.js remove --name morning-review
+```
+
+Details: [docs/cron-jobs.md](docs/cron-jobs.md)
 
 ### Common issues (Windows)
 

@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud, Webhook } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud, Webhook, Send } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -17,13 +17,13 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import Link from "next/link";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
-import { MODEL_PRESETS } from "@/components/settings/ModelSelector";
+import { getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useComputeNode } from "@/hooks/useComputeNode";
-import { AgentToggleButton, type AgentType, DEFAULT_MODEL } from "@/components/AgentToggleButton";
+import { AgentToggleButton, type AgentType } from "@/components/AgentToggleButton";
 
 
 const CTX_MAX = 200_000;
@@ -118,6 +118,14 @@ interface SessionDetailData {
   file_age_ms?: number;
   process_vitals?: ProcessVitals | null;
   alarm?: { session_id: string; message: string; check_after_ms: number; set_at: number } | null;
+  _remote?: boolean;
+}
+
+interface SessionAlarmData {
+  session_id: string;
+  message: string;
+  check_after_ms: number;
+  set_at: number;
 }
 
 export default function SessionDetailPage({
@@ -172,7 +180,8 @@ export default function SessionDetailPage({
   const [hasReplied, setHasReplied] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [focusError, setFocusError] = useState<string | null>(null);
-  const [focusOk, setFocusOk] = useState(false);
+  const [focusOk, setFocusOk] = useState<"focused" | "opened" | null>(null);
+  const [closeOk, setCloseOk] = useState(false);
 
   const replyInputRef = useRef<ReplyInputHandle>(null);
 
@@ -232,6 +241,7 @@ export default function SessionDetailPage({
   const [startingNewSession, setStartingNewSession] = useState(false);
   const [newSessionModel, setNewSessionModel] = useState("");
   const [showNewSessionOpts, setShowNewSessionOpts] = useState(false);
+  const [contextTransferState, setContextTransferState] = useState<"idle" | "loading" | "applied" | "empty" | "error" | "off">("idle");
   const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
   const [newSessionMessage, setNewSessionMessage] = useState("");
   const newSessionInputRef = useRef<HTMLTextAreaElement>(null);
@@ -241,6 +251,10 @@ export default function SessionDetailPage({
   const newAutodetect = useAutodetect();
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
   const compute = useComputeNode();
+
+  useEffect(() => {
+    setNewSessionModel(getDefaultModelForAgent(newSessionAgent, settings?.claude_model));
+  }, [newSessionAgent, settings?.claude_model]);
 
   // Issue submission
   const [issueCategory, setIssueCategory] = useState<string | null>(null);
@@ -303,6 +317,16 @@ export default function SessionDetailPage({
   const prevTotalRef = useRef(0);
   // Counter to invalidate stale fetches without using AbortController (avoids unhandled rejection in Next.js dev overlay)
   const fetchGenRef = useRef(0);
+  const fetchAlarm = useCallback(async (): Promise<SessionAlarmData | null> => {
+    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/alarm`));
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json && typeof json === "object" && "session_id" in json) {
+      return json as SessionAlarmData;
+    }
+    return null;
+  }, [apiUrl, sessionId]);
+
   const fetchSession = useCallback(async ({ clearExtras = false } = {}) => {
     const gen = ++fetchGenRef.current;
     try {
@@ -313,6 +337,10 @@ export default function SessionDetailPage({
         return;
       }
       const json = await res.json();
+      if (gen !== fetchGenRef.current) return; // stale
+      if (!("alarm" in json)) {
+        json.alarm = await fetchAlarm();
+      }
       if (gen !== fetchGenRef.current) return; // stale
       const prevTotal = prevTotalRef.current;
       prevTotalRef.current = json.messages_total;
@@ -332,7 +360,7 @@ export default function SessionDetailPage({
     } finally {
       setLoading(false);
     }
-  }, [sessionId, apiUrl]);
+  }, [sessionId, apiUrl, fetchAlarm]);
 
   // Backoff polling trigger — incremented to start a new backoff cycle
   const [backoffTrigger, setBackoffTrigger] = useState(0);
@@ -1167,6 +1195,24 @@ export default function SessionDetailPage({
     }
   };
 
+  const contextTransferBadge = (() => {
+    const usingGemini = settings?.gemini_configured === "true";
+    switch (contextTransferState) {
+      case "loading":
+        return { label: "Context loading", className: "border-sky-500/40 bg-sky-500/10 text-sky-400" };
+      case "applied":
+        return { label: usingGemini ? "Smart context applied" : "Context applied", className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400" };
+      case "empty":
+        return { label: "No useful context", className: "border-amber-500/40 bg-amber-500/10 text-amber-400" };
+      case "error":
+        return { label: "Context failed", className: "border-red-500/40 bg-red-500/10 text-red-400" };
+      case "off":
+        return { label: "Context off", className: "border-border bg-background/60 text-muted-foreground/70" };
+      default:
+        return { label: usingGemini ? "Smart context ready" : "Context ready", className: "border-border bg-background/60 text-muted-foreground/70" };
+    }
+  })();
+
   const handleStartNewSession = async (overrideMessage?: string) => {
     const msg = (overrideMessage || newSessionMessage).trim();
     if (!msg || !newSessionPath || startingNewSession) return;
@@ -1178,19 +1224,33 @@ export default function SessionDetailPage({
 
       // Optionally prepend smart context from previous session
       if (includeSummary) {
+        setContextTransferState("loading");
         try {
           const ctxRes = await fetch(apiUrl(`/api/sessions/${sessionId}/context`), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ question: msg }),
           });
-          if (ctxRes.ok) {
+          if (!ctxRes.ok) {
+            const err = await ctxRes.json().catch(() => ({ error: "Failed to fetch context" }));
+            toast.error(`Context transfer failed: ${err.error || "starting without context"}`);
+            setContextTransferState("error");
+          } else {
             const ctxData = await ctxRes.json();
             if (ctxData.context && ctxData.context.length > 20) {
               fullMessage = `${msg}\n\n<context>\nRelevant context from previous session:\n${ctxData.context}\n</context>`;
+              setContextTransferState("applied");
+            } else {
+              toast("No useful context found — starting without context");
+              setContextTransferState("empty");
             }
           }
-        } catch { /* non-critical — send without context */ }
+        } catch {
+          toast.error("Context transfer failed: network error, starting without context");
+          setContextTransferState("error");
+        }
+      } else {
+        setContextTransferState("off");
       }
 
       const startUrl = compute.nodeId
@@ -1226,7 +1286,7 @@ export default function SessionDetailPage({
       setNewSessionMessage("");
       if (overrideMessage) replyInputRef.current?.setText("");
       setStartingNewSession(false);
-      toast.success("Session started — will appear in list shortly");
+      toast.success(fullMessage === msg ? "Session started — without extra context" : "Session started with context");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start new session");
       setStartingNewSession(false);
@@ -1362,18 +1422,37 @@ export default function SessionDetailPage({
 
   const focusTerminal = async () => {
     setFocusError(null);
-    setFocusOk(false);
+    setFocusOk(null);
     try {
       const res = await fetch(apiUrl(`/api/sessions/${sessionId}/focus`), { method: "POST" });
       if (!res.ok) {
         const err = await res.json();
         setFocusError(err.error ?? "Failed to focus terminal");
       } else {
-        setFocusOk(true);
-        setTimeout(() => setFocusOk(false), 2000);
+        const payload = await res.json();
+        const mode = payload.mode === "opened" ? "opened" : "focused";
+        setFocusOk(mode);
+        setTimeout(() => setFocusOk(null), 2000);
       }
     } catch {
       setFocusError("Failed to focus terminal");
+    }
+  };
+
+  const closeTerminal = async () => {
+    setFocusError(null);
+    setCloseOk(false);
+    try {
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/close`), { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json();
+        setFocusError(err.error ?? "Failed to close terminal");
+      } else {
+        setCloseOk(true);
+        setTimeout(() => setCloseOk(false), 2000);
+      }
+    } catch {
+      setFocusError("Failed to close terminal");
     }
   };
 
@@ -1899,15 +1978,19 @@ export default function SessionDetailPage({
                 <Terminal className="h-3.5 w-3.5" />
                 Open Terminal
               </Button>
-              {data.is_active && (
+              {!data._remote && (
                 <>
                   <Button size="sm" variant="ghost" className="gap-1 text-xs h-7" onClick={focusTerminal} title="Bring terminal into focus">
                     <Crosshair className="h-3.5 w-3.5" />
-                    {focusOk ? "Focused!" : "Focus"}
+                    {focusOk === "focused" ? "Focused!" : focusOk === "opened" ? "Opened!" : "Focus"}
                   </Button>
-                  {!terminalKilled && (
+                  <Button size="sm" variant="ghost" className="gap-1 text-xs h-7" onClick={closeTerminal} title="Close terminal window or tab">
+                    <X className="h-3.5 w-3.5" />
+                    {closeOk ? "Closed!" : "Close"}
+                  </Button>
+                  {data.is_active && !terminalKilled && (
                     <Button size="sm" variant="ghost" className="gap-1 text-xs h-7 text-destructive/60 hover:text-destructive" onClick={killTerminal} title="Kill terminal session">
-                      <X className="h-3.5 w-3.5" />
+                      <Flame className="h-3.5 w-3.5" />
                       Kill
                     </Button>
                   )}
@@ -2315,6 +2398,7 @@ export default function SessionDetailPage({
                   onClick={() => {
                     const next = !showNewSessionOpts;
                     setShowNewSessionOpts(next);
+                    setContextTransferState(includeSummary ? "idle" : "off");
                     if (next && !newSessionPath) {
                       const msg = replyInputRef.current?.getText() || "";
                       if (msg.trim()) handleNewSessionAutodetect(msg);
@@ -2389,153 +2473,151 @@ export default function SessionDetailPage({
 
             {/* New session options — visible after clicking New ↗ */}
             {replyMode === "reply" && showNewSessionOpts && settings?.new_session_from_reply === "true" && (
-              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                <button
-                  onClick={() => setFolderBrowserOpen(true)}
-                  className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded min-w-0 ${
-                    newSessionPath
-                      ? "text-violet-500 hover:text-violet-600 hover:bg-violet-500/10"
-                      : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
-                  }`}
-                  title={newSessionPath || "Select folder for new session"}
-                >
-                  <FolderOpen className="h-3 w-3 shrink-0" />
-                  <span className="truncate max-w-[140px]">
-                    {newSessionPath ? newSessionPath.split(/[\\/]/).pop() : "folder..."}
-                  </span>
-                </button>
-                <button
-                  onClick={() => {
-                    const msg = replyInputRef.current?.getText() || "";
-                    handleNewSessionAutodetect(msg);
-                  }}
-                  disabled={newAutodetect.detecting}
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-violet-500 disabled:opacity-30 transition-colors px-1.5 py-0.5 rounded hover:bg-violet-500/10"
-                  title="Auto-detect project from your prompt"
-                >
-                  {newAutodetect.detecting ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3 w-3" />
-                  )}
-                  <span>auto</span>
-                </button>
-                <button
-                  onClick={skipPerms.toggle}
-                  className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
-                    skipPerms.value
-                      ? "text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
-                      : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
-                  }`}
-                  title={skipPerms.value ? "Skip permissions enabled" : "Skip permissions disabled"}
-                >
-                  <ShieldOff className="h-3 w-3" />
-                  <span>skip perms</span>
-                  <span className={`font-medium ${skipPerms.value ? "text-amber-400" : "text-muted-foreground/60"}`}>
-                    {skipPerms.value ? "on" : "off"}
-                  </span>
-                </button>
-                <AgentToggleButton
-                  agent={newSessionAgent}
-                  onCycle={(next) => {
-                    setNewSessionAgent(next);
-                    setNewSessionModel(DEFAULT_MODEL[next]);
-                  }}
-                  size="md"
-                />
-                {compute.nodes.length > 0 && (
+              <div className="mt-2 rounded-xl border border-border bg-muted/20 p-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-medium text-foreground">New session setup</div>
+                  <div className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] ${contextTransferBadge.className}`}>
+                    {contextTransferState === "loading" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Webhook className="h-3 w-3" />}
+                    <span>{contextTransferBadge.label}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <button
-                    onClick={compute.toggle}
-                    className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
-                      compute.isLocal
-                        ? "text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10"
-                        : "text-sky-500 hover:text-sky-400 hover:bg-sky-500/10"
+                    onClick={() => setFolderBrowserOpen(true)}
+                    className={`flex items-center gap-1 text-[11px] transition-colors px-2 py-1 rounded-md min-w-0 border ${
+                      newSessionPath
+                        ? "border-violet-500/30 bg-violet-500/10 text-violet-400 hover:border-violet-500/50"
+                        : "border-border text-muted-foreground hover:text-foreground hover:bg-background/70"
                     }`}
-                    title={compute.isLocal ? "Running locally — click to switch to VM" : `Running on ${compute.currentNode?.name} — click to switch`}
+                    title={newSessionPath || "Select folder for new session"}
                   >
-                    {compute.isLocal ? <Monitor className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
-                    <span className="font-medium">
-                      {compute.isLocal ? "local" : compute.currentNode?.name ?? "vm"}
+                    <FolderOpen className="h-3 w-3 shrink-0" />
+                    <span className="truncate max-w-[160px]">
+                      {newSessionPath ? newSessionPath.split(/[\\/]/).pop() : "Choose folder"}
                     </span>
                   </button>
-                )}
-                <label
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground cursor-pointer select-none px-1 py-0.5 rounded hover:bg-muted/50"
-                  title={
-                    !includeSummary
-                      ? "Include relevant context from this session"
-                      : settings?.gemini_configured === "true"
-                        ? "Smart context: Gemini extracts only what's relevant"
-                        : "Basic context: truncated transcript"
-                  }
-                >
-                  <input
-                    type="checkbox"
-                    checked={includeSummary}
-                    onChange={(e) => setIncludeSummary(e.target.checked)}
-                    className="h-3 w-3 rounded border-muted-foreground/30"
+                  <button
+                    onClick={() => {
+                      const msg = replyInputRef.current?.getText() || "";
+                      handleNewSessionAutodetect(msg);
+                    }}
+                    disabled={newAutodetect.detecting}
+                    className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-violet-400 hover:border-violet-500/30 disabled:opacity-30"
+                    title="Auto-detect project from your prompt"
+                  >
+                    {newAutodetect.detecting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    <span>Auto-detect</span>
+                  </button>
+                  <AgentToggleButton
+                    agent={newSessionAgent}
+                    onCycle={(next) => {
+                      setNewSessionAgent(next);
+                      setNewSessionModel(getDefaultModelForAgent(next, settings?.claude_model));
+                    }}
+                    size="md"
                   />
-                  <span>Context</span>
-                  {includeSummary && settings?.gemini_configured !== "true" && (
-                    <AlertTriangle className="h-3 w-3 text-amber-500" />
-                  )}
-                </label>
-                <select
-                  value={newSessionModel}
-                  onChange={(e) => setNewSessionModel(e.target.value)}
-                  className="text-[11px] px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground hover:border-violet-500/30 cursor-pointer max-w-[140px]"
-                  title="Model for new session"
-                >
-                  {newSessionAgent === "forge"
-                    ? MODEL_PRESETS.filter(p => p.model.startsWith("models/gemini") || p.model.startsWith("gemini") || p.model === "claude-sonnet-4-6").map(p => (
-                        <option key={p.id} value={p.model}>{p.name}</option>
-                      ))
-                    : newSessionAgent === "codex"
-                      ? MODEL_PRESETS.filter(p => p.model.startsWith("gpt")).map(p => (
-                          <option key={p.id} value={p.model}>{p.name}</option>
-                        ))
-                      : MODEL_PRESETS.filter(p => p.model.startsWith("claude")).map(p => (
-                          <option key={p.id} value={p.model}>{p.name}</option>
-                        ))
-                  }
-                </select>
+                  <select
+                    value={newSessionModel}
+                    onChange={(e) => setNewSessionModel(e.target.value)}
+                    className="text-[11px] px-2 py-1 rounded-md border border-border bg-card text-muted-foreground hover:border-violet-500/30 cursor-pointer max-w-[180px]"
+                    title="Model for new session"
+                  >
+                    {getModelPresetsForAgent(newSessionAgent).map((preset) => (
+                      <option key={preset.id} value={preset.model}>{preset.name}</option>
+                    ))}
+                  </select>
+                </div>
 
-                <div className="flex-1" />
-
-                {/* Start — explicit send action */}
-                <button
-                  onClick={async () => {
-                    const msg = replyInputRef.current?.getText() || "";
-                    if (!msg.trim()) return;
-                    if (!newSessionPath) {
-                      const firstPath = await newAutodetect.detect(msg);
-                      if (firstPath) {
-                        setNewSessionPath(firstPath);
-                        setTimeout(() => handleStartNewSession(msg), 50);
-                      } else {
-                        setFolderBrowserOpen(true);
-                      }
-                      return;
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <label
+                    className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer select-none px-2 py-1 rounded-md border border-border bg-background/60"
+                    title={
+                      !includeSummary
+                        ? "Include relevant context from this session"
+                        : settings?.gemini_configured === "true"
+                          ? "Smart context: Gemini extracts only what's relevant"
+                          : "Basic context: truncated transcript"
                     }
-                    handleStartNewSession(msg);
-                    replyInputRef.current?.setText("");
-                    setShowNewSessionOpts(false);
-                  }}
-                  disabled={startingNewSession}
-                  className={`text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 text-white ${
-                    newSessionAgent === "codex"
-                      ? "bg-violet-600 hover:bg-violet-500"
-                      : "bg-emerald-600 hover:bg-emerald-500"
-                  }`}
-                >
-                  {startingNewSession ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : newSessionAgent === "codex" ? (
-                    "Terminal ↗"
-                  ) : (
-                    "Start ↗"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={includeSummary}
+                      onChange={(e) => {
+                        setIncludeSummary(e.target.checked);
+                        setContextTransferState(e.target.checked ? "idle" : "off");
+                      }}
+                      className="h-3 w-3 rounded border-muted-foreground/30"
+                    />
+                    <span>Attach context</span>
+                    {includeSummary && settings?.gemini_configured !== "true" && (
+                      <AlertTriangle className="h-3 w-3 text-amber-500" />
+                    )}
+                  </label>
+                  <button
+                    onClick={skipPerms.toggle}
+                    className={`flex items-center gap-1 text-[11px] transition-colors px-2 py-1 rounded-md border ${
+                      skipPerms.value
+                        ? "border-amber-500/40 bg-amber-500/10 text-amber-400 hover:border-amber-500/60"
+                        : "border-border text-muted-foreground hover:text-foreground hover:bg-background/70"
+                    }`}
+                    title={skipPerms.value ? "Skip permissions enabled" : "Skip permissions disabled"}
+                  >
+                    <ShieldOff className="h-3 w-3" />
+                    <span>Skip perms {skipPerms.value ? "on" : "off"}</span>
+                  </button>
+                  {compute.nodes.length > 0 && (
+                    <button
+                      onClick={compute.toggle}
+                      className={`flex items-center gap-1 text-[11px] transition-colors px-2 py-1 rounded-md border ${
+                        compute.isLocal
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:border-emerald-500/50"
+                          : "border-sky-500/30 bg-sky-500/10 text-sky-400 hover:border-sky-500/50"
+                      }`}
+                      title={compute.isLocal ? "Running locally — click to switch to VM" : `Running on ${compute.currentNode?.name} — click to switch`}
+                    >
+                      {compute.isLocal ? <Monitor className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
+                      <span>{compute.isLocal ? "Local" : compute.currentNode?.name ?? "VM"}</span>
+                    </button>
                   )}
-                </button>
+
+                  <div className="flex-1" />
+
+                  <button
+                    onClick={async () => {
+                      const msg = replyInputRef.current?.getText() || "";
+                      if (!msg.trim()) return;
+                      if (!newSessionPath) {
+                        const firstPath = await newAutodetect.detect(msg);
+                        if (firstPath) {
+                          setNewSessionPath(firstPath);
+                          setTimeout(() => handleStartNewSession(msg), 50);
+                        } else {
+                          setFolderBrowserOpen(true);
+                        }
+                        return;
+                      }
+                      handleStartNewSession(msg);
+                      replyInputRef.current?.setText("");
+                      setShowNewSessionOpts(false);
+                    }}
+                    disabled={startingNewSession}
+                    className={`inline-flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md transition-colors disabled:opacity-30 text-white ${
+                      newSessionAgent === "codex"
+                        ? "bg-violet-600 hover:bg-violet-500"
+                        : "bg-emerald-600 hover:bg-emerald-500"
+                    }`}
+                  >
+                    {startingNewSession ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : newSessionAgent === "codex" ? (
+                      <Terminal className="h-3.5 w-3.5" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5" />
+                    )}
+                    <span>{newSessionAgent === "codex" ? "Start in terminal" : "Start new session"}</span>
+                  </button>
+                </div>
               </div>
             )}
 
