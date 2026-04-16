@@ -226,6 +226,12 @@ export default function SessionDetailPage({
   const [mdHasEarlier, setMdHasEarlier] = useState(false);
   const [mdRenderStart, setMdRenderStart] = useState(0);
   const [mdLoadingEarlier, setMdLoadingEarlier] = useState(false);
+  const fetchMd = useCallback(async (full = false) => {
+    if (!data?.session_id) return null;
+    const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/md`, full ? { limit: "0" } : undefined));
+    if (!res.ok) return null;
+    return res.json();
+  }, [apiUrl, data?.session_id]);
 
   // Summary
   const [summary, setSummary] = useState<string | null>(null);
@@ -508,22 +514,21 @@ export default function SessionDetailPage({
     mdInitialLoadRef.current = null;
   }, [sessionId]);
 
-  // Auto-load MD view when data arrives — load all messages at once (limit=0)
+  // Auto-load MD view when data arrives — start with the recent tail, not full history
   useEffect(() => {
     if (!data?.session_id || mdContent || mdLoading) return;
     setMdLoading(true);
-    fetch(apiUrl(`/api/sessions/${data.session_id}/md`, { limit: "0" }))
-      .then(r => r.json())
+    fetchMd(false)
       .then(json => {
-        if (json.markdown) {
+        if (json?.markdown) {
           setMdContent(json.markdown);
-          setMdHasEarlier(false);
-          setMdRenderStart(0);
+          setMdHasEarlier(!!json.has_earlier);
+          setMdRenderStart(json.render_start ?? 0);
         }
       })
       .catch(() => {})
       .finally(() => setMdLoading(false));
-  }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data?.session_id, fetchMd]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load full MD history (user clicks "Load earlier")
   const loadAllMdMessages = useCallback(async () => {
@@ -534,11 +539,11 @@ export default function SessionDetailPage({
     const savedScrollTop = scrollEl?.scrollTop ?? 0;
     const savedScrollHeight = scrollEl?.scrollHeight ?? 0;
     try {
-      const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/md`, { limit: "0" }));
-      const json = await res.json();
-      if (json.markdown) {
+      const json = await fetchMd(true);
+      if (json?.markdown) {
         setMdContent(json.markdown);
-        setMdHasEarlier(false);
+        setMdHasEarlier(!!json.has_earlier);
+        setMdRenderStart(json.render_start ?? 0);
         // Compensate for prepended content so user stays at the same spot
         requestAnimationFrame(() => {
           const el = mdScrollRef.current;
@@ -548,7 +553,7 @@ export default function SessionDetailPage({
       }
     } catch { /* ignore */ }
     setMdLoadingEarlier(false);
-  }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data?.session_id, fetchMd]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   // Auto-refresh MD content when new messages arrive (active terminal sessions)
@@ -570,12 +575,11 @@ export default function SessionDetailPage({
       // Debounce: clear previous timer, wait 1s for burst to settle
       if (mdRefreshTimerRef.current) clearTimeout(mdRefreshTimerRef.current);
       mdRefreshTimerRef.current = setTimeout(() => {
-        fetch(apiUrl(`/api/sessions/${data.session_id}/md`, { limit: "0" }))
-          .then(r => r.json())
+        fetchMd(mdRenderStart === 0 && !mdHasEarlier)
           .then(json => {
-            if (json.markdown) {
+            if (json?.markdown) {
               setMdContent(json.markdown);
-              setMdHasEarlier(false);
+              setMdHasEarlier(!!json.has_earlier);
               setMdRenderStart(json.render_start ?? 0);
               // No scroll restore needed: MarkdownContent renders each section
               // with a stable key, so React only appends new DOM nodes at the
@@ -590,7 +594,7 @@ export default function SessionDetailPage({
     return () => {
       if (mdRefreshTimerRef.current) clearTimeout(mdRefreshTimerRef.current);
     };
-  }, [data?.messages_total, data?.session_id, mdView]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data?.messages_total, data?.session_id, mdView, mdRenderStart, mdHasEarlier, fetchMd]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-populate summary/learnings from DB cache (no LLM call needed)
   useEffect(() => {

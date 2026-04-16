@@ -42,10 +42,27 @@ export async function GET(
     return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
+  const limitParam = req.nextUrl.searchParams.get("limit");
+  const offsetParam = req.nextUrl.searchParams.get("offset");
+
+  // limit=0 means "all messages" (no pagination)
+  const messageLimit = limitParam != null
+    ? (parseInt(limitParam) || undefined)
+    : DEFAULT_MESSAGE_LIMIT;
+  const messageOffset = offsetParam != null ? parseInt(offsetParam) : undefined;
+
   // ── Codex sessions: render from rollout JSONL ────────────────────────────
   if (session.agent_type === "codex") {
     const { readCodexMessages } = await import("@/lib/codex-db");
-    const messages = readCodexMessages(session.jsonl_path);
+    const allMessages = readCodexMessages(session.jsonl_path);
+    const totalMessages = allMessages.length;
+    const renderStart = messageLimit === 0 || messageLimit == null
+      ? 0
+      : Math.max(0, totalMessages - messageLimit - (messageOffset ?? 0));
+    const renderEnd = messageLimit === 0 || messageLimit == null
+      ? totalMessages
+      : Math.max(renderStart, totalMessages - (messageOffset ?? 0));
+    const messages = allMessages.slice(renderStart, renderEnd);
     const parts: string[] = [];
     for (const m of messages) {
       if (m.type === "user") {
@@ -54,6 +71,7 @@ export async function GET(
         const blocks = Array.isArray(m.content) ? m.content : [];
         const textParts: string[] = [];
         const toolParts: string[] = [];
+        const toolResultParts: string[] = [];
         for (const b of blocks) {
           if (b.type === "text" && b.text?.trim()) {
             textParts.push(b.text);
@@ -62,9 +80,14 @@ export async function GET(
             const cmd = input.command ?? input.file_path ?? input.query ?? input.url ?? Object.values(input)[0];
             const detail = cmd ? `: \`${String(cmd).slice(0, 120)}\`` : "";
             toolParts.push(`🔧 **${b.name}**${detail}`);
+          } else if (b.type === "tool_result") {
+            const result = typeof b.content === "string" ? b.content.trim() : String(b.content ?? "").trim();
+            if (result) {
+              toolResultParts.push(`\`\`\`text\n${result}\n\`\`\``);
+            }
           }
         }
-        const text = [...textParts, ...toolParts].join("\n\n");
+        const text = [...textParts, ...toolParts, ...toolResultParts].join("\n\n");
         if (text) parts.push(`${text}\n`);
       }
     }
@@ -72,17 +95,25 @@ export async function GET(
     return Response.json({
       markdown,
       session_id: sessionId,
-      total_messages: messages.length,
-      render_start: 0,
-      render_end: messages.length,
-      has_earlier: false,
+      total_messages: totalMessages,
+      render_start: renderStart,
+      render_end: renderEnd,
+      has_earlier: renderStart > 0,
     });
   }
 
   // ── Forge sessions: render from Forge SQLite ─────────────────────────────
   if (session.jsonl_path?.startsWith("forge://")) {
     const { readForgeMessages } = await import("@/lib/forge-db");
-    const messages = readForgeMessages(sessionId);
+    const allMessages = readForgeMessages(sessionId);
+    const totalMessages = allMessages.length;
+    const renderStart = messageLimit === 0 || messageLimit == null
+      ? 0
+      : Math.max(0, totalMessages - messageLimit - (messageOffset ?? 0));
+    const renderEnd = messageLimit === 0 || messageLimit == null
+      ? totalMessages
+      : Math.max(renderStart, totalMessages - (messageOffset ?? 0));
+    const messages = allMessages.slice(renderStart, renderEnd);
     const parts: string[] = [];
     for (const m of messages) {
       if (m.type === "user") {
@@ -98,21 +129,12 @@ export async function GET(
     return Response.json({
       markdown,
       session_id: sessionId,
-      total_messages: messages.length,
-      render_start: 0,
-      render_end: messages.length,
-      has_earlier: false,
+      total_messages: totalMessages,
+      render_start: renderStart,
+      render_end: renderEnd,
+      has_earlier: renderStart > 0,
     });
   }
-
-  const limitParam = req.nextUrl.searchParams.get("limit");
-  const offsetParam = req.nextUrl.searchParams.get("offset");
-
-  // limit=0 means "all messages" (no pagination)
-  const messageLimit = limitParam != null
-    ? (parseInt(limitParam) || undefined)
-    : DEFAULT_MESSAGE_LIMIT;
-  const messageOffset = offsetParam != null ? parseInt(offsetParam) : undefined;
 
   try {
     const result = sessionToMarkdownPaginated(session.jsonl_path, {
