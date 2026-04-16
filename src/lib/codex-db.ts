@@ -7,6 +7,7 @@ import os from "os";
 import path from "path";
 import fs from "fs";
 import type { ParsedMessage } from "./types";
+import { iterateLinesSync } from "./utils-server";
 
 const CODEX_DB_PATH = path.join(os.homedir(), ".codex", "state_5.sqlite");
 
@@ -78,6 +79,8 @@ interface CodexJsonlLine {
   type?: string;
   payload?: Record<string, unknown>;
 }
+
+const MAX_FTS_TEXT = 20_000;
 
 /** Map Codex tool names + args to the format ToolUseBlock expects */
 function normalizeCodexTool(
@@ -291,42 +294,141 @@ export function codexSessionCompleted(rolloutPath: string): boolean {
 }
 
 export function extractCodexSearchText(rolloutPath: string): string {
-  if (!rolloutPath || !fs.existsSync(rolloutPath)) return "";
+  return extractCodexRolloutIndex(rolloutPath).searchText;
+}
+
+export interface CodexSessionSummary {
+  messageCount: number;
+  lastMessage: string;
+  lastMessageRole: "user" | "assistant" | null;
+}
+
+export interface CodexRolloutIndex {
+  hasResult: boolean;
+  searchText: string;
+  summary: CodexSessionSummary;
+}
+
+export function extractCodexRolloutIndex(rolloutPath: string): CodexRolloutIndex {
+  if (!rolloutPath || !fs.existsSync(rolloutPath)) {
+    return {
+      hasResult: false,
+      searchText: "",
+      summary: { messageCount: 0, lastMessage: "", lastMessageRole: null },
+    };
+  }
 
   const textParts: string[] = [];
   let textPartsSize = 0;
-  const MAX_FTS_TEXT = 20_000;
+  let hasResult = false;
+  let messageCount = 0;
+  let lastMessage = "";
+  let lastMessageRole: "user" | "assistant" | null = null;
+  let turnOpen = false;
+  let turnHasContent = false;
+  let turnFirstText = "";
+  let turnSeenText = new Set<string>();
+
+  const appendSearchText = (message: string) => {
+    const trimmed = message.trim();
+    if (!trimmed || textPartsSize >= MAX_FTS_TEXT) return;
+    textParts.push(trimmed);
+    textPartsSize += trimmed.length;
+  };
+
+  const resetTurn = () => {
+    turnOpen = false;
+    turnHasContent = false;
+    turnFirstText = "";
+    turnSeenText = new Set<string>();
+  };
+
+  const ensureTurn = () => {
+    if (turnOpen) return;
+    turnOpen = true;
+    turnHasContent = false;
+    turnFirstText = "";
+    turnSeenText = new Set<string>();
+  };
+
+  const emitTurn = () => {
+    if (!turnOpen) return;
+    if (turnHasContent) {
+      messageCount++;
+      lastMessage = turnFirstText.trim();
+      lastMessageRole = "assistant";
+    }
+    resetTurn();
+  };
 
   try {
-    const content = fs.readFileSync(rolloutPath, "utf-8");
-    const lines = content.split(/\r?\n/);
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-
+    for (const line of iterateLinesSync(rolloutPath)) {
+      let d: CodexJsonlLine;
       try {
-        const ev = JSON.parse(line) as {
-          type?: string;
-          payload?: { type?: string; message?: unknown };
-        };
-        if (ev.type !== "event_msg") continue;
-
-        const eventType = ev.payload?.type;
-        if (eventType !== "user_message" && eventType !== "agent_message") continue;
-
-        const message = typeof ev.payload?.message === "string" ? ev.payload.message.trim() : "";
-        if (!message) continue;
-
-        textParts.push(message);
-        textPartsSize += message.length;
-        if (textPartsSize >= MAX_FTS_TEXT) break;
+        d = JSON.parse(line);
       } catch {
-        // Skip malformed lines
+        continue;
+      }
+
+      const type = d.type;
+      const p = (d.payload ?? {}) as Record<string, unknown>;
+      const pt = p.type as string | undefined;
+
+      if (type === "event_msg") {
+        if (pt === "user_message") {
+          emitTurn();
+          const msg = typeof p.message === "string" ? p.message : "";
+          if (!msg) continue;
+          appendSearchText(msg);
+          messageCount++;
+          lastMessage = msg.trim();
+          lastMessageRole = "user";
+        } else if (pt === "task_started") {
+          emitTurn();
+          ensureTurn();
+        } else if (pt === "agent_message") {
+          const msg = typeof p.message === "string" ? p.message : "";
+          if (!msg) continue;
+          appendSearchText(msg);
+          ensureTurn();
+          if (!turnSeenText.has(msg)) {
+            turnSeenText.add(msg);
+            turnHasContent = true;
+            if (!turnFirstText) turnFirstText = msg;
+          }
+        } else if (pt === "task_complete") {
+          hasResult = true;
+          emitTurn();
+        }
+      } else if (type === "response_item") {
+        if (pt === "function_call" || pt === "custom_tool_call") {
+          ensureTurn();
+          turnHasContent = true;
+        } else if (
+          turnOpen &&
+          (pt === "function_call_output" || pt === "custom_tool_call_output")
+        ) {
+          turnHasContent = true;
+        }
       }
     }
   } catch {
-    return "";
+    return {
+      hasResult: false,
+      searchText: "",
+      summary: { messageCount: 0, lastMessage: "", lastMessageRole: null },
+    };
   }
 
-  return textParts.join("\n");
+  emitTurn();
+
+  return {
+    hasResult,
+    searchText: textParts.join("\n"),
+    summary: { messageCount, lastMessage, lastMessageRole },
+  };
+}
+
+export function extractCodexSessionSummary(rolloutPath: string): CodexSessionSummary {
+  return extractCodexRolloutIndex(rolloutPath).summary;
 }

@@ -4,7 +4,6 @@ import { getActiveSessionIds } from "@/lib/process-detector";
 import { SessionRow, SessionListItem } from "@/lib/types";
 import { fetchAllRemoteSessions } from "@/lib/remote-compute";
 import { ensureCodexBackgroundScanner } from "@/lib/codex-background-scanner";
-import { codexSessionCompleted } from "@/lib/codex-db";
 
 export const dynamic = "force-dynamic";
 
@@ -128,7 +127,7 @@ export async function GET(request: NextRequest) {
     const fileAgeMs = Date.now() - row.file_mtime;
     let isActive: boolean;
     if (agentType === "codex") {
-      isActive = !codexSessionCompleted(row.jsonl_path) && fileAgeMs < 5 * 60 * 1000;
+      isActive = !row.has_result && fileAgeMs < 5 * 60 * 1000;
     } else if (agentType === "forge") {
       isActive = fileAgeMs < 5 * 60 * 1000;
     } else {
