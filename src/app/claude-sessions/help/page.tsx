@@ -62,7 +62,7 @@ export default function HelpPage() {
               </p>
               <div className="space-y-1.5 text-muted-foreground">
                 <Step n={1}>Open <strong>System Settings → Privacy &amp; Security → Accessibility</strong></Step>
-                <Step n={2}>Click the <strong>+</strong> button and add your terminal app (Terminal.app, iTerm2, Warp, etc.)</Step>
+                <Step n={2}>Click the <strong>+</strong> button and add your terminal app. If <strong>iTerm2</strong> is installed, Session Manager prefers it automatically on macOS.</Step>
                 <Step n={3}>Also keep <strong>node</strong> in the list — it's the server process that sends the AppleScript command</Step>
               </div>
               <Warning>Without this: the Focus Terminal button returns an error. Everything else works normally.</Warning>
@@ -150,7 +150,7 @@ Get-Command claude     # Windows PowerShell</Block>
               <ul className="text-amber-700 dark:text-amber-400 space-y-1 ml-4 list-disc text-xs leading-relaxed">
                 <li>Active session detection (requires <Code>ps</Code> / <Code>lsof</Code>) — sessions show as inactive</li>
                 <li>Focus Terminal button — requires AppleScript / macOS</li>
-                <li>Open in Terminal button — iTerm2/macOS only</li>
+                <li>Open in Terminal button — macOS/Windows only</li>
                 <li>Kill terminal button — SIGTERM not supported</li>
               </ul>
             </div>

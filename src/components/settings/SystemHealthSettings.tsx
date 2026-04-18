@@ -120,13 +120,13 @@ export function MacOSPermissionsSettings() {
       </h2>
       <div className="text-xs text-muted-foreground leading-relaxed">
         <strong className="text-foreground/80">Focus Terminal</strong> requires Accessibility access so it can raise the terminal window.
-        Add your terminal app below, then toggle it on.
+        Add your terminal app below, then toggle it on. On macOS, Session Manager now prefers <strong className="text-foreground/80">iTerm2</strong> automatically when it is installed.
       </div>
       <div className="border border-border rounded-md p-3 space-y-2 bg-muted/20">
         <div className="text-xs font-medium">Required: System Settings → Privacy &amp; Security → Accessibility</div>
         <div className="text-[11px] text-muted-foreground space-y-1">
-          <div>• Add <strong>Terminal.app</strong> if you use the built-in terminal</div>
-          <div>• Add <strong>iTerm2</strong> if you use iTerm2</div>
+          <div>• Add <strong>iTerm2</strong> if you want the preferred/default macOS path</div>
+          <div>• Add <strong>Terminal.app</strong> too if you still use the built-in terminal</div>
           <div>• <strong>node</strong> is already there — that&apos;s the server process, good to keep it</div>
         </div>
         <a
