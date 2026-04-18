@@ -2,6 +2,8 @@ import { execSync, execFileSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { claudeProjectsDir } from "./utils";
+import type { CodexThreadRow } from "./codex-db";
+import { listCodexThreads } from "./codex-db";
 
 const isWin = process.platform === "win32";
 
@@ -13,6 +15,7 @@ export interface ActiveProcess {
   sessionId: string | null;
   cwd: string | null;
   command: string;
+  elapsedSecs?: number | null;
 }
 
 export interface ProcessVitals {
@@ -41,6 +44,18 @@ function pathToProjectDir(cwdPath: string): string {
   return cwdPath.replace(/[\\/]/g, "-");
 }
 
+function normalizePath(p: string): string {
+  try {
+    return path.resolve(p);
+  } catch {
+    return p;
+  }
+}
+
+function isCodexCommand(command: string): boolean {
+  return /(^|[\/\s])codex(\s|$)/.test(command);
+}
+
 /** Find the most recently modified JSONL session file in a project dir.
  *  Skips session IDs in `exclude` (already claimed by another process). */
 function findMostRecentSession(projectDir: string, exclude?: Set<string>): string | null {
@@ -66,6 +81,50 @@ function findMostRecentSession(projectDir: string, exclude?: Set<string>): strin
   }
 }
 
+export function assignCodexSessionIdsByCwd(
+  processes: ActiveProcess[],
+  threads: Array<Pick<CodexThreadRow, "id" | "cwd" | "updated_at">>,
+  claimed: Set<string>
+) {
+  const byCwd = new Map<string, Array<Pick<CodexThreadRow, "id" | "cwd" | "updated_at">>>();
+  for (const thread of threads) {
+    if (!thread.cwd) continue;
+    const key = normalizePath(thread.cwd);
+    const bucket = byCwd.get(key);
+    if (bucket) bucket.push(thread);
+    else byCwd.set(key, [thread]);
+  }
+  for (const bucket of byCwd.values()) {
+    bucket.sort((a, b) => b.updated_at - a.updated_at);
+  }
+
+  const unresolvedByCwd = new Map<string, ActiveProcess[]>();
+  for (const proc of processes) {
+    if (proc.sessionId || !proc.cwd || !isCodexCommand(proc.command)) continue;
+    const key = normalizePath(proc.cwd);
+    const bucket = unresolvedByCwd.get(key);
+    if (bucket) bucket.push(proc);
+    else unresolvedByCwd.set(key, [proc]);
+  }
+
+  for (const [cwd, procs] of unresolvedByCwd) {
+    const candidates = (byCwd.get(cwd) ?? []).filter((thread) => !claimed.has(thread.id));
+    if (candidates.length === 0) continue;
+
+    procs.sort((a, b) => {
+      const aElapsed = a.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
+      const bElapsed = b.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
+      if (aElapsed !== bElapsed) return aElapsed - bElapsed;
+      return a.pid - b.pid;
+    });
+
+    for (let i = 0; i < procs.length && i < candidates.length; i++) {
+      procs[i].sessionId = candidates[i].id;
+      claimed.add(candidates[i].id);
+    }
+  }
+}
+
 export function detectActiveClaudeSessions(): ActiveProcess[] {
   if (cachedResult && Date.now() - cachedResult.timestamp < CACHE_TTL_MS) {
     return cachedResult.processes;
@@ -80,6 +139,7 @@ export function detectActiveClaudeSessions(): ActiveProcess[] {
     const claimed = new Set<string>(
       processes.filter((p) => p.sessionId).map((p) => p.sessionId!)
     );
+    assignCodexSessionIdsByCwd(processes, listCodexThreads(), claimed);
     for (const proc of processes) {
       if (proc.sessionId || !proc.cwd) continue;
       const projectDir = pathToProjectDir(proc.cwd);
@@ -131,7 +191,7 @@ function detectWindows(): ActiveProcess[] {
     const resumeMatch = command.match(RESUME_RE);
     if (resumeMatch) sessionId = resumeMatch[1];
 
-    processes.push({ pid, sessionId, cwd: null, command });
+    processes.push({ pid, sessionId, cwd: null, command, elapsedSecs: null });
   }
 
   return processes;
@@ -143,7 +203,7 @@ const RESUME_RE = /(?:--)?resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 /** Unix: use ps + lsof to find claude/codex processes and their CWDs */
 function detectUnix(): ActiveProcess[] {
   const psOutput = execSync(
-    'ps axo pid,command | grep -E "(/| |^)(claude|codex)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
+    'ps axo pid=,etime=,command= | grep -E "(/| |^)(claude|codex)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
     { encoding: "utf-8", timeout: 3000 }
   ).trim();
 
@@ -151,16 +211,17 @@ function detectUnix(): ActiveProcess[] {
 
   const processes: ActiveProcess[] = [];
   for (const line of psOutput.split("\n")) {
-    const match = line.trim().match(/^(\d+)\s+(.+)$/);
+    const match = line.trim().match(/^(\d+)\s+(\S+)\s+(.+)$/);
     if (!match) continue;
     const pid = parseInt(match[1]);
-    const command = match[2];
+    const elapsedSecs = parseElapsedTime(match[2]);
+    const command = match[3];
 
     let sessionId: string | null = null;
     const resumeMatch = command.match(RESUME_RE);
     if (resumeMatch) sessionId = resumeMatch[1];
 
-    processes.push({ pid, sessionId, cwd: null, command });
+    processes.push({ pid, sessionId, cwd: null, command, elapsedSecs });
   }
 
   // Get CWDs for all PIDs in one lsof call
