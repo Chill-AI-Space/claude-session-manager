@@ -47,6 +47,16 @@ function hasMacApp(appName: string): boolean {
   );
 }
 
+function isMacProcessRunning(processName: string): boolean {
+  if (process.platform !== "darwin") return false;
+  try {
+    execFileSync("pgrep", ["-x", processName], { stdio: "ignore", timeout: 3000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Open a shell command in a terminal window.
  * Supports macOS (iTerm2/Terminal.app), Windows (Windows Terminal/cmd.exe), and Linux (common terminals).
@@ -70,9 +80,10 @@ export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | 
 
   // Prefer iTerm2 whenever it is installed; AppleScript will launch it on demand.
   const useIterm = hasMacApp("iTerm");
+  const iTermWasRunning = useIterm && isMacProcessRunning("iTerm2");
 
   if (options.autoClose) {
-    return openMacAutoClose(shellCmd, useIterm);
+    return openMacAutoClose(shellCmd, useIterm, iTermWasRunning);
   }
 
   const safeCmd = wrapLongCommand(shellCmd);
@@ -80,7 +91,16 @@ export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | 
     ? [
         'tell application "iTerm"',
         "  activate",
-        "  set newWindow to (create window with default profile)",
+        `  if ${iTermWasRunning ? "true" : "false"} then`,
+        "    set newWindow to (create window with default profile)",
+        "  else",
+        "    delay 0.2",
+        "    if (count of windows) = 0 then",
+        "      set newWindow to (create window with default profile)",
+        "    else",
+        "      set newWindow to current window",
+        "    end if",
+        "  end if",
         "  tell current session of newWindow",
         `    write text ${asString(safeCmd)}`,
         "  end tell",
@@ -101,7 +121,11 @@ export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | 
  * Open command in terminal and auto-close the window when it finishes.
  * Runs a background osascript that polls the tab and closes it when done.
  */
-function openMacAutoClose(shellCmd: string, useIterm: boolean): Promise<{ terminal: string }> {
+function openMacAutoClose(
+  shellCmd: string,
+  useIterm: boolean,
+  iTermWasRunning: boolean
+): Promise<{ terminal: string }> {
   // Append "; exit" so the shell exits when the command finishes
   const cmdWithExit = shellCmd + " ; exit";
 
@@ -109,7 +133,16 @@ function openMacAutoClose(shellCmd: string, useIterm: boolean): Promise<{ termin
     ? [
         'tell application "iTerm"',
         "  activate",
-        "  set newWindow to (create window with default profile)",
+        `  if ${iTermWasRunning ? "true" : "false"} then`,
+        "    set newWindow to (create window with default profile)",
+        "  else",
+        "    delay 0.2",
+        "    if (count of windows) = 0 then",
+        "      set newWindow to (create window with default profile)",
+        "    else",
+        "      set newWindow to current window",
+        "    end if",
+        "  end if",
         "  tell current session of newWindow",
         `    write text ${asString(cmdWithExit)}`,
         "  end tell",
