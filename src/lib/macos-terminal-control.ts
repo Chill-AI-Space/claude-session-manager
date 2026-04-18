@@ -52,7 +52,7 @@ export function sendTextToTerminalTTY(args: {
 set targetTTY to ${asAppleScriptString(args.tty)}
 set payloadPath to ${asAppleScriptString(payloadPath)}
 
-on pastePayloadForProcess(payloadPath, processName)
+on pastePayloadForProcess(payloadPath, processName, shouldSubmit)
   set savedClipboard to missing value
   try
     set savedClipboard to the clipboard
@@ -62,8 +62,10 @@ on pastePayloadForProcess(payloadPath, processName)
   tell application "System Events"
     tell process processName
       click menu item "Paste" of menu "Edit" of menu bar 1
-      delay 0.15
-      key code 36
+      if shouldSubmit then
+        delay 0.15
+        key code 36
+      end if
     end tell
   end tell
   if savedClipboard is not missing value then
@@ -78,15 +80,16 @@ tell application "System Events"
 end tell
 
 if iTerm2Running then
+  set payloadText to do shell script "/bin/cat " & quoted form of payloadPath
   tell application "iTerm"
     repeat with w in windows
       repeat with t in tabs of w
         repeat with s in sessions of t
-          if (tty of s) is targetTTY then
+          if (tty of s as text) is equal to targetTTY then
             activate
             select s
             delay 0.15
-            my pastePayloadForProcess(payloadPath, "iTerm2")
+            tell s to write text payloadText
             return "ok:iterm2"
           end if
         end repeat
@@ -103,7 +106,7 @@ tell application "Terminal"
         set selected tab of w to t
         set frontmost of w to true
         delay 0.15
-        my pastePayloadForProcess(payloadPath, "Terminal")
+        my pastePayloadForProcess(payloadPath, "Terminal", true)
         return "ok:terminal"
       end if
     end repeat
