@@ -39,6 +39,14 @@ function hasBinary(name: string): boolean {
   }
 }
 
+function hasMacApp(appName: string): boolean {
+  if (process.platform !== "darwin") return false;
+  return (
+    fs.existsSync(path.join("/Applications", `${appName}.app`)) ||
+    fs.existsSync(path.join(os.homedir(), "Applications", `${appName}.app`))
+  );
+}
+
 /**
  * Open a shell command in a terminal window.
  * Supports macOS (iTerm2/Terminal.app), Windows (Windows Terminal/cmd.exe), and Linux (common terminals).
@@ -60,16 +68,8 @@ export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | 
     throw new Error(`openInTerminal is not supported on ${process.platform}`);
   }
 
-  let useIterm = false;
-  try {
-    const { stdout } = await execFileAsync("osascript", [
-      "-e",
-      'application "iTerm2" is running',
-    ]);
-    useIterm = stdout.trim() === "true";
-  } catch {
-    // iTerm2 not available
-  }
+  // Prefer iTerm2 whenever it is installed; AppleScript will launch it on demand.
+  const useIterm = hasMacApp("iTerm");
 
   if (options.autoClose) {
     return openMacAutoClose(shellCmd, useIterm);
@@ -78,7 +78,7 @@ export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | 
   const safeCmd = wrapLongCommand(shellCmd);
   const script = useIterm
     ? [
-        'tell application "iTerm2"',
+        'tell application "iTerm"',
         "  activate",
         "  set newWindow to (create window with default profile)",
         "  tell current session of newWindow",
@@ -107,7 +107,7 @@ function openMacAutoClose(shellCmd: string, useIterm: boolean): Promise<{ termin
 
   const script = useIterm
     ? [
-        'tell application "iTerm2"',
+        'tell application "iTerm"',
         "  activate",
         "  set newWindow to (create window with default profile)",
         "  tell current session of newWindow",
@@ -119,7 +119,7 @@ function openMacAutoClose(shellCmd: string, useIterm: boolean): Promise<{ termin
         "repeat",
         "  delay 10",
         "  try",
-        '    tell application "iTerm2"',
+        '    tell application "iTerm"',
         "      if newWindow is not in windows then exit repeat",
         "      tell current session of newWindow",
         "        if (is at shell prompt) then",

@@ -78,7 +78,7 @@ tell application "System Events"
 end tell
 
 if iTerm2Running then
-  tell application "iTerm2"
+  tell application "iTerm"
     repeat with w in windows
       repeat with t in tabs of w
         repeat with s in sessions of t
@@ -193,7 +193,7 @@ tell application "System Events"
   set iTerm2Running to (count of (every process whose bundle identifier is "com.googlecode.iterm2")) > 0
 end tell
 if iTerm2Running then
-  tell application "iTerm2"
+  tell application "iTerm"
     repeat with w in windows
       repeat with t in tabs of w
         repeat with s in sessions of t
