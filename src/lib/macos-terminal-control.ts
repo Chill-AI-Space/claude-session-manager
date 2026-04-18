@@ -46,7 +46,7 @@ function asAppleScriptString(value: string | null | undefined): string {
 export function sendTextToTerminalTTY(args: {
   tty: string;
   text: string;
-}): { ok: boolean; error?: string; terminal?: "iTerm2" | "Terminal"; reason?: "not_found" | "applescript" } {
+}): { ok: boolean; error?: string; terminal?: "iTerm2" | "Terminal"; reason?: "not_found" | "applescript" | "busy" } {
   const payloadPath = writeTempTextFile(args.text);
   const script = `
 set targetTTY to ${asAppleScriptString(args.tty)}
@@ -86,10 +86,31 @@ if iTerm2Running then
       repeat with t in tabs of w
         repeat with s in sessions of t
           if (tty of s as text) is equal to targetTTY then
+            try
+              set sessionText to contents of s
+            on error
+              set sessionText to ""
+            end try
+            set tailText to sessionText
+            try
+              set tailParagraphs to paragraphs of sessionText
+              set paraCount to count of tailParagraphs
+              if paraCount > 20 then
+                set tailText to ""
+                repeat with idx from (paraCount - 19) to paraCount
+                  set tailText to tailText & (item idx of tailParagraphs as text) & linefeed
+                end repeat
+              end if
+            end try
+            if tailText contains "esc to interrupt" or tailText contains "Starting MCP servers" then
+              return "busy:iterm2"
+            end if
             activate
             select s
             delay 0.15
-            tell s to write text payloadText
+            tell s to write text payloadText newline NO
+            delay 0.15
+            tell s to write text ""
             return "ok:iterm2"
           end if
         end repeat
@@ -120,6 +141,14 @@ return "not_found"
     const result = runAppleScript(script);
     if (result === "ok:iterm2") return { ok: true, terminal: "iTerm2" };
     if (result === "ok:terminal") return { ok: true, terminal: "Terminal" };
+    if (result === "busy:iterm2") {
+      return {
+        ok: false,
+        reason: "busy",
+        terminal: "iTerm2",
+        error: `Live iTerm2 session ${args.tty} is busy; falling back to reopen`,
+      };
+    }
     return {
       ok: false,
       reason: "not_found",
