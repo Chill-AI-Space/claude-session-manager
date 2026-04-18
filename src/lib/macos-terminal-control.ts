@@ -6,6 +6,12 @@ import { join } from "path";
 export type TerminalMatch = "tty" | "heuristic";
 export type TerminalAction = "focus" | "close";
 
+function writeTempTextFile(text: string): string {
+  const tmpFile = join(tmpdir(), `terminal-input-${Date.now()}.txt`);
+  writeFileSync(tmpFile, text, "utf-8");
+  return tmpFile;
+}
+
 export function getTTY(pid: number): string | null {
   try {
     const tty = execFileSync("ps", ["-p", String(pid), "-o", "tty="], {
@@ -35,6 +41,96 @@ function runAppleScript(script: string): string {
 
 function asAppleScriptString(value: string | null | undefined): string {
   return `"${(value ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+export function sendTextToTerminalTTY(args: {
+  tty: string;
+  text: string;
+}): { ok: boolean; error?: string; terminal?: "iTerm2" | "Terminal"; reason?: "not_found" | "applescript" } {
+  const payloadPath = writeTempTextFile(args.text);
+  const script = `
+set targetTTY to ${asAppleScriptString(args.tty)}
+set payloadPath to ${asAppleScriptString(payloadPath)}
+
+on pastePayloadForProcess(payloadPath, processName)
+  set savedClipboard to missing value
+  try
+    set savedClipboard to the clipboard
+  end try
+  set the clipboard to (read POSIX file payloadPath)
+  delay 0.15
+  tell application "System Events"
+    tell process processName
+      click menu item "Paste" of menu "Edit" of menu bar 1
+      delay 0.15
+      key code 36
+    end tell
+  end tell
+  if savedClipboard is not missing value then
+    try
+      set the clipboard to savedClipboard
+    end try
+  end if
+end pastePayloadForProcess
+
+tell application "System Events"
+  set iTerm2Running to (count of (every process whose bundle identifier is "com.googlecode.iterm2")) > 0
+end tell
+
+if iTerm2Running then
+  tell application "iTerm2"
+    repeat with w in windows
+      repeat with t in tabs of w
+        repeat with s in sessions of t
+          if (tty of s) is targetTTY then
+            activate
+            select s
+            delay 0.15
+            my pastePayloadForProcess(payloadPath, "iTerm2")
+            return "ok:iterm2"
+          end if
+        end repeat
+      end repeat
+    end repeat
+  end tell
+end if
+
+tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if (tty of t) is targetTTY then
+        activate
+        set selected tab of w to t
+        set frontmost of w to true
+        delay 0.15
+        my pastePayloadForProcess(payloadPath, "Terminal")
+        return "ok:terminal"
+      end if
+    end repeat
+  end repeat
+end tell
+
+return "not_found"
+`.trim();
+
+  try {
+    const result = runAppleScript(script);
+    if (result === "ok:iterm2") return { ok: true, terminal: "iTerm2" };
+    if (result === "ok:terminal") return { ok: true, terminal: "Terminal" };
+    return {
+      ok: false,
+      reason: "not_found",
+      error: `Live terminal not found for TTY ${args.tty}`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "applescript",
+      error: `AppleScript error: ${String(err).slice(0, 300)}`,
+    };
+  } finally {
+    try { unlinkSync(payloadPath); } catch { /* ignore */ }
+  }
 }
 
 export function controlTerminalSession(args: {

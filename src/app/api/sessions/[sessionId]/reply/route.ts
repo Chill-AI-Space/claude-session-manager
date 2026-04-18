@@ -1,26 +1,16 @@
 import { NextRequest } from "next/server";
 import { getDb, getSetting, logAction } from "@/lib/db";
 import type { SessionRow } from "@/lib/types";
-import { killSessionProcesses } from "@/lib/process-detector";
+import { detectActiveClaudeSessions, killSessionProcesses } from "@/lib/process-detector";
 import { getOrchestrator } from "@/lib/orchestrator";
 import { getCodexPath } from "@/lib/codex-bin";
+import { buildCodexResumeShellCommand } from "@/lib/codex-command";
 import { openInTerminal } from "@/lib/terminal-launcher";
+import { getTTY, sendTextToTerminalTTY } from "@/lib/macos-terminal-control";
 import { sseResponse, SSE_HEADERS } from "@/lib/claude-runner";
 import { resolveNode, proxySSE } from "@/lib/remote-compute";
 
 export const dynamic = "force-dynamic";
-
-function ansiQuote(s: string): string {
-  return "$'" +
-    s
-      .replace(/\\/g, "\\\\")
-      .replace(/'/g, "\\'")
-      .replace(/\r/g, "\\r")
-      .replace(/\n/g, "\\n")
-      .replace(/\t/g, "\\t")
-      .replace(/"/g, '\\"') +
-    "'";
-}
 
 export async function POST(
   request: NextRequest,
@@ -121,10 +111,31 @@ export async function POST(
         };
 
         try {
+          if (process.platform === "darwin") {
+            const liveProc = detectActiveClaudeSessions().find((proc) => proc.sessionId === sessionId);
+            const tty = liveProc ? getTTY(liveProc.pid) : null;
+
+            if (tty) {
+              const injected = sendTextToTerminalTTY({ tty, text: message });
+              if (injected.ok) {
+                logAction("service", "codex_reply_injected", `${injected.terminal} tty:${tty} msg_len:${message.length}`, sessionId);
+                send({ type: "status", text: `Codex reply sent to live ${injected.terminal} terminal` });
+                send({ type: "done", result: "Codex reply sent", is_error: false });
+                return;
+              }
+              logAction("service", "codex_reply_inject_failed", `${injected.error ?? injected.reason ?? "unknown"} tty:${tty}`, sessionId);
+            }
+          }
+
           const bin = getCodexPath();
           const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
-          const codexSkipFlag = skipPermissions ? " --dangerously-bypass-approvals-and-sandbox" : "";
-          const shellCmd = `cd "${session.project_path}" && "${bin}"${codexSkipFlag} resume "${sessionId}" ${ansiQuote(message)}`;
+          const shellCmd = buildCodexResumeShellCommand({
+            projectPath: session.project_path,
+            bin,
+            sessionId,
+            message,
+            skipPermissions,
+          });
           const { terminal } = await openInTerminal(shellCmd);
           logAction("service", "codex_reply_opened", `${terminal} msg_len:${message.length}`, sessionId);
           send({ type: "status", text: `Codex resumed in ${terminal}` });

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import fs from "fs";
 import { getDb, getSessionAlarm } from "@/lib/db";
-import { readSessionMessages, readSessionMessagesPaginated } from "@/lib/session-reader";
+import { readSessionMessagesPaginated } from "@/lib/session-reader";
 import { SessionRow } from "@/lib/types";
 import { isSessionActive, getSessionVitals, getSessionVitalsByCwd } from "@/lib/process-detector";
 import { hasResultEvent } from "@/lib/orchestrator";
@@ -47,6 +47,8 @@ export async function GET(
 
   // Local execution
   const db = getDb();
+  const searchParams = request.nextUrl.searchParams;
+  const PAGE_SIZE = 100;
 
   const session = db
     .prepare("SELECT * FROM sessions WHERE session_id = ?")
@@ -54,10 +56,13 @@ export async function GET(
 
   if (!session) {
     // Fallback: session may be running but not yet scanned — check Codex DB directly
-    const { getCodexThread, readCodexMessages, codexSessionCompleted } = await import("@/lib/codex-db");
+    const { getCodexThread, readCodexMessagesPaginated, codexSessionCompleted } = await import("@/lib/codex-db");
     const codexThread = getCodexThread(sessionId);
     if (codexThread) {
-      const codexMessages = readCodexMessages(codexThread.rollout_path);
+      const { messages: codexMessages, total, start } = readCodexMessagesPaginated(
+        codexThread.rollout_path,
+        { pageSize: PAGE_SIZE }
+      );
       let fileMtime = codexThread.updated_at * 1000;
       try {
         fileMtime = fs.statSync(codexThread.rollout_path).mtimeMs;
@@ -73,8 +78,8 @@ export async function GET(
         session_id: sessionId,
         project_path: codexThread.cwd,
         messages: codexMessages,
-        messages_start: 0,
-        messages_total: codexMessages.length,
+        messages_start: start,
+        messages_total: total,
         metadata: {
           session_id: sessionId,
           project_path: codexThread.cwd,
@@ -96,7 +101,7 @@ export async function GET(
           reply_to_session_id: null,
         },
         is_active: active,
-        has_result: codexMessages.some((m) => m.type === "assistant"),
+        has_result: completed,
         file_age_ms: Math.round(fileAgeMs),
         process_vitals: active
           ? (getSessionVitals(sessionId) ?? getSessionVitalsByCwd(codexThread.cwd))
@@ -110,17 +115,23 @@ export async function GET(
     );
   }
 
-  const searchParams = request.nextUrl.searchParams;
-  const PAGE_SIZE = 100;
-
   // ── Codex sessions: read from JSONL rollout file ─────────────────────────
   const agentType = (session as SessionRow & { agent_type?: string }).agent_type ?? "claude";
   if (agentType === "codex") {
-    const { readCodexMessages, codexSessionCompleted } = await import("@/lib/codex-db");
-    const codexMessages = readCodexMessages(session.jsonl_path);
+    const beforeParam = searchParams.has("before")
+      ? parseInt(searchParams.get("before")!)
+      : undefined;
+    const { readCodexMessagesPaginated, codexSessionCompleted } = await import("@/lib/codex-db");
+    const { messages: codexMessages, total, start } = readCodexMessagesPaginated(
+      session.jsonl_path,
+      { pageSize: PAGE_SIZE, before: beforeParam }
+    );
+    const liveTail = beforeParam == null || beforeParam >= total
+      ? codexMessages
+      : readCodexMessagesPaginated(session.jsonl_path, { pageSize: 1 }).messages;
     let liveLastMessageRole: string | null = session.last_message_role ?? null;
-    for (let i = codexMessages.length - 1; i >= 0; i--) {
-      const msg = codexMessages[i];
+    for (let i = liveTail.length - 1; i >= 0; i--) {
+      const msg = liveTail[i];
       if (msg.type === "assistant") {
         liveLastMessageRole = "assistant";
         break;
@@ -148,11 +159,11 @@ export async function GET(
       session_id: session.session_id,
       project_path: session.project_path,
       messages: codexMessages,
-      messages_start: 0,
-      messages_total: codexMessages.length,
+      messages_start: start,
+      messages_total: total,
       metadata: { ...session, last_message_role: liveLastMessageRole },
       is_active: active,
-      has_result: codexMessages.some(m => m.type === "assistant"),
+      has_result: completed,
       file_age_ms: Math.round(fileAgeMs),
       process_vitals: active ? (getSessionVitals(sessionId) ?? getSessionVitalsByCwd(session.project_path)) : null,
       alarm: getSessionAlarm(sessionId),

@@ -2,7 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
-import { extractCodexRolloutIndex, extractCodexSearchText } from "../codex-db";
+import { extractCodexRolloutIndex, extractCodexSearchText, readCodexMessagesPaginated } from "../codex-db";
 import { shouldSkipSessionIncremental } from "../scanner";
 
 const tempPaths: string[] = [];
@@ -98,5 +98,36 @@ describe("extractCodexRolloutIndex", () => {
         lastMessageRole: "assistant",
       },
     });
+  });
+});
+
+describe("readCodexMessagesPaginated", () => {
+  it("returns only the tail window and supports loading earlier batches", () => {
+    const tempPath = writeTempRollout([
+      { type: "event_msg", payload: { type: "user_message", message: "one" } },
+      { type: "event_msg", payload: { type: "task_started" } },
+      { type: "event_msg", payload: { type: "agent_message", message: "first" } },
+      { type: "event_msg", payload: { type: "task_complete" } },
+      { type: "event_msg", payload: { type: "user_message", message: "two" } },
+      { type: "event_msg", payload: { type: "task_started" } },
+      { type: "event_msg", payload: { type: "agent_message", message: "second" } },
+      { type: "event_msg", payload: { type: "task_complete" } },
+    ]);
+
+    const tail = readCodexMessagesPaginated(tempPath, { pageSize: 2 });
+    expect(tail.total).toBe(4);
+    expect(tail.start).toBe(2);
+    expect(tail.messages.map((message) => typeof message.content === "string" ? message.content : message.type)).toEqual([
+      "two",
+      "assistant",
+    ]);
+
+    const earlier = readCodexMessagesPaginated(tempPath, { pageSize: 2, before: tail.start });
+    expect(earlier.total).toBe(4);
+    expect(earlier.start).toBe(0);
+    expect(earlier.messages.map((message) => typeof message.content === "string" ? message.content : message.type)).toEqual([
+      "one",
+      "assistant",
+    ]);
   });
 });

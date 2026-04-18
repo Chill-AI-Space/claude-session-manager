@@ -81,6 +81,15 @@ interface CodexJsonlLine {
 }
 
 const MAX_FTS_TEXT = 20_000;
+const MESSAGE_CACHE_LIMIT = 24;
+
+interface CachedCodexMessages {
+  mtimeMs: number;
+  size: number;
+  messages: ParsedMessage[];
+}
+
+const codexMessageCache = new Map<string, CachedCodexMessages>();
 
 /** Map Codex tool names + args to the format ToolUseBlock expects */
 function normalizeCodexTool(
@@ -156,6 +165,45 @@ interface Turn {
   seenText: Set<string>;
 }
 
+function getRolloutStat(rolloutPath: string): { mtimeMs: number; size: number } | null {
+  try {
+    const stat = fs.statSync(rolloutPath);
+    return { mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch {
+    return null;
+  }
+}
+
+function rememberCodexMessages(
+  rolloutPath: string,
+  stat: { mtimeMs: number; size: number },
+  messages: ParsedMessage[]
+) {
+  codexMessageCache.delete(rolloutPath);
+  codexMessageCache.set(rolloutPath, { ...stat, messages });
+  if (codexMessageCache.size > MESSAGE_CACHE_LIMIT) {
+    const oldest = codexMessageCache.keys().next().value;
+    if (oldest) codexMessageCache.delete(oldest);
+  }
+}
+
+export function readCodexMessagesPaginated(
+  rolloutPath: string,
+  opts: { pageSize: number; before?: number }
+): { messages: ParsedMessage[]; total: number; start: number } {
+  const all = readCodexMessages(rolloutPath);
+  const total = all.length;
+  const end = opts.before == null
+    ? total
+    : Math.max(0, Math.min(total, opts.before));
+  const start = Math.max(0, end - Math.max(1, opts.pageSize));
+  return {
+    messages: all.slice(start, end),
+    total,
+    start,
+  };
+}
+
 /** Read Codex session messages from the rollout JSONL file.
  *
  * Groups by turn (task_started → task_complete):
@@ -169,6 +217,16 @@ interface Turn {
  */
 export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
   if (!rolloutPath || !fs.existsSync(rolloutPath)) return [];
+
+  const stat = getRolloutStat(rolloutPath);
+  if (!stat) return [];
+
+  const cached = codexMessageCache.get(rolloutPath);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    codexMessageCache.delete(rolloutPath);
+    codexMessageCache.set(rolloutPath, cached);
+    return cached.messages;
+  }
 
   let raw: string;
   try {
@@ -270,6 +328,7 @@ export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
   // Flush any open turn (session still in progress)
   emitTurn();
 
+  rememberCodexMessages(rolloutPath, stat, messages);
   return messages;
 }
 
