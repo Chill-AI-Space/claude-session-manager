@@ -16,6 +16,7 @@ export interface ActiveProcess {
   cwd: string | null;
   command: string;
   elapsedSecs?: number | null;
+  tty?: string | null;
 }
 
 export interface ProcessVitals {
@@ -56,6 +57,107 @@ function isCodexCommand(command: string): boolean {
   return /(^|[\/\s])codex(\s|$)/.test(command);
 }
 
+function normalizePromptText(text: string | null | undefined): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+function tokenizeCommand(command: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else if (ch === "\\" && quote === '"' && i + 1 < command.length) {
+        i += 1;
+        current += command[i];
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+
+    if (/\s/.test(ch)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    if (ch === "\\" && i + 1 < command.length) {
+      i += 1;
+      current += command[i];
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function findCodexExecutableTokenIndex(tokens: string[]): number {
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const base = path.basename(tokens[i]);
+    if (base === "codex") return i;
+  }
+  return -1;
+}
+
+function extractCodexInitialPrompt(command: string): string | null {
+  if (!isCodexCommand(command) || RESUME_RE.test(command)) return null;
+
+  const tokens = tokenizeCommand(command);
+  const execIdx = findCodexExecutableTokenIndex(tokens);
+  if (execIdx < 0) return null;
+
+  const args = tokens.slice(execIdx + 1);
+  let i = 0;
+  while (i < args.length) {
+    const token = args[i];
+    if (!token) {
+      i += 1;
+      continue;
+    }
+    if (token === "resume" || token === "--resume") return null;
+    if (
+      token === "--dangerously-bypass-approvals-and-sandbox" ||
+      token === "--dangerously-skip-permissions"
+    ) {
+      i += 1;
+      continue;
+    }
+    if (
+      token === "-c" ||
+      token === "--config" ||
+      token === "--model" ||
+      token === "--profile" ||
+      token === "--approval-mode"
+    ) {
+      i += 2;
+      continue;
+    }
+    if (token.startsWith("-")) {
+      i += 1;
+      continue;
+    }
+    break;
+  }
+
+  const prompt = normalizePromptText(args.slice(i).join(" "));
+  return prompt || null;
+}
+
 /** Find the most recently modified JSONL session file in a project dir.
  *  Skips session IDs in `exclude` (already claimed by another process). */
 function findMostRecentSession(projectDir: string, exclude?: Set<string>): string | null {
@@ -83,10 +185,10 @@ function findMostRecentSession(projectDir: string, exclude?: Set<string>): strin
 
 export function assignCodexSessionIdsByCwd(
   processes: ActiveProcess[],
-  threads: Array<Pick<CodexThreadRow, "id" | "cwd" | "updated_at">>,
+  threads: Array<Pick<CodexThreadRow, "id" | "cwd" | "updated_at" | "first_user_message">>,
   claimed: Set<string>
 ) {
-  const byCwd = new Map<string, Array<Pick<CodexThreadRow, "id" | "cwd" | "updated_at">>>();
+  const byCwd = new Map<string, Array<Pick<CodexThreadRow, "id" | "cwd" | "updated_at" | "first_user_message">>>();
   for (const thread of threads) {
     if (!thread.cwd) continue;
     const key = normalizePath(thread.cwd);
@@ -98,30 +200,69 @@ export function assignCodexSessionIdsByCwd(
     bucket.sort((a, b) => b.updated_at - a.updated_at);
   }
 
-  const unresolvedByCwd = new Map<string, ActiveProcess[]>();
+  type CodexProcessGroup = {
+    cwd: string;
+    tty: string | null;
+    prompt: string | null;
+    processes: ActiveProcess[];
+    minElapsed: number;
+  };
+
+  const unresolvedGroups = new Map<string, CodexProcessGroup>();
   for (const proc of processes) {
     if (proc.sessionId || !proc.cwd || !isCodexCommand(proc.command)) continue;
-    const key = normalizePath(proc.cwd);
-    const bucket = unresolvedByCwd.get(key);
-    if (bucket) bucket.push(proc);
-    else unresolvedByCwd.set(key, [proc]);
+    const cwd = normalizePath(proc.cwd);
+    const tty = proc.tty ?? null;
+    const prompt = extractCodexInitialPrompt(proc.command);
+    const key = `${cwd}::${tty ?? "no-tty"}::${prompt ?? "no-prompt"}`;
+    const existing = unresolvedGroups.get(key);
+    if (existing) {
+      existing.processes.push(proc);
+      existing.minElapsed = Math.min(existing.minElapsed, proc.elapsedSecs ?? Number.MAX_SAFE_INTEGER);
+    } else {
+      unresolvedGroups.set(key, {
+        cwd,
+        tty,
+        prompt,
+        processes: [proc],
+        minElapsed: proc.elapsedSecs ?? Number.MAX_SAFE_INTEGER,
+      });
+    }
   }
 
-  for (const [cwd, procs] of unresolvedByCwd) {
-    const candidates = (byCwd.get(cwd) ?? []).filter((thread) => !claimed.has(thread.id));
-    if (candidates.length === 0) continue;
+  const groups = Array.from(unresolvedGroups.values()).sort((a, b) => {
+    if (a.cwd !== b.cwd) return a.cwd.localeCompare(b.cwd);
+    if (a.minElapsed !== b.minElapsed) return a.minElapsed - b.minElapsed;
+    return (a.tty ?? "").localeCompare(b.tty ?? "");
+  });
 
-    procs.sort((a, b) => {
-      const aElapsed = a.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
-      const bElapsed = b.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
-      if (aElapsed !== bElapsed) return aElapsed - bElapsed;
-      return a.pid - b.pid;
-    });
+  for (const group of groups) {
+    const allCandidates = byCwd.get(group.cwd) ?? [];
+    if (allCandidates.length === 0) continue;
 
-    for (let i = 0; i < procs.length && i < candidates.length; i++) {
-      procs[i].sessionId = candidates[i].id;
-      claimed.add(candidates[i].id);
+    const normalizedPrompt = normalizePromptText(group.prompt);
+    let matchedCandidates = normalizedPrompt
+      ? allCandidates.filter((thread) => normalizePromptText(thread.first_user_message) === normalizedPrompt)
+      : [];
+
+    if (matchedCandidates.length === 0 && normalizedPrompt) {
+      matchedCandidates = allCandidates.filter((thread) => {
+        const threadPrompt = normalizePromptText(thread.first_user_message);
+        return threadPrompt.length > 0 &&
+          (normalizedPrompt.includes(threadPrompt) || threadPrompt.includes(normalizedPrompt));
+      });
     }
+
+    const fallbackCandidates = allCandidates.filter((thread) => !claimed.has(thread.id));
+    const chosen = (matchedCandidates.length > 0 ? matchedCandidates : fallbackCandidates)
+      .slice()
+      .sort((a, b) => b.updated_at - a.updated_at)[0];
+    if (!chosen) continue;
+
+    for (const proc of group.processes) {
+      proc.sessionId = chosen.id;
+    }
+    claimed.add(chosen.id);
   }
 }
 
@@ -147,14 +288,23 @@ export function detectActiveClaudeSessions(): ActiveProcess[] {
       if (proc.sessionId) claimed.add(proc.sessionId);
     }
 
-    // Deduplicate: if multiple PIDs resolved to same session, keep one
-    const seen = new Set<string>();
-    const unique = processes.filter((p) => {
-      if (!p.sessionId) return false;
-      if (seen.has(p.sessionId)) return false;
-      seen.add(p.sessionId);
-      return true;
-    });
+    // Deduplicate: if multiple PIDs resolved to same session, keep the most
+    // recently started process (usually the active resumed terminal).
+    const bySessionId = new Map<string, ActiveProcess>();
+    for (const proc of processes) {
+      if (!proc.sessionId) continue;
+      const prev = bySessionId.get(proc.sessionId);
+      if (!prev) {
+        bySessionId.set(proc.sessionId, proc);
+        continue;
+      }
+      const prevElapsed = prev.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
+      const nextElapsed = proc.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
+      if (nextElapsed < prevElapsed || (nextElapsed === prevElapsed && proc.pid > prev.pid)) {
+        bySessionId.set(proc.sessionId, proc);
+      }
+    }
+    const unique = Array.from(bySessionId.values());
 
     cachedResult = { processes: unique, timestamp: Date.now() };
     return unique;
@@ -191,7 +341,7 @@ function detectWindows(): ActiveProcess[] {
     const resumeMatch = command.match(RESUME_RE);
     if (resumeMatch) sessionId = resumeMatch[1];
 
-    processes.push({ pid, sessionId, cwd: null, command, elapsedSecs: null });
+    processes.push({ pid, sessionId, cwd: null, command, elapsedSecs: null, tty: null });
   }
 
   return processes;
@@ -203,7 +353,7 @@ const RESUME_RE = /(?:--)?resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 /** Unix: use ps + lsof to find claude/codex processes and their CWDs */
 function detectUnix(): ActiveProcess[] {
   const psOutput = execSync(
-    'ps axo pid=,etime=,command= | grep -E "(/| |^)(claude|codex)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
+    'ps axo pid=,etime=,tty=,command= | grep -E "(/| |^)(claude|codex)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
     { encoding: "utf-8", timeout: 3000 }
   ).trim();
 
@@ -211,17 +361,18 @@ function detectUnix(): ActiveProcess[] {
 
   const processes: ActiveProcess[] = [];
   for (const line of psOutput.split("\n")) {
-    const match = line.trim().match(/^(\d+)\s+(\S+)\s+(.+)$/);
+    const match = line.trim().match(/^(\d+)\s+(\S+)\s+(\S+)\s+(.+)$/);
     if (!match) continue;
     const pid = parseInt(match[1]);
     const elapsedSecs = parseElapsedTime(match[2]);
-    const command = match[3];
+    const tty = match[3] === "??" ? null : match[3];
+    const command = match[4];
 
     let sessionId: string | null = null;
     const resumeMatch = command.match(RESUME_RE);
     if (resumeMatch) sessionId = resumeMatch[1];
 
-    processes.push({ pid, sessionId, cwd: null, command, elapsedSecs });
+    processes.push({ pid, sessionId, cwd: null, command, elapsedSecs, tty });
   }
 
   // Get CWDs for all PIDs in one lsof call

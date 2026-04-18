@@ -57,7 +57,7 @@ on pastePayloadForProcess(payloadPath, processName)
   try
     set savedClipboard to the clipboard
   end try
-  set the clipboard to (read POSIX file payloadPath)
+  do shell script "/usr/bin/pbcopy < " & quoted form of payloadPath
   delay 0.15
   tell application "System Events"
     tell process processName
