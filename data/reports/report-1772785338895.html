@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Средняя длительность сессии по проектам</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0a; color: #e5e5e5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 2rem 1rem; }
+.container { max-width: 900px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+.subtitle { color: #888; margin-bottom: 2rem; font-size: 0.9rem; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+.metric { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1rem; }
+.metric .value { font-size: 1.5rem; font-weight: 700; color: #a78bfa; }
+.metric .label { font-size: 0.8rem; color: #888; margin-top: 0.25rem; }
+.card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }
+.card h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th { text-align: left; padding: 0.5rem; border-bottom: 1px solid #2a2a2a; color: #888; font-weight: 500; }
+td { padding: 0.5rem; border-bottom: 1px solid #1a1a1a; }
+tr:hover td { background: #222; }
+canvas { max-height: 400px; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>Средняя длительность сессии по проектам</h1>
+    <p class="subtitle">Только основные сессии (без subagent), проекты с 3+ сессиями</p>
+
+    <div class="metrics">
+        <div class="metric">
+            <div class="value">3.4h</div>
+            <div class="label">Средняя длительность (все проекты)</div>
+        </div>
+        <div class="metric">
+            <div class="value">620</div>
+            <div class="label">Всего сессий</div>
+        </div>
+        <div class="metric">
+            <div class="value">vibe/sec</div>
+            <div class="label">Самый долгий проект (10.0h ср.)</div>
+        </div>
+        <div class="metric">
+            <div class="value">claude/session/manager</div>
+            <div class="label">Самый частый проект (191 сессий)</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Средняя длительность (мин) — топ-15 проектов</h2>
+        <canvas id="avgChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h2>Средняя vs максимальная длительность (мин)</h2>
+        <canvas id="compareChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h2>Все проекты</h2>
+        <div style="overflow-x:auto">
+        <table>
+            <thead><tr><th>Проект</th><th>Сессий</th><th>Среднее</th><th>Мин</th><th>Макс</th><th>Всего</th></tr></thead>
+            <tbody><tr>
+        <td>vibe/sec</td>
+        <td>3</td>
+        <td><strong>10.0h</strong></td>
+        <td>2.5m</td>
+        <td>29.9h</td>
+        <td>30.0h</td>
+    </tr><tr>
+        <td>interview/engine</td>
+        <td>19</td>
+        <td><strong>8.1h</strong></td>
+        <td>1.7m</td>
+        <td>39.8h</td>
+        <td>153.5h</td>
+    </tr><tr>
+        <td>Documents</td>
+        <td>41</td>
+        <td><strong>6.7h</strong></td>
+        <td>4s</td>
+        <td>57.6h</td>
+        <td>274.4h</td>
+    </tr><tr>
+        <td>inbox/processing</td>
+        <td>3</td>
+        <td><strong>6.6h</strong></td>
+        <td>1.9h</td>
+        <td>10.4h</td>
+        <td>19.9h</td>
+    </tr><tr>
+        <td>skillset/analytics</td>
+        <td>37</td>
+        <td><strong>5.9h</strong></td>
+        <td>40s</td>
+        <td>92.9h</td>
+        <td>218.0h</td>
+    </tr><tr>
+        <td>linkedin/messenger</td>
+        <td>7</td>
+        <td><strong>5.8h</strong></td>
+        <td>2.8m</td>
+        <td>25.6h</td>
+        <td>40.8h</td>
+    </tr><tr>
+        <td>improvado/notes</td>
+        <td>55</td>
+        <td><strong>5.2h</strong></td>
+        <td>17s</td>
+        <td>33.1h</td>
+        <td>285.7h</td>
+    </tr><tr>
+        <td>skillset</td>
+        <td>3</td>
+        <td><strong>5.2h</strong></td>
+        <td>2.8m</td>
+        <td>13.9h</td>
+        <td>15.5h</td>
+    </tr><tr>
+        <td>candidate/routing</td>
+        <td>32</td>
+        <td><strong>5.1h</strong></td>
+        <td>3.6m</td>
+        <td>27.8h</td>
+        <td>162.8h</td>
+    </tr><tr>
+        <td>vova</td>
+        <td>112</td>
+        <td><strong>4.8h</strong></td>
+        <td>0s</td>
+        <td>106.2h</td>
+        <td>536.5h</td>
+    </tr><tr>
+        <td>skillset/ads/bot</td>
+        <td>4</td>
+        <td><strong>4.5h</strong></td>
+        <td>12.7m</td>
+        <td>16.5h</td>
+        <td>18.2h</td>
+    </tr><tr>
+        <td>aichill/content</td>
+        <td>20</td>
+        <td><strong>4.1h</strong></td>
+        <td>3s</td>
+        <td>44.0h</td>
+        <td>81.8h</td>
+    </tr><tr>
+        <td>context/trash/mcp</td>
+        <td>4</td>
+        <td><strong>3.1h</strong></td>
+        <td>1.0h</td>
+        <td>5.8h</td>
+        <td>12.5h</td>
+    </tr><tr>
+        <td>skillset/ai</td>
+        <td>31</td>
+        <td><strong>3.1h</strong></td>
+        <td>4s</td>
+        <td>15.9h</td>
+        <td>95.2h</td>
+    </tr><tr>
+        <td>web/analytics/setup</td>
+        <td>4</td>
+        <td><strong>2.9h</strong></td>
+        <td>16.8m</td>
+        <td>5.7h</td>
+        <td>11.5h</td>
+    </tr><tr>
+        <td>behalf/chrome/extension</td>
+        <td>5</td>
+        <td><strong>2.8h</strong></td>
+        <td>22.0m</td>
+        <td>7.5h</td>
+        <td>13.9h</td>
+    </tr><tr>
+        <td>GitHub</td>
+        <td>6</td>
+        <td><strong>2.5h</strong></td>
+        <td>2.7m</td>
+        <td>6.3h</td>
+        <td>15.1h</td>
+    </tr><tr>
+        <td>vault/mcp</td>
+        <td>4</td>
+        <td><strong>1.8h</strong></td>
+        <td>12.7m</td>
+        <td>5.9h</td>
+        <td>7.2h</td>
+    </tr><tr>
+        <td>improvado</td>
+        <td>3</td>
+        <td><strong>1.8h</strong></td>
+        <td>1.1h</td>
+        <td>3.1h</td>
+        <td>5.4h</td>
+    </tr><tr>
+        <td>multi/playwright</td>
+        <td>3</td>
+        <td><strong>1.6h</strong></td>
+        <td>22s</td>
+        <td>4.8h</td>
+        <td>4.9h</td>
+    </tr><tr>
+        <td>/sessions/improvado/2</td>
+        <td>3</td>
+        <td><strong>1.6h</strong></td>
+        <td>49.1m</td>
+        <td>3.1h</td>
+        <td>4.9h</td>
+    </tr><tr>
+        <td>payment/duties</td>
+        <td>3</td>
+        <td><strong>1.2h</strong></td>
+        <td>10s</td>
+        <td>2.1h</td>
+        <td>3.5h</td>
+    </tr><tr>
+        <td>teamhub</td>
+        <td>4</td>
+        <td><strong>1.1h</strong></td>
+        <td>14s</td>
+        <td>1.9h</td>
+        <td>4.3h</td>
+    </tr><tr>
+        <td>rnd/forge</td>
+        <td>6</td>
+        <td><strong>53.1m</strong></td>
+        <td>10.6m</td>
+        <td>1.8h</td>
+        <td>5.3h</td>
+    </tr><tr>
+        <td>claude/session/manager</td>
+        <td>191</td>
+        <td><strong>26.7m</strong></td>
+        <td>3s</td>
+        <td>30.8h</td>
+        <td>84.9h</td>
+    </tr><tr>
+        <td>claude/context/compact/prevent</td>
+        <td>4</td>
+        <td><strong>23.9m</strong></td>
+        <td>5s</td>
+        <td>1.4h</td>
+        <td>1.6h</td>
+    </tr><tr>
+        <td>tmp</td>
+        <td>13</td>
+        <td><strong>11.3m</strong></td>
+        <td>0s</td>
+        <td>1.2h</td>
+        <td>2.5h</td>
+    </tr></tbody>
+        </table>
+        </div>
+    </div>
+</div>
+<script>
+const colors = ['#6366f1','#8b5cf6','#a78bfa','#06b6d4','#10b981','#f59e0b','#ef4444',
+                '#ec4899','#14b8a6','#84cc16','#f97316','#3b82f6','#e879f9','#22d3ee','#facc15'];
+Chart.defaults.color = '#888';
+Chart.defaults.borderColor = '#2a2a2a';
+
+new Chart(document.getElementById('avgChart'), {
+    type: 'bar',
+    data: {
+        labels: ["interview/engine", "Documents", "skillset/analytics", "linkedin/messenger", "improvado/notes", "candidate/routing", "vova", "skillset/ads/bot", "aichill/content", "skillset/ai", "behalf/chrome/extension", "GitHub", "rnd/forge", "claude/session/manager", "tmp"],
+        datasets: [{
+            label: 'Среднее (мин)',
+            data: [484.6, 401.6, 353.5, 349.5, 311.7, 305.3, 287.4, 272.8, 245.4, 184.2, 167.2, 151.2, 53.1, 26.7, 11.3],
+            backgroundColor: colors,
+            borderRadius: 4,
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { title: { display: true, text: 'минуты' }, grid: { color: '#1a1a1a' } },
+            y: { grid: { display: false } }
+        }
+    }
+});
+
+new Chart(document.getElementById('compareChart'), {
+    type: 'bar',
+    data: {
+        labels: ["interview/engine", "Documents", "skillset/analytics", "linkedin/messenger", "improvado/notes", "candidate/routing", "vova", "skillset/ads/bot", "aichill/content", "skillset/ai", "behalf/chrome/extension", "GitHub", "rnd/forge", "claude/session/manager", "tmp"],
+        datasets: [
+            { label: 'Среднее (мин)', data: [484.6, 401.6, 353.5, 349.5, 311.7, 305.3, 287.4, 272.8, 245.4, 184.2, 167.2, 151.2, 53.1, 26.7, 11.3], backgroundColor: '#6366f1', borderRadius: 4 },
+            { label: 'Макс (мин)', data: [2385.8, 3454.3, 5571.7, 1537.6, 1983.1, 1667.6, 6369.5, 992.8, 2638.1, 951.8, 447.3, 376.8, 105.2, 1846.9, 74.3], backgroundColor: '#2a2a5a', borderRadius: 4 }
+        ]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+            x: { title: { display: true, text: 'минуты' }, grid: { color: '#1a1a1a' }, stacked: false },
+            y: { grid: { display: false } }
+        }
+    }
+});
+</script>
+</body>
+</html>

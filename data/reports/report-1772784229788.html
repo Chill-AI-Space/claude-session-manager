@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Top 5 Projects by Token Cost</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; color: #e5e5e5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 2rem 1rem; }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin-bottom: 0.5rem; color: #fff; }
+  .subtitle { color: #888; font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem; }
+  .metric { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 1.2rem; }
+  .metric .label { color: #888; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .metric .value { font-size: 1.5rem; font-weight: 700; color: #fff; margin-top: 0.3rem; }
+  .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; }
+  .card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #fff; }
+  .chart-wrap { position: relative; height: 320px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+  th, td { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid #2a2a2a; font-size: 0.9rem; }
+  th { color: #888; font-weight: 500; font-size: 0.8rem; text-transform: uppercase; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  th.num { text-align: right; }
+  .bar { display: inline-block; height: 8px; border-radius: 4px; background: #6366f1; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Top 5 Projects by Token Cost</h1>
+  <p class="subtitle">Estimated API cost based on published Claude pricing</p>
+
+  <div class="metrics">
+    <div class="metric"><div class="label">Total Spend (est.)</div><div class="value">$15,559.52</div></div>
+    <div class="metric"><div class="label">Top Project</div><div class="value">vova</div></div>
+    <div class="metric"><div class="label">Projects Tracked</div><div class="value">49</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Cost by Project</h2>
+    <div class="chart-wrap"><canvas id="barChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Cost Breakdown: Input vs Cache vs Output</h2>
+    <div class="chart-wrap"><canvas id="stackedChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Details</h2>
+    <table>
+      <tr><th>#</th><th>Project</th><th class="num">Cost</th><th class="num">Sessions</th><th class="num">Tokens</th></tr>
+      <tr><td>1</td><td>vova</td><td class="num">$3,442.42</td><td class="num">113</td><td class="num">1,811,288,220</td></tr><tr><td>2</td><td>improvado-notes</td><td class="num">$2,329.57</td><td class="num">55</td><td class="num">1,114,903,199</td></tr><tr><td>3</td><td>candidate-routing</td><td class="num">$1,850.01</td><td class="num">37</td><td class="num">872,267,129</td></tr><tr><td>4</td><td>skillset-analytics</td><td class="num">$1,574.09</td><td class="num">39</td><td class="num">713,456,988</td></tr><tr><td>5</td><td>Documents</td><td class="num">$1,154.24</td><td class="num">42</td><td class="num">488,302,154</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+const labels = ["vova", "improvado-notes", "candidate-routing", "skillset-analytics", "Documents"];
+const costs = [3442.42, 2329.57, 1850.01, 1574.09, 1154.24];
+const colors = ['#6366f1','#8b5cf6','#a78bfa','#06b6d4','#10b981'];
+
+Chart.defaults.color = '#888';
+Chart.defaults.borderColor = '#2a2a2a';
+
+new Chart(document.getElementById('barChart'), {
+  type: 'bar',
+  data: {
+    labels,
+    datasets: [{ label: 'Cost ($)', data: costs, backgroundColor: colors, borderRadius: 6, maxBarThickness: 60 }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { ticks: { callback: v => '$' + v }, grid: { color: '#1f1f1f' } },
+      x: { grid: { display: false } }
+    }
+  }
+});
+
+new Chart(document.getElementById('stackedChart'), {
+  type: 'bar',
+  data: {
+    labels,
+    datasets: [
+      { label: 'Input', data: [2.56, 3.79, 1.07, 2.19, 1.45], backgroundColor: '#6366f1', borderRadius: 4 },
+      { label: 'Cache', data: [3253.5, 2137.92, 1718.86, 1439.76, 1070.27], backgroundColor: '#06b6d4', borderRadius: 4 },
+      { label: 'Output', data: [186.36, 187.87, 130.07, 132.14, 82.52], backgroundColor: '#f59e0b', borderRadius: 4 }
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { boxWidth: 12, padding: 16 } } },
+    scales: {
+      x: { stacked: true, grid: { display: false } },
+      y: { stacked: true, ticks: { callback: v => '$' + v }, grid: { color: '#1f1f1f' } }
+    }
+  }
+});
+</script>
+</body>
+</html>

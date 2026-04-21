@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Search, Send } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud, Webhook, Send } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -17,9 +17,14 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import Link from "next/link";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
+import { getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
+import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
+import { useComputeNode } from "@/hooks/useComputeNode";
+import { AgentToggleButton, type AgentType } from "@/components/AgentToggleButton";
+
 
 const CTX_MAX = 200_000;
 
@@ -73,11 +78,6 @@ function ContextBar({ tokens }: { tokens: number }) {
   );
 }
 
-const SETTING_LABELS: Record<string, string> = {
-  dangerously_skip_permissions: "Skip Permissions",
-  auto_kill_terminal_on_reply: "Auto-Kill Terminal",
-  context_guard_enabled: "Context Guard",
-};
 
 function FocusErrorBanner({ error }: { error: string }): React.ReactElement {
   return (
@@ -97,6 +97,15 @@ function FocusErrorBanner({ error }: { error: string }): React.ReactElement {
   );
 }
 
+interface ProcessVitals {
+  pid: number;
+  cpu_percent: number;
+  mem_mb: number;
+  has_established_tcp: boolean;
+  tcp_connections: string[];
+  elapsed_secs: number;
+}
+
 interface SessionDetailData {
   session_id: string;
   project_path: string;
@@ -105,7 +114,18 @@ interface SessionDetailData {
   messages_total: number;
   metadata: SessionRow;
   is_active: boolean;
+  has_result?: boolean;
   file_age_ms?: number;
+  process_vitals?: ProcessVitals | null;
+  alarm?: { session_id: string; message: string; check_after_ms: number; set_at: number } | null;
+  _remote?: boolean;
+}
+
+interface SessionAlarmData {
+  session_id: string;
+  message: string;
+  check_after_ms: number;
+  set_at: number;
 }
 
 export default function SessionDetailPage({
@@ -117,6 +137,15 @@ export default function SessionDetailPage({
   const router = useRouter();
   const searchParams = useSearchParams();
   const highlightQuery = searchParams.get("q") || null;
+  const remoteNodeId = searchParams.get("node") || null;
+
+  /** Build API URL, appending ?node= for remote sessions */
+  const apiUrl = useCallback((path: string, extraParams?: Record<string, string>) => {
+    const params = new URLSearchParams(extraParams);
+    if (remoteNodeId) params.set("node", remoteNodeId);
+    const qs = params.toString();
+    return `${path}${qs ? `?${qs}` : ""}`;
+  }, [remoteNodeId]);
   const [data, setData] = useState<SessionDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +156,7 @@ export default function SessionDetailPage({
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
+  const [statusHistory, setStatusHistory] = useState<string[]>([]);
   // Track last time we received ANY data on the SSE stream (for stale detection)
   const lastStreamEventRef = useRef<number>(0);
 
@@ -150,7 +180,8 @@ export default function SessionDetailPage({
   const [hasReplied, setHasReplied] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [focusError, setFocusError] = useState<string | null>(null);
-  const [focusOk, setFocusOk] = useState(false);
+  const [focusOk, setFocusOk] = useState<"focused" | "opened" | null>(null);
+  const [closeOk, setCloseOk] = useState(false);
 
   const replyInputRef = useRef<ReplyInputHandle>(null);
 
@@ -167,6 +198,10 @@ export default function SessionDetailPage({
   const [shareState, setShareState] = useState<"idle" | "loading" | "done">("idle");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // CI callback snippet
+  const [ciSnippetOpen, setCiSnippetOpen] = useState(false);
+  const [ciCopied, setCiCopied] = useState<"pr" | "action" | null>(null);
 
   // Sent message confirmation (shown in right panel)
   const [lastSentText, setLastSentText] = useState<string | null>(null);
@@ -186,9 +221,17 @@ export default function SessionDetailPage({
   const [mdContent, setMdContent] = useState<string | null>(null);
   const [mdLoading, setMdLoading] = useState(false);
   const mdScrollRef = useRef<HTMLDivElement>(null);
-  const [mdSearch, setMdSearch] = useState(false);
-  const [mdSearchQuery, setMdSearchQuery] = useState("");
-  const mdSearchInputRef = useRef<HTMLInputElement>(null);
+  const mdIsNearBottomRef = useRef(true);
+  const mdInitialLoadRef = useRef<string | null>(null); // tracks sessionId of initial load
+  const [mdHasEarlier, setMdHasEarlier] = useState(false);
+  const [mdRenderStart, setMdRenderStart] = useState(0);
+  const [mdLoadingEarlier, setMdLoadingEarlier] = useState(false);
+  const fetchMd = useCallback(async (full = false) => {
+    if (!data?.session_id) return null;
+    const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/md`, full ? { limit: "0" } : undefined));
+    if (!res.ok) return null;
+    return res.json();
+  }, [apiUrl, data?.session_id]);
 
   // Summary
   const [summary, setSummary] = useState<string | null>(null);
@@ -198,10 +241,13 @@ export default function SessionDetailPage({
 
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
+  const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("claude");
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [startingNewSession, setStartingNewSession] = useState(false);
+  const [newSessionModel, setNewSessionModel] = useState("");
   const [showNewSessionOpts, setShowNewSessionOpts] = useState(false);
+  const [contextTransferState, setContextTransferState] = useState<"idle" | "loading" | "applied" | "empty" | "error" | "off">("idle");
   const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
   const [newSessionMessage, setNewSessionMessage] = useState("");
   const newSessionInputRef = useRef<HTMLTextAreaElement>(null);
@@ -210,6 +256,11 @@ export default function SessionDetailPage({
   const newDragCounterRef = useRef(0);
   const newAutodetect = useAutodetect();
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
+  const compute = useComputeNode();
+
+  useEffect(() => {
+    setNewSessionModel(getDefaultModelForAgent(newSessionAgent, settings?.claude_model));
+  }, [newSessionAgent, settings?.claude_model]);
 
   // Issue submission
   const [issueCategory, setIssueCategory] = useState<string | null>(null);
@@ -233,21 +284,22 @@ export default function SessionDetailPage({
     setTheme(saved === "light" ? "light" : "dark");
   }, []);
 
-  // Poll for pending permission requests (every 2s)
+  // Poll for pending permission requests (every 2s) — only when session is active
   useEffect(() => {
+    if (!data?.is_active && !isStreaming) return;
     let cancelled = false;
     const poll = async () => {
       try {
         const res = await fetch(`/api/permissions/pending?sessionId=${sessionId}`);
         if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled) setPendingPermissions(data);
+        const json = await res.json();
+        if (!cancelled) setPendingPermissions(json);
       } catch { /* ignore */ }
     };
     poll();
     const id = setInterval(poll, 2000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [sessionId]);
+  }, [sessionId, data?.is_active, isStreaming]);
 
   const handlePermissionDecide = async (id: string, behavior: "allow" | "deny") => {
     try {
@@ -271,16 +323,30 @@ export default function SessionDetailPage({
   const prevTotalRef = useRef(0);
   // Counter to invalidate stale fetches without using AbortController (avoids unhandled rejection in Next.js dev overlay)
   const fetchGenRef = useRef(0);
+  const fetchAlarm = useCallback(async (): Promise<SessionAlarmData | null> => {
+    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/alarm`));
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json && typeof json === "object" && "session_id" in json) {
+      return json as SessionAlarmData;
+    }
+    return null;
+  }, [apiUrl, sessionId]);
+
   const fetchSession = useCallback(async ({ clearExtras = false } = {}) => {
     const gen = ++fetchGenRef.current;
     try {
-      const res = await fetch(`/api/sessions/${sessionId}`);
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}`));
       if (gen !== fetchGenRef.current) return; // stale
       if (!res.ok) {
         setError("Session not found");
         return;
       }
       const json = await res.json();
+      if (gen !== fetchGenRef.current) return; // stale
+      if (!("alarm" in json)) {
+        json.alarm = await fetchAlarm();
+      }
       if (gen !== fetchGenRef.current) return; // stale
       const prevTotal = prevTotalRef.current;
       prevTotalRef.current = json.messages_total;
@@ -300,7 +366,7 @@ export default function SessionDetailPage({
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [sessionId, apiUrl, fetchAlarm]);
 
   // Backoff polling trigger — incremented to start a new backoff cycle
   const [backoffTrigger, setBackoffTrigger] = useState(0);
@@ -311,7 +377,7 @@ export default function SessionDetailPage({
     if (earliestLoaded === null || earliestLoaded === 0) return;
     setLoadingEarlier(true);
     try {
-      const res = await fetch(`/api/sessions/${sessionId}?before=${earliestLoaded}`);
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}`, { before: String(earliestLoaded) }));
       if (!res.ok) return;
       const json = await res.json();
       if (!Array.isArray(json.messages)) return;
@@ -322,7 +388,7 @@ export default function SessionDetailPage({
     } finally {
       setLoadingEarlier(false);
     }
-  }, [sessionId, earliestLoaded]);
+  }, [sessionId, earliestLoaded, apiUrl]);
 
   useEffect(() => {
     // Abort any in-flight streaming request from previous session
@@ -342,11 +408,16 @@ export default function SessionDetailPage({
     setHasReplied(false);
     setMdView(true);
     setMdContent(null);
+    setMdLoading(false);
+    setMdHasEarlier(false);
+    setMdRenderStart(0);
+    setMdLoadingEarlier(false);
     setSummary(null);
     setSummaryOpen(false);
     queueRef.current = [];
     processingRef.current = false;
     prevTotalRef.current = 0;
+    prevMdTotalRef.current = 0;
 
     // Stale-while-revalidate: show cached data instantly, fetch fresh in background
     const cached = getCachedSession(sessionId);
@@ -373,11 +444,17 @@ export default function SessionDetailPage({
       // Cleanup on unmount or session change
       abortRef.current?.abort("cancelled");
     };
-  }, [sessionId, fetchSession]);
+  }, [apiUrl, sessionId, fetchSession, startBackoff]);
 
-  // Auto-poll for new messages when session is active in terminal (not via web)
+  // Auto-poll for new messages when session is active in terminal (not via web).
+  // During streaming, poll at a slower rate just for liveness detection so the
+  // watchdog can notice when the session process dies.
   useEffect(() => {
-    if (!data?.is_active || isStreaming) return;
+    if (isStreaming) {
+      const id = setInterval(() => { fetchSession().catch(() => {}); }, 10_000);
+      return () => clearInterval(id);
+    }
+    if (!data?.is_active) return;
     const id = setInterval(() => { fetchSession().catch(() => {}); }, 2000);
     return () => clearInterval(id);
   }, [data?.is_active, isStreaming, fetchSession]);
@@ -399,58 +476,175 @@ export default function SessionDetailPage({
     return () => window.removeEventListener("sessions-scanned", handler);
   }, [fetchSession]);
 
-  // Auto-load MD view when data arrives (MD is the default display mode)
+  // Track whether user is near bottom in MD view.
+  // Key insight: wheel/touchmove events are ONLY fired by user interaction,
+  // never by programmatic scrollTo(). This lets us reliably detect when the
+  // user scrolls away and avoid fighting them with auto-scroll.
+  const mdUserDetachedRef = useRef(false);
+  useEffect(() => {
+    const el = mdScrollRef.current;
+    if (!el) return;
+    const THRESHOLD = 150;
+    const onScroll = () => {
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < THRESHOLD;
+      mdIsNearBottomRef.current = nearBottom;
+      // If user scrolled back to bottom, re-attach
+      if (nearBottom) mdUserDetachedRef.current = false;
+    };
+    // wheel/touch = definitively user-initiated (programmatic scrollTo never fires these)
+    const onUserInteraction = () => {
+      if (!mdIsNearBottomRef.current) {
+        mdUserDetachedRef.current = true;
+      }
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("wheel", onUserInteraction, { passive: true });
+    el.addEventListener("touchmove", onUserInteraction, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onUserInteraction);
+      el.removeEventListener("touchmove", onUserInteraction);
+    };
+  }, [data?.session_id, mdView]);
+
+  // Reset MD scroll tracking on session switch
+  useEffect(() => {
+    mdIsNearBottomRef.current = true;
+    mdUserDetachedRef.current = false;
+    mdInitialLoadRef.current = null;
+  }, [sessionId]);
+
+  // Auto-load MD view when data arrives — start with the recent tail, not full history
   useEffect(() => {
     if (!data?.session_id || mdContent || mdLoading) return;
     setMdLoading(true);
-    fetch(`/api/sessions/${data.session_id}/md`)
-      .then(r => r.json())
+    fetchMd(false)
       .then(json => {
-        if (json.markdown) setMdContent(json.markdown);
+        if (json?.markdown) {
+          setMdContent(json.markdown);
+          setMdHasEarlier(!!json.has_earlier);
+          setMdRenderStart(json.render_start ?? 0);
+        }
       })
       .catch(() => {})
       .finally(() => setMdLoading(false));
+  }, [data?.session_id, fetchMd]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load full MD history (user clicks "Load earlier")
+  const loadAllMdMessages = useCallback(async () => {
+    if (!data?.session_id || mdLoadingEarlier) return;
+    setMdLoadingEarlier(true);
+    // Save scroll state — earlier messages are prepended, shifting content down
+    const scrollEl = mdScrollRef.current;
+    const savedScrollTop = scrollEl?.scrollTop ?? 0;
+    const savedScrollHeight = scrollEl?.scrollHeight ?? 0;
+    try {
+      const json = await fetchMd(true);
+      if (json?.markdown) {
+        setMdContent(json.markdown);
+        setMdHasEarlier(!!json.has_earlier);
+        setMdRenderStart(json.render_start ?? 0);
+        // Compensate for prepended content so user stays at the same spot
+        requestAnimationFrame(() => {
+          const el = mdScrollRef.current;
+          if (!el) return;
+          el.scrollTop = savedScrollTop + (el.scrollHeight - savedScrollHeight);
+        });
+      }
+    } catch { /* ignore */ }
+    setMdLoadingEarlier(false);
+  }, [data?.session_id, fetchMd]); // eslint-disable-line react-hooks/exhaustive-deps
+
+
+  // Auto-refresh MD content when new messages arrive (active terminal sessions)
+  // Debounced: waits 1s after last message-count change before re-fetching
+  // to avoid rapid full re-renders during bursts of tool calls.
+  const prevMdTotalRef = useRef(0);
+  const mdRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!data?.session_id) return;
+    const newTotal = data.messages_total ?? 0;
+    // On first load, just record the count
+    if (prevMdTotalRef.current === 0) {
+      prevMdTotalRef.current = newTotal;
+      return;
+    }
+    // Only refresh when message count actually increased and MD is loaded
+    if (newTotal > prevMdTotalRef.current && mdContent && mdView) {
+      prevMdTotalRef.current = newTotal;
+      // Debounce: clear previous timer, wait 1s for burst to settle
+      if (mdRefreshTimerRef.current) clearTimeout(mdRefreshTimerRef.current);
+      mdRefreshTimerRef.current = setTimeout(() => {
+        fetchMd(mdRenderStart === 0 && !mdHasEarlier)
+          .then(json => {
+            if (json?.markdown) {
+              setMdContent(json.markdown);
+              setMdHasEarlier(!!json.has_earlier);
+              setMdRenderStart(json.render_start ?? 0);
+              // No scroll restore needed: MarkdownContent renders each section
+              // with a stable key, so React only appends new DOM nodes at the
+              // bottom without touching existing ones → scroll stays put.
+            }
+          })
+          .catch(() => {});
+      }, 1000);
+    } else {
+      prevMdTotalRef.current = newTotal;
+    }
+    return () => {
+      if (mdRefreshTimerRef.current) clearTimeout(mdRefreshTimerRef.current);
+    };
+  }, [data?.messages_total, data?.session_id, mdView, mdRenderStart, mdHasEarlier, fetchMd]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-populate summary/learnings from DB cache (no LLM call needed)
+  useEffect(() => {
+    if (!data?.metadata) return;
+    if (!summary && data.metadata.summary) setSummary(data.metadata.summary);
+    if (!learnings && data.metadata.learnings) {
+      try {
+        setLearnings(typeof data.metadata.learnings === "string"
+          ? JSON.parse(data.metadata.learnings) : data.metadata.learnings);
+      } catch { /* ignore */ }
+    }
   }, [data?.session_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Scroll to bottom when MD content loads
+  // Scroll to bottom on initial MD load, or on content update when user hasn't scrolled away.
+  // Uses mdUserDetachedRef (set by wheel/touch) instead of just isNearBottom,
+  // because smooth scrollTo generates scroll events that pollute isNearBottom.
   useEffect(() => {
-    if (mdContent && mdScrollRef.current) {
+    if (!mdContent || !mdScrollRef.current) return;
+    const isInitial = mdInitialLoadRef.current !== data?.session_id;
+    if (isInitial) {
+      mdInitialLoadRef.current = data?.session_id ?? null;
+      mdUserDetachedRef.current = false;
       requestAnimationFrame(() => {
-        mdScrollRef.current?.scrollTo({ top: mdScrollRef.current.scrollHeight });
+        mdScrollRef.current?.scrollTo({ top: mdScrollRef.current!.scrollHeight });
+      });
+    } else if (!mdUserDetachedRef.current) {
+      requestAnimationFrame(() => {
+        mdScrollRef.current?.scrollTo({ top: mdScrollRef.current!.scrollHeight, behavior: "smooth" });
       });
     }
-  }, [mdContent]);
+  }, [mdContent]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cmd+F search in MD view
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "f" && mdView) {
-        e.preventDefault();
-        setMdSearch(prev => !prev);
-        setTimeout(() => mdSearchInputRef.current?.focus(), 50);
-      }
-      if (e.key === "Escape" && mdSearch) {
-        setMdSearch(false);
-        setMdSearchQuery("");
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [mdView, mdSearch]);
 
   // Watchdog: detect dead streams and clean up
   useEffect(() => {
     if (!isStreaming) return;
 
-    // Case 1: session went inactive with no streaming text — stream died
-    if (!streamingText && !data?.is_active) {
+    // Case 1: session went inactive — process is dead, stream should close soon.
+    // Short grace period: 3s if no text yet (stream died immediately),
+    // 5s if text exists (process died mid-response, give time for stream to flush).
+    if (data && !data.is_active) {
+      const delay = streamingText ? 5000 : 3000;
       const timer = setTimeout(() => {
         setIsStreaming(false);
         setStreamingText("");
         setStreamStatus(null);
         processingRef.current = false;
         setQueuedMessages([...queueRef.current]);
-      }, 3000);
+        fetchSession({ clearExtras: true }).catch(() => {});
+      }, delay);
       return () => clearTimeout(timer);
     }
 
@@ -483,6 +677,64 @@ export default function SessionDetailPage({
 
   const triggerNotification = useTriggerNotification(notifSettings);
 
+  const { prBodySnippet, actionsSnippet, ciMode } = useMemo(() => {
+    const nodeId = settings?.relay_node_id;
+    const relayEnabled = settings?.relay_enabled === "true" && !!nodeId;
+
+    // Prefer stable WebSocket relay over ephemeral cloudflared tunnel
+    const useRelay = relayEnabled;
+    const relayHttpBase = (settings?.relay_server_url || "wss://csm-relay.chillai.workers.dev")
+      .replace(/^wss:\/\//, "https://")
+      .replace(/^ws:\/\//, "http://")
+      .replace(/\/$/, "");
+    const fallbackBase = (settings?.csm_base_url || "http://localhost:3000").replace(/\/$/, "");
+
+    const prBodySnippet = `<!-- session: ${sessionId} -->`;
+
+    let actionsSnippet: string;
+    if (useRelay) {
+      // Stable relay: POST /node/{nodeId}/resume  body: {sessionId, message}
+      actionsSnippet = [
+        `- name: Notify Claude session`,
+        `  if: always()`,
+        `  env:`,
+        `    GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}`,
+        `  run: |`,
+        `    SESSION=$(gh pr view \${{ github.event.pull_request.number }} \\`,
+        `      --json body -q '.body' | \\`,
+        `      grep -o 'session: [a-z0-9-]*' | awk '{print $2}')`,
+        `    [ -z "$SESSION" ] && exit 0`,
+        `    curl -s -X POST "${relayHttpBase}/node/${nodeId}/resume" \\`,
+        `      -H "Content-Type: application/json" \\`,
+        `      -d '{"sessionId":"'$SESSION'","message":"CI \${{ job.status }}: \${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}"}'`,
+      ].join("\n");
+    } else {
+      // Fallback: direct HTTP to csm_base_url (cloudflared or custom domain)
+      actionsSnippet = [
+        `- name: Notify Claude session`,
+        `  if: always()`,
+        `  env:`,
+        `    GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}`,
+        `  run: |`,
+        `    SESSION=$(gh pr view \${{ github.event.pull_request.number }} \\`,
+        `      --json body -q '.body' | \\`,
+        `      grep -o 'session: [a-z0-9-]*' | awk '{print $2}')`,
+        `    [ -z "$SESSION" ] && exit 0`,
+        `    curl -s -X POST "${fallbackBase}/api/sessions/$SESSION/reply" \\`,
+        `      -H "Content-Type: application/json" \\`,
+        `      -d '{"message":"CI \${{ job.status }}: \${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}"}'`,
+      ].join("\n");
+    }
+
+    return { prBodySnippet, actionsSnippet, ciMode: useRelay ? "relay" : "direct" };
+  }, [settings?.relay_enabled, settings?.relay_node_id, settings?.relay_server_url, settings?.csm_base_url, sessionId]);
+
+  const copyCi = useCallback((text: string, type: "pr" | "action") => {
+    navigator.clipboard.writeText(text);
+    setCiCopied(type);
+    setTimeout(() => setCiCopied(null), 2000);
+  }, []);
+
   // Always read from ref so effects with suppressed deps get the latest title
   const dataRef = useRef(data);
   useEffect(() => { dataRef.current = data; }, [data]);
@@ -496,6 +748,20 @@ export default function SessionDetailPage({
   useEffect(() => {
     clearTabBadge();
   }, [sessionId]);
+
+  // Dynamic browser tab title — show session name instead of generic "Claude Sessions"
+  useEffect(() => {
+    if (!data) return;
+    const title = data.metadata.custom_name
+      ?? data.metadata.generated_title
+      ?? data.metadata.first_prompt?.slice(0, 60)
+      ?? "Session";
+    document.title = title;
+    return () => { document.title = "Claude Sessions"; };
+  }, [data?.session_id, data?.metadata?.custom_name, data?.metadata?.generated_title, data?.metadata?.first_prompt]);
+
+  // Dynamic favicon — per-project icon (GitHub avatar or AI-generated)
+  useDynamicFavicon(data?.project_path);
 
   // Notify when web streaming finishes + start backoff to catch follow-up messages
   const prevStreamingRef = useRef(false);
@@ -527,6 +793,26 @@ export default function SessionDetailPage({
       startBackoff();
     }
   }, [data?.is_active]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Gemini quota exhausted banner
+  const isGeminiQuotaError = !!streamError?.startsWith("GEMINI_QUOTA_EXHAUSTED:");
+  const geminiExhaustedModel = isGeminiQuotaError ? (streamError!.slice("GEMINI_QUOTA_EXHAUSTED:".length) || data?.metadata?.model || "") : "";
+  const [switchingModel, setSwitchingModel] = useState(false);
+  const switchToFlash = useCallback(async () => {
+    if (!data) return;
+    setSwitchingModel(true);
+    try {
+      await fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "models/gemini-2.5-flash" }),
+      });
+      setStreamError(null);
+      await fetchSession({ clearExtras: true });
+    } finally {
+      setSwitchingModel(false);
+    }
+  }, [data, sessionId, fetchSession]);
 
   // Auto-retry countdown for interrupted sessions
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
@@ -598,6 +884,7 @@ export default function SessionDetailPage({
     setStreamingText("");
     setStreamError(null);
     setStreamStatus(null);
+    setStatusHistory([]);
     setIsStreaming(true);
     lastStreamEventRef.current = Date.now();
 
@@ -605,7 +892,7 @@ export default function SessionDetailPage({
     abortRef.current = controller;
 
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/reply`, {
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/reply`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
@@ -653,6 +940,7 @@ export default function SessionDetailPage({
                 setStreamStatus(null);
               } else if (evt.type === "status") {
                 setStreamStatus(evt.text);
+                setStatusHistory(prev => [...prev.slice(-49), evt.text]);
               } else if (evt.type === "error") {
                 setStreamError(evt.text);
               } else if (evt.type === "done") {
@@ -689,7 +977,9 @@ export default function SessionDetailPage({
         setStreamError(null);
         fetchSession({ clearExtras: true }).catch(() => {});
       } else {
-        // No response — start backoff poll so session data refreshes eventually
+        // Status-only flows (e.g. Codex resume) still update session metadata immediately.
+        fetchSession().catch(() => {});
+        // No assistant text yet — start backoff poll so session data refreshes eventually
         startBackoff();
       }
     } catch (err) {
@@ -712,7 +1002,7 @@ export default function SessionDetailPage({
       // Schedule next message asynchronously to avoid concurrent streaming
       setTimeout(() => processQueueRef.current(), 0);
     }
-  }, [sessionId, fetchSession]);
+  }, [apiUrl, sessionId, fetchSession, startBackoff]);
   processQueueRef.current = processQueue;
 
   // Auto-find matching message for highlight query, loading earlier batches if needed
@@ -732,6 +1022,30 @@ export default function SessionDetailPage({
       loadEarlierMessages();
     }
   }, [highlightQuery, data, earlierMessages, extraMessages, earliestLoaded, loadingEarlier, loadEarlierMessages]);
+
+  // Scroll to first search highlight in MD view (MarkdownContent inserts <mark> tags, we scroll the container)
+  const didScrollToMdHighlight = useRef<string | null>(null);
+  useEffect(() => {
+    if (!highlightQuery || !mdContent || !mdView) return;
+    if (didScrollToMdHighlight.current === highlightQuery) return;
+
+    // Wait for MarkdownContent to insert <mark> elements (it uses a 100ms setTimeout)
+    const timer = setTimeout(() => {
+      const container = mdScrollRef.current;
+      if (!container) return;
+      const mark = container.querySelector("mark[data-search-highlight]");
+      if (mark) {
+        // Calculate mark's position relative to scroll container
+        const markRect = mark.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        const scrollOffset = markRect.top - containerRect.top + container.scrollTop - container.clientHeight / 2;
+        container.scrollTo({ top: Math.max(0, scrollOffset), behavior: "smooth" });
+        didScrollToMdHighlight.current = highlightQuery;
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [highlightQuery, mdContent, mdView]);
 
   const handleSendDirect = useCallback((message: string) => {
     setContextGuardError(null);
@@ -850,54 +1164,10 @@ export default function SessionDetailPage({
     if (newFileInputRef.current) newFileInputRef.current.value = "";
   };
 
-  const handleNewSessionPaste = async (e: React.ClipboardEvent) => {
-    const items = Array.from(e.clipboardData?.items ?? []);
-    const imageItems = items.filter((item) => item.type.startsWith("image/"));
-    if (imageItems.length === 0) return;
-    e.preventDefault();
-    for (const item of imageItems) {
-      const blob = item.getAsFile();
-      if (!blob) continue;
-      const ext = blob.type.split("/")[1] || "png";
-      const file = new File([blob], `clipboard-${Date.now()}.${ext}`, { type: blob.type });
-      await uploadNewSessionFiles([file]);
-    }
-  };
-
   const handleNewSessionAutodetect = async (overrideMessage?: string) => {
     const msg = overrideMessage || newSessionMessage;
     const firstPath = await newAutodetect.detect(msg);
     if (firstPath) setNewSessionPath(firstPath);
-  };
-
-  const handleIssuePaste = async (e: React.ClipboardEvent) => {
-    const items = Array.from(e.clipboardData?.items ?? []);
-    const imageItems = items.filter((item) => item.type.startsWith("image/"));
-    if (imageItems.length === 0) return;
-    e.preventDefault();
-    for (const item of imageItems) {
-      const blob = item.getAsFile();
-      if (!blob) continue;
-      const ext = blob.type.split("/")[1] || "png";
-      const file = new File([blob], `clipboard-${Date.now()}.${ext}`, { type: blob.type });
-      const fd = new FormData();
-      fd.append("file", file);
-      try {
-        const res = await fetch("/api/upload", { method: "POST", body: fd });
-        const d = await res.json();
-        const textarea = issueInputRef.current;
-        const path = d.path || file.name;
-        if (textarea) {
-          const start = textarea.selectionStart;
-          const before = issueDescription.slice(0, start);
-          const after = issueDescription.slice(textarea.selectionEnd);
-          const sep = before && !before.endsWith("\n") ? "\n" : "";
-          setIssueDescription(before + sep + path + after);
-        } else {
-          setIssueDescription((prev) => prev + (prev ? "\n" : "") + path);
-        }
-      } catch { /* ignore */ }
-    }
   };
 
   const handleSubmitIssue = async () => {
@@ -929,6 +1199,24 @@ export default function SessionDetailPage({
     }
   };
 
+  const contextTransferBadge = (() => {
+    const usingGemini = settings?.gemini_configured === "true";
+    switch (contextTransferState) {
+      case "loading":
+        return { label: "Context loading", className: "border-sky-500/40 bg-sky-500/10 text-sky-400" };
+      case "applied":
+        return { label: usingGemini ? "Smart context applied" : "Context applied", className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400" };
+      case "empty":
+        return { label: "No useful context", className: "border-amber-500/40 bg-amber-500/10 text-amber-400" };
+      case "error":
+        return { label: "Context failed", className: "border-red-500/40 bg-red-500/10 text-red-400" };
+      case "off":
+        return { label: "Context off", className: "border-border bg-background/60 text-muted-foreground/70" };
+      default:
+        return { label: usingGemini ? "Smart context ready" : "Context ready", className: "border-border bg-background/60 text-muted-foreground/70" };
+    }
+  })();
+
   const handleStartNewSession = async (overrideMessage?: string) => {
     const msg = (overrideMessage || newSessionMessage).trim();
     if (!msg || !newSessionPath || startingNewSession) return;
@@ -940,25 +1228,48 @@ export default function SessionDetailPage({
 
       // Optionally prepend smart context from previous session
       if (includeSummary) {
+        setContextTransferState("loading");
         try {
-          const ctxRes = await fetch(`/api/sessions/${sessionId}/context`, {
+          const ctxRes = await fetch(apiUrl(`/api/sessions/${sessionId}/context`), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ question: msg }),
           });
-          if (ctxRes.ok) {
+          if (!ctxRes.ok) {
+            const err = await ctxRes.json().catch(() => ({ error: "Failed to fetch context" }));
+            toast.error(`Context transfer failed: ${err.error || "starting without context"}`);
+            setContextTransferState("error");
+          } else {
             const ctxData = await ctxRes.json();
             if (ctxData.context && ctxData.context.length > 20) {
               fullMessage = `${msg}\n\n<context>\nRelevant context from previous session:\n${ctxData.context}\n</context>`;
+              setContextTransferState("applied");
+            } else {
+              toast("No useful context found — starting without context");
+              setContextTransferState("empty");
             }
           }
-        } catch { /* non-critical — send without context */ }
+        } catch {
+          toast.error("Context transfer failed: network error, starting without context");
+          setContextTransferState("error");
+        }
+      } else {
+        setContextTransferState("off");
       }
 
-      const res = await fetch("/api/sessions/start", {
+      const startUrl = compute.nodeId
+        ? `/api/sessions/start?node=${encodeURIComponent(compute.nodeId)}`
+        : "/api/sessions/start";
+      const res = await fetch(startUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: newSessionPath, message: fullMessage }),
+        body: JSON.stringify({
+          path: newSessionPath,
+          message: fullMessage,
+          previous_session_id: sessionId,
+          agent: newSessionAgent,
+          ...(newSessionModel && { model: newSessionModel }),
+        }),
       });
 
       if (!res.ok) throw new Error("Failed to start session");
@@ -979,7 +1290,7 @@ export default function SessionDetailPage({
       setNewSessionMessage("");
       if (overrideMessage) replyInputRef.current?.setText("");
       setStartingNewSession(false);
-      toast.success("Session started — will appear in list shortly");
+      toast.success(fullMessage === msg ? "Session started — without extra context" : "Session started with context");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start new session");
       setStartingNewSession(false);
@@ -999,9 +1310,6 @@ export default function SessionDetailPage({
     setStreamStatus(null);
     setLastSentText(null);
     processingRef.current = false;
-    // Also clear the queue
-    queueRef.current = [];
-    setQueuedMessages([]);
   }, []);
 
   // Keyboard shortcuts
@@ -1055,9 +1363,12 @@ export default function SessionDetailPage({
   // Use last assistant message's usage — this reflects the actual current context window size.
   // Cumulative total_input_tokens is wrong: each turn re-sends full context so it grows as N².
   // Must include cache_read + cache_creation — with prompt caching most tokens are there.
-  const lastUsage = [...data.messages]
-    .reverse()
-    .find((m) => m.type === "assistant" && m.usage)?.usage;
+  // Iterate backwards to avoid copying the array.
+  let lastUsage: typeof data.messages[0]["usage"] | undefined;
+  for (let i = data.messages.length - 1; i >= 0; i--) {
+    const m = data.messages[i];
+    if (m.type === "assistant" && m.usage) { lastUsage = m.usage; break; }
+  }
   const totalTokens = lastUsage
     ? (lastUsage.input_tokens || 0)
       + (lastUsage.cache_read_input_tokens || 0)
@@ -1068,7 +1379,7 @@ export default function SessionDetailPage({
 
   const killTerminal = async () => {
     try {
-      await fetch(`/api/sessions/${sessionId}/kill`, { method: "POST" });
+      await fetch(apiUrl(`/api/sessions/${sessionId}/kill`), { method: "POST" });
       setTerminalKilled(true);
     } catch {
       // ignore
@@ -1078,7 +1389,7 @@ export default function SessionDetailPage({
   const handleShare = async () => {
     setShareState("loading");
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/share`, { method: "POST" });
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/share`), { method: "POST" });
       const json = await res.json();
       if (json.url) {
         setShareUrl(json.url);
@@ -1101,7 +1412,7 @@ export default function SessionDetailPage({
 
   const openInTerminal = async () => {
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/open`, {
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/open`), {
         method: "POST",
       });
       if (!res.ok) {
@@ -1115,18 +1426,37 @@ export default function SessionDetailPage({
 
   const focusTerminal = async () => {
     setFocusError(null);
-    setFocusOk(false);
+    setFocusOk(null);
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/focus`, { method: "POST" });
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/focus`), { method: "POST" });
       if (!res.ok) {
         const err = await res.json();
         setFocusError(err.error ?? "Failed to focus terminal");
       } else {
-        setFocusOk(true);
-        setTimeout(() => setFocusOk(false), 2000);
+        const payload = await res.json();
+        const mode = payload.mode === "opened" ? "opened" : "focused";
+        setFocusOk(mode);
+        setTimeout(() => setFocusOk(null), 2000);
       }
     } catch {
       setFocusError("Failed to focus terminal");
+    }
+  };
+
+  const closeTerminal = async () => {
+    setFocusError(null);
+    setCloseOk(false);
+    try {
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/close`), { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json();
+        setFocusError(err.error ?? "Failed to close terminal");
+      } else {
+        setCloseOk(true);
+        setTimeout(() => setCloseOk(false), 2000);
+      }
+    } catch {
+      setFocusError("Failed to close terminal");
     }
   };
 
@@ -1134,17 +1464,11 @@ export default function SessionDetailPage({
   const allMessages = [...earlierMessages, ...data.messages, ...extraMessages];
   const hasEarlier = (earliestLoaded ?? 0) > 0;
 
-  const enabledSettings = settings
-    ? Object.entries(settings)
-        .filter(([, v]) => v === "true")
-        .map(([k]) => SETTING_LABELS[k] || k)
-    : [];
-
   return (
     <>
       {/* Session header — single line: status + title */}
       {(() => {
-        let activityStatus = getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role });
+        let activityStatus = getActivityStatus({ is_active: data.is_active, modified_at: data.metadata.modified_at, last_message_role: data.metadata.last_message_role, has_result: data.has_result });
         // If JSONL was written to recently and process is alive, Claude is actively working
         // (not just waiting at prompt — the "terminal-open" heuristic is wrong mid-tool-execution)
         if (data.is_active && data.file_age_ms != null && data.file_age_ms < 30_000 && activityStatus === "terminal-open") {
@@ -1161,22 +1485,6 @@ export default function SessionDetailPage({
             "border-border"
           }`}>
             <StatusBadge status={activityStatus} />
-            {isRunning && (
-              <span className="text-[11px] font-medium text-green-600 dark:text-green-400 shrink-0 flex items-center gap-1.5">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Working...
-              </span>
-            )}
-            {isInterrupted && (
-              <span className="text-[11px] font-medium text-orange-600 dark:text-orange-400 shrink-0">
-                Crashed — retrying
-              </span>
-            )}
-            {isWaiting && (
-              <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400 shrink-0">
-                Waiting for reply
-              </span>
-            )}
             <h2 className="text-sm font-medium flex-1 min-w-0 line-clamp-2">
               {data.metadata.custom_name ||
               data.metadata.first_prompt?.slice(0, 200) ||
@@ -1190,9 +1498,8 @@ export default function SessionDetailPage({
       <div className="flex-1 flex min-h-0">
         {/* ── Left: Messages ──────────────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          {/* ── Summary + Learnings — top of messages area ─────────────────── */}
-          <div className="shrink-0 border-b border-border/30">
-            {/* Trigger bar */}
+          {/* ── Summary + Learnings triggers — hidden, moved to bottom of MD ── */}
+          <div className="shrink-0 border-b border-border/30 hidden">
             <div className="flex items-center gap-3 px-5 py-1.5">
               <button
                 onClick={async () => {
@@ -1202,7 +1509,7 @@ export default function SessionDetailPage({
                   setSummaryLoading(true);
                   setSummaryError(null);
                   try {
-                    const res = await fetch(`/api/sessions/${data.session_id}/summary`, { method: "POST" });
+                    const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/summary`), { method: "POST" });
                     const json = await res.json();
                     if (json.error) setSummaryError(json.error);
                     else setSummary(json.summary);
@@ -1232,7 +1539,7 @@ export default function SessionDetailPage({
                   setLearningsLoading(true);
                   setLearningsError(null);
                   try {
-                    const res = await fetch(`/api/sessions/${data.session_id}/learnings`, { method: "POST" });
+                    const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/learnings`), { method: "POST" });
                     const json = await res.json();
                     if (json.error) setLearningsError(json.error);
                     else setLearnings(json.learnings);
@@ -1276,7 +1583,7 @@ export default function SessionDetailPage({
                   </div>
                 )}
                 {summaryError && <div className="text-[11px] text-red-500 py-1">{summaryError}</div>}
-                {summary && <MarkdownContent content={summary} projectPath={data?.project_path} />}
+                {summary && <MarkdownContent content={summary} projectPath={data?.project_path} compact />}
               </div>
             )}
 
@@ -1299,7 +1606,28 @@ export default function SessionDetailPage({
                     <span className="text-blue-400/70">Extracting learnings…</span>
                   </div>
                 )}
-                {learningsError && <div className="text-[11px] text-red-500 py-1">{learningsError}</div>}
+                {learningsError && (
+                  <div className="text-[11px] text-red-500 py-2 space-y-1">
+                    <div>{learningsError}</div>
+                    <button
+                      onClick={() => {
+                        setLearningsError(null);
+                        setLearningsLoading(true);
+                        fetch(`/api/sessions/${data.session_id}/learnings?refresh=1`, { method: "POST" })
+                          .then(r => r.json())
+                          .then(json => {
+                            if (json.error) setLearningsError(json.error + (json.raw ? `\n\nRaw: ${json.raw.slice(0, 300)}...` : ""));
+                            else setLearnings(json.learnings);
+                          })
+                          .catch(e => setLearningsError(e.message))
+                          .finally(() => setLearningsLoading(false));
+                      }}
+                      className="underline underline-offset-2 hover:text-red-400"
+                    >
+                      Retry with refresh
+                    </button>
+                  </div>
+                )}
                 {learnings && (() => {
                   const l = learnings as Record<string, string | string[]>;
                   const categories = [
@@ -1312,6 +1640,7 @@ export default function SessionDetailPage({
                     { key: "tools_learned", label: "Tools Learned", single: false },
                     { key: "preferences", label: "Preferences", single: false },
                     { key: "gotchas", label: "Gotchas", single: false },
+                    { key: "prompt_coaching", label: "Prompt Coaching", single: false },
                   ];
                   return (
                     <div className="space-y-2.5">
@@ -1350,31 +1679,6 @@ export default function SessionDetailPage({
           {/* MD view (default) or bubble messages */}
           {mdView ? (
             <div className="flex-1 min-h-0 overflow-y-auto relative" ref={mdScrollRef}>
-              {/* Search bar (Cmd+F) */}
-              {mdSearch && (
-                <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b px-4 py-2 flex items-center gap-2">
-                  <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <input
-                    ref={mdSearchInputRef}
-                    type="text"
-                    value={mdSearchQuery}
-                    onChange={e => setMdSearchQuery(e.target.value)}
-                    placeholder="Search in session…"
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                    onKeyDown={e => {
-                      if (e.key === "Escape") { setMdSearch(false); setMdSearchQuery(""); }
-                      if (e.key === "Enter" && mdSearchQuery && mdScrollRef.current) {
-                        // Use browser find — highlight next match
-                        const w = window as unknown as { find: (s: string) => boolean };
-                        if (w.find) w.find(mdSearchQuery);
-                      }
-                    }}
-                  />
-                  <button onClick={() => { setMdSearch(false); setMdSearchQuery(""); }} className="text-muted-foreground hover:text-foreground">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
               {mdLoading ? (
                 <div className="flex items-center justify-center h-full gap-2 text-muted-foreground">
                   <Loader2 className="h-5 w-5 animate-spin" />
@@ -1382,7 +1686,153 @@ export default function SessionDetailPage({
                 </div>
               ) : mdContent ? (
                 <div className="max-w-4xl mx-auto px-6 py-6">
-                  <MarkdownContent content={mdContent} projectPath={data.project_path} />
+                  <MarkdownContent content={mdContent} projectPath={data.project_path} compact folded={folded} highlightQuery={highlightQuery ?? undefined} />
+
+                  {/* ── Live activity indicator ── */}
+                  {data.is_active && (data.metadata.last_message_role !== "assistant" || (data.file_age_ms != null && data.file_age_ms < 30_000)) && (
+                    <div className="my-4 flex items-center gap-2 text-[12px] text-green-600 dark:text-green-400 animate-pulse">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span className="font-medium">Claude is working…</span>
+                      {streamingText && (
+                        <span className="text-muted-foreground font-normal truncate max-w-[400px]">
+                          {streamingText.split('\n').pop()?.slice(0, 80)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── Summary & Learnings — collapsible at bottom ── */}
+                  <div className="mt-6 space-y-2 pb-4">
+                    {/* Summary */}
+                    <div className="border border-border/30 rounded-lg overflow-hidden">
+                      <button
+                        onClick={async () => {
+                          if (summaryOpen) { setSummaryOpen(false); return; }
+                          setSummaryOpen(true);
+                          if (summary) return;
+                          setSummaryLoading(true);
+                          setSummaryError(null);
+                          try {
+                            const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/summary`), { method: "POST" });
+                            const json = await res.json();
+                            if (json.error) setSummaryError(json.error);
+                            else setSummary(json.summary);
+                          } catch (e) {
+                            setSummaryError(e instanceof Error ? e.message : "Failed");
+                          } finally { setSummaryLoading(false); }
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <span className={summaryOpen ? "rotate-90 transition-transform" : "transition-transform"}>▶</span>
+                        <ScrollText className="h-3.5 w-3.5" />
+                        <span className="font-medium">Summary</span>
+                        {summary && <span className="text-[10px] text-green-500 font-medium ml-1">ready</span>}
+                        {summaryLoading && <Loader2 className="h-3 w-3 animate-spin text-blue-400 ml-1" />}
+                      </button>
+                      {summaryOpen && (
+                        <div className="px-4 pb-3 border-t border-border/20">
+                          {summaryError && <div className="text-[11px] text-red-500 py-2">{summaryError}</div>}
+                          {summary && (
+                            <div className="pt-2 relative group/summary">
+                              <button
+                                onClick={() => { navigator.clipboard.writeText(summary); toast.success("Summary copied"); }}
+                                className="absolute top-2 right-0 p-1 rounded opacity-0 group-hover/summary:opacity-100 text-muted-foreground/40 hover:text-muted-foreground transition-opacity"
+                                title="Copy summary"
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                              </button>
+                              <MarkdownContent content={summary} projectPath={data?.project_path} compact />
+                            </div>
+                          )}
+                          {!summary && !summaryLoading && !summaryError && <div className="text-[11px] text-muted-foreground py-2">Click to generate…</div>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Learnings */}
+                    <div className="border border-border/30 rounded-lg overflow-hidden">
+                      <button
+                        onClick={async () => {
+                          if (learningsOpen) { setLearningsOpen(false); return; }
+                          setLearningsOpen(true);
+                          if (learnings) return;
+                          setLearningsLoading(true);
+                          setLearningsError(null);
+                          try {
+                            const res = await fetch(apiUrl(`/api/sessions/${data.session_id}/learnings`), { method: "POST" });
+                            const json = await res.json();
+                            if (json.error) setLearningsError(json.error);
+                            else setLearnings(json.learnings);
+                          } catch (e) {
+                            setLearningsError(e instanceof Error ? e.message : "Failed");
+                          } finally { setLearningsLoading(false); }
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <span className={learningsOpen ? "rotate-90 transition-transform" : "transition-transform"}>▶</span>
+                        <Lightbulb className="h-3.5 w-3.5" />
+                        <span className="font-medium">Learnings</span>
+                        {learnings && <span className="text-[10px] text-green-500 font-medium ml-1">ready</span>}
+                        {learningsLoading && <Loader2 className="h-3 w-3 animate-spin text-blue-400 ml-1" />}
+                      </button>
+                      {learningsOpen && (
+                        <div className="px-4 pb-3 border-t border-border/20">
+                          {learningsError && (
+                            <div className="text-[11px] text-red-500 py-2 space-y-1">
+                              <div>{learningsError}</div>
+                              <button
+                                onClick={() => {
+                                  setLearningsError(null);
+                                  setLearningsLoading(true);
+                                  fetch(`/api/sessions/${data.session_id}/learnings?refresh=1`, { method: "POST" })
+                                    .then(r => r.json())
+                                    .then(json => {
+                                      if (json.error) setLearningsError(json.error + (json.raw ? `\n\nRaw: ${json.raw.slice(0, 300)}...` : ""));
+                                      else setLearnings(json.learnings);
+                                    })
+                                    .catch(e => setLearningsError(e.message))
+                                    .finally(() => setLearningsLoading(false));
+                                }}
+                                className="underline underline-offset-2 hover:text-red-400"
+                              >
+                                Retry with refresh
+                              </button>
+                            </div>
+                          )}
+                          {learnings && (() => {
+                            const l = learnings as Record<string, string | string[]>;
+                            const entries = Object.entries(l).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : !!v));
+                            return (
+                              <div className="pt-2 space-y-2 relative group/learnings">
+                                <button
+                                  onClick={() => { navigator.clipboard.writeText(JSON.stringify(learnings, null, 2)); toast.success("Learnings copied"); }}
+                                  className="absolute top-2 right-0 p-1 rounded opacity-0 group-hover/learnings:opacity-100 text-muted-foreground/40 hover:text-muted-foreground transition-opacity"
+                                  title="Copy learnings"
+                                >
+                                  <Copy className="h-3.5 w-3.5" />
+                                </button>
+                                {entries.map(([key, value]) => (
+                                  <div key={key}>
+                                    <div className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider mb-1">{key.replace(/_/g, " ")}</div>
+                                    {typeof value === "string" ? (
+                                      <p className="text-[12px] text-foreground/80">{value}</p>
+                                    ) : (
+                                      <ul className="list-disc pl-4 space-y-0.5">
+                                        {(value as string[]).map((item, i) => (
+                                          <li key={i} className="text-[12px] text-foreground/80">{item}</li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                          {!learnings && !learningsLoading && !learningsError && <div className="text-[11px] text-muted-foreground py-2">Click to generate…</div>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -1485,7 +1935,7 @@ export default function SessionDetailPage({
             </button>
           </div>
         )}
-        <div className={`shrink-0 border-l border-border flex flex-col bg-muted/30 transition-[width] duration-200 ease-in-out overflow-hidden ${rightPanelOpen ? "w-96" : "w-0 border-l-0"}`}>
+        <div className={`border-l border-border flex flex-col bg-muted/30 transition-[width] duration-200 ease-in-out overflow-hidden ${rightPanelOpen ? "w-96" : "shrink-0 w-0 border-l-0"}`}>
           {/* Panel header with collapse button */}
           <div className="flex items-center justify-end px-2 pt-1.5 shrink-0">
             <button
@@ -1512,12 +1962,10 @@ export default function SessionDetailPage({
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="flex items-center gap-1">
                   <Hash className="h-3 w-3" />
-                  {data.metadata.message_count} messages
+                  {data.messages_total ?? data.metadata.message_count} messages
                 </span>
                 {data.metadata.model && (
-                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
-                    {data.metadata.model.replace("claude-", "")}
-                  </Badge>
+                  <span className="text-xs text-muted-foreground">{data.metadata.model}</span>
                 )}
                 {totalTokens > 0 && <ContextBar tokens={totalTokens} />}
               </div>
@@ -1534,15 +1982,19 @@ export default function SessionDetailPage({
                 <Terminal className="h-3.5 w-3.5" />
                 Open Terminal
               </Button>
-              {data.is_active && (
+              {!data._remote && (
                 <>
                   <Button size="sm" variant="ghost" className="gap-1 text-xs h-7" onClick={focusTerminal} title="Bring terminal into focus">
                     <Crosshair className="h-3.5 w-3.5" />
-                    {focusOk ? "Focused!" : "Focus"}
+                    {focusOk === "focused" ? "Focused!" : focusOk === "opened" ? "Opened!" : "Focus"}
                   </Button>
-                  {!terminalKilled && (
+                  <Button size="sm" variant="ghost" className="gap-1 text-xs h-7" onClick={closeTerminal} title="Close terminal window or tab">
+                    <X className="h-3.5 w-3.5" />
+                    {closeOk ? "Closed!" : "Close"}
+                  </Button>
+                  {data.is_active && !terminalKilled && (
                     <Button size="sm" variant="ghost" className="gap-1 text-xs h-7 text-destructive/60 hover:text-destructive" onClick={killTerminal} title="Kill terminal session">
-                      <X className="h-3.5 w-3.5" />
+                      <Flame className="h-3.5 w-3.5" />
                       Kill
                     </Button>
                   )}
@@ -1552,6 +2004,7 @@ export default function SessionDetailPage({
                 <span className="text-[10px] text-amber-600 dark:text-amber-400">{focusError}</span>
               )}
             </div>
+
 
             {/* Actions: fold / download / share */}
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -1604,7 +2057,50 @@ export default function SessionDetailPage({
                   Share
                 </Button>
               )}
+              <Button
+                size="sm"
+                variant={ciSnippetOpen ? "secondary" : "ghost"}
+                className="gap-1 text-xs h-7"
+                onClick={() => setCiSnippetOpen(v => !v)}
+                title="GitHub CI callback snippets"
+              >
+                <Webhook className="h-3.5 w-3.5" />
+                CI
+              </Button>
             </div>
+
+            {/* CI callback snippets panel */}
+            {ciSnippetOpen && (
+              <div className="mt-1 p-3 rounded-lg border border-border/50 bg-muted/30 text-xs space-y-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-muted-foreground font-medium">Add to PR description</span>
+                    <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => copyCi(prBodySnippet, "pr")} title="Copy">
+                      {ciCopied === "pr" ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                    </Button>
+                  </div>
+                  <pre className="font-mono text-[10px] bg-background/60 p-2 rounded overflow-x-auto whitespace-pre-wrap break-all select-all">{prBodySnippet}</pre>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-muted-foreground font-medium">GitHub Actions step (last step in job)</span>
+                    <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => copyCi(actionsSnippet, "action")} title="Copy">
+                      {ciCopied === "action" ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                    </Button>
+                  </div>
+                  <pre className="font-mono text-[10px] bg-background/60 p-2 rounded overflow-x-auto select-all">{actionsSnippet}</pre>
+                </div>
+                {ciMode === "relay" ? (
+                  <p className="text-green-600 dark:text-green-400 text-[10px]">
+                    ✓ Using stable relay — URL won&apos;t break on restart.
+                  </p>
+                ) : (
+                  <p className="text-amber-600 dark:text-amber-400 text-[10px]">
+                    ⚠ Using direct URL (ephemeral). Enable <strong>Remote Relay</strong> in Settings for a stable URL that survives restarts.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Status alerts: crashed > streaming > terminal active */}
             {isInterrupted && !isStreaming ? (
@@ -1629,12 +2125,23 @@ export default function SessionDetailPage({
                 </div>
               </div>
             ) : isStreaming ? (
-              <div className="flex items-center gap-2 p-2.5 text-xs rounded-lg border border-orange-500/30 bg-orange-500/5 text-orange-600 dark:text-orange-400">
-                <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-                <span className="flex-1 truncate">{streamStatus || "Thinking…"}</span>
-                <button onClick={cancelStreaming} className="text-muted-foreground/60 hover:text-foreground transition-colors" title="Stop (Esc)">
-                  <X className="h-3 w-3" />
-                </button>
+              <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 text-orange-600 dark:text-orange-400 overflow-hidden">
+                {/* current status line */}
+                <div className="flex items-center gap-2 p-2.5 text-xs">
+                  <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                  <span className="flex-1 truncate">{streamStatus || "Thinking…"}</span>
+                  <button onClick={cancelStreaming} className="text-muted-foreground/60 hover:text-foreground transition-colors" title="Stop (Esc)">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                {/* history log — up to 50 past status events */}
+                {statusHistory.length > 1 && (
+                  <div className="border-t border-orange-500/20 px-2.5 pb-2 max-h-40 overflow-y-auto flex flex-col-reverse">
+                    {[...statusHistory].reverse().slice(1).map((s, i) => (
+                      <div key={i} className="text-[10px] text-orange-500/60 dark:text-orange-400/50 py-0.5 truncate font-mono">{s}</div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : data.is_active && !queuedMessages.length ? (
               <div className="flex items-center gap-2 p-2.5 text-xs rounded-lg border border-border bg-muted/30 text-muted-foreground">
@@ -1654,6 +2161,35 @@ export default function SessionDetailPage({
               </div>
             ) : null}
 
+            {/* Gemini quota exhausted banner */}
+            {isGeminiQuotaError && (
+              <div className="flex items-start gap-2.5 p-2.5 text-xs rounded-lg border border-yellow-500/40 bg-yellow-500/8 text-yellow-700 dark:text-yellow-400">
+                <Zap className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium">Gemini quota exhausted</div>
+                  {geminiExhaustedModel && (
+                    <div className="opacity-70 mt-0.5 font-mono">{geminiExhaustedModel}</div>
+                  )}
+                  <div className="opacity-70 mt-0.5">All API keys hit their daily limit for this model.</div>
+                  <div className="flex gap-1.5 mt-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-[11px] px-2 border-yellow-500/40 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/10"
+                      onClick={switchToFlash}
+                      disabled={switchingModel}
+                    >
+                      {switchingModel ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Zap className="h-3 w-3 mr-1" />}
+                      Switch to gemini-2.5-flash
+                    </Button>
+                  </div>
+                </div>
+                <button className="text-yellow-500/60 hover:text-yellow-500 shrink-0" onClick={() => setStreamError(null)}>
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+
             {/* Context Guard error */}
             {contextGuardError && (
               <div className="flex items-start gap-2 p-2.5 text-xs text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg">
@@ -1665,10 +2201,91 @@ export default function SessionDetailPage({
               </div>
             )}
 
-            {/* Settings & shortcuts */}
-            {enabledSettings.length > 0 && (
-              <div className="text-[10px] text-muted-foreground/50">
-                {enabledSettings.join(" · ")}
+            {/* Self-alarm indicator */}
+            {data.alarm && (
+              <div className="font-mono text-[10px] flex items-center gap-1.5 text-amber-600 dark:text-amber-400" title={`Alarm message: ${data.alarm.message}`}>
+                <span>⏰</span>
+                <span>
+                  alarm in {Math.max(0, Math.round((data.alarm.check_after_ms - (Date.now() - data.alarm.set_at)) / 60_000))}m
+                </span>
+                <button
+                  className="opacity-50 hover:opacity-100 ml-0.5"
+                  title="Cancel alarm"
+                  onClick={async () => {
+                    await fetch(apiUrl(`/api/sessions/${sessionId}/alarm`), { method: "DELETE" });
+                    fetchSession();
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Process vitals — show when active (with metrics) or recently finished (< 5min, no process) */}
+            {(data.is_active || (data.file_age_ms != null && data.file_age_ms < 5 * 60_000)) && (
+              <div className="font-mono text-[10px] text-muted-foreground/70 space-y-1">
+                {data.process_vitals ? (<>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={data.process_vitals.cpu_percent > 5 ? "text-green-600 dark:text-green-400" : ""}
+                    title="CPU usage of Claude process"
+                  >
+                    CPU {data.process_vitals.cpu_percent.toFixed(0)}%
+                  </span>
+                  <span className="opacity-40">·</span>
+                  <span title="Resident memory">RAM {data.process_vitals.mem_mb} MB</span>
+                  <span className="opacity-40">·</span>
+                  <span title="Process uptime (how long the claude process has been running)">
+                    {"up "}
+                    {data.process_vitals.elapsed_secs < 60
+                      ? `${data.process_vitals.elapsed_secs}s`
+                      : data.process_vitals.elapsed_secs < 3600
+                        ? `${Math.floor(data.process_vitals.elapsed_secs / 60)}m`
+                        : `${Math.floor(data.process_vitals.elapsed_secs / 3600)}h`}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={data.process_vitals.has_established_tcp ? "text-blue-600 dark:text-blue-400" : "opacity-40"}
+                    title={data.process_vitals.has_established_tcp
+                      ? `${data.process_vitals.tcp_connections.length} ESTABLISHED TCP connections`
+                      : "No active TCP connections"}
+                  >
+                    {data.process_vitals.has_established_tcp
+                      ? `API: ${data.process_vitals.tcp_connections.length} conn`
+                      : "API: idle"}
+                  </span>
+                  {data.file_age_ms != null && (
+                    <>
+                      <span className="opacity-40">·</span>
+                      <span title="Time since Claude last wrote to the JSONL log (last tool call / message output)">
+                        {"write "}
+                        {data.file_age_ms < 60_000
+                          ? `${Math.round(data.file_age_ms / 1000)}s ago`
+                          : data.file_age_ms < 3_600_000
+                            ? `${Math.floor(data.file_age_ms / 60_000)}m ago`
+                            : `${Math.floor(data.file_age_ms / 3_600_000)}h ago`}
+                      </span>
+                    </>
+                  )}
+                </div>
+                </>) : (
+                /* No process found — show write time so user knows it recently ran */
+                <div className="flex items-center gap-2 opacity-50">
+                  <span title="Process exited">process ended</span>
+                  {data.file_age_ms != null && (
+                    <>
+                      <span className="opacity-40">·</span>
+                      <span title="Time since last JSONL write">
+                        {"write "}
+                        {data.file_age_ms < 60_000
+                          ? `${Math.round(data.file_age_ms / 1000)}s ago`
+                          : `${Math.floor(data.file_age_ms / 60_000)}m ago`}
+                      </span>
+                    </>
+                  )}
+                </div>
+                )}
               </div>
             )}
             <div className="text-[10px] text-muted-foreground/40 flex items-center gap-3">
@@ -1676,45 +2293,6 @@ export default function SessionDetailPage({
               <span><kbd className="font-mono">⌘L</kbd> input</span>
             </div>
 
-            {/* Navigation — 2 columns */}
-            <div className="pt-1 border-t border-border/30 grid grid-cols-2 gap-x-1 gap-y-0.5">
-              <Link href="/claude-sessions/settings" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <Settings className="h-4 w-4 shrink-0" />
-                Settings
-              </Link>
-              <Link href="/claude-sessions/actions" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <ClipboardList className="h-4 w-4 shrink-0" />
-                Actions log
-              </Link>
-              <Link href="/claude-sessions/analytics" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <BarChart2 className="h-4 w-4 shrink-0" />
-                Analytics
-              </Link>
-              <Link href="/claude-sessions/archive" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <Archive className="h-4 w-4 shrink-0" />
-                Archive
-              </Link>
-              <Link href="/claude-sessions/store" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <Package className="h-4 w-4 shrink-0" />
-                Store
-              </Link>
-              <Link href="/claude-sessions/help" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors">
-                <CircleHelp className="h-4 w-4 shrink-0" />
-                Help
-              </Link>
-              <button
-                onClick={() => {
-                  const next = theme === "dark" ? "light" : "dark";
-                  setTheme(next);
-                  document.documentElement.className = next === "light" ? "" : "dark";
-                  localStorage.setItem("theme", next);
-                }}
-                className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
-              >
-                {theme === "dark" ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
-                Theme
-              </button>
-            </div>
           </div>
 
           {/* Sent message confirmation */}
@@ -1778,6 +2356,7 @@ export default function SessionDetailPage({
                 onSend={handleSend}
                 queueSize={queuedMessages.length}
                 isStreaming={isStreaming}
+                bgClassName="border-border bg-muted/30"
               />
             </div>
 
@@ -1799,145 +2378,21 @@ export default function SessionDetailPage({
                   className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
                   disabled={isSubmittingIssue}
                 />
-                <div
-                  className={`relative border rounded-lg transition-colors ${newSessionDragging ? "border-ring border-dashed bg-muted/40" : "border-input bg-muted/20"}`}
-                  onDrop={handleNewSessionDrop}
-                  onDragEnter={handleNewSessionDragEnter}
-                  onDragLeave={handleNewSessionDragLeave}
-                  onDragOver={handleNewSessionDragOver}
-                >
-                  {newSessionDragging && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-muted/60 pointer-events-none">
-                      <span className="text-xs text-muted-foreground font-medium">Drop to attach</span>
-                    </div>
-                  )}
-                  <textarea
-                    ref={newSessionInputRef}
-                    value={newSessionMessage}
-                    onChange={(e) => {
-                      setNewSessionMessage(e.target.value);
-                      if (newAutodetect.suggestions.length > 0) newAutodetect.clearSuggestions();
-                    }}
-                    onPaste={handleNewSessionPaste}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        if (newSessionPath) {
-                          handleStartNewSession();
-                        } else {
-                          handleNewSessionAutodetect();
-                        }
-                      } else if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleStartNewSession();
-                      }
-                    }}
-                    placeholder="First message for new session..."
-                    rows={16}
-                    className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-16 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                    disabled={startingNewSession}
-                  />
-                  {/* Bottom bar — two rows */}
-                  <div className="absolute bottom-1 left-1.5 right-1.5 space-y-0.5">
-                    {/* Row 1: attach + folder + auto */}
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => newFileInputRef.current?.click()}
-                        className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
-                        title="Attach file or drag & drop"
-                        type="button"
-                      >
-                        <Paperclip className="h-3 w-3" />
-                      </button>
-                      <button
-                        onClick={() => setFolderBrowserOpen(true)}
-                        className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded min-w-0 ${
-                          newAutodetect.autodetected
-                            ? "text-violet-500 hover:text-violet-600 hover:bg-violet-500/10"
-                            : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
-                        }`}
-                        title={newSessionPath || "Select folder"}
-                      >
-                        <FolderOpen className="h-3 w-3 shrink-0" />
-                        <span className="truncate max-w-[140px]">
-                          {newSessionPath ? newSessionPath.split(/[\\/]/).pop() : "folder..."}
-                        </span>
-                      </button>
-                      <button
-                        onClick={() => handleNewSessionAutodetect()}
-                        disabled={!newSessionMessage.trim() || newAutodetect.detecting}
-                        className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-violet-500 disabled:opacity-30 transition-colors px-1.5 py-0.5 rounded hover:bg-violet-500/10"
-                        title="Auto-detect project from your prompt"
-                      >
-                        {newAutodetect.detecting ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-3 w-3" />
-                        )}
-                        <span>auto</span>
-                      </button>
-                    </div>
-                    {/* Row 2: skip-perms, context, send */}
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={skipPerms.toggle}
-                        className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
-                          skipPerms.value
-                            ? "text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
-                            : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
-                        }`}
-                        title={skipPerms.value ? "Skip permissions enabled — click to disable" : "Skip permissions disabled — click to enable"}
-                      >
-                        <ShieldOff className="h-3 w-3" />
-                        <span>skip perms</span>
-                        <span className={`font-medium ${skipPerms.value ? "text-amber-400" : "text-muted-foreground/60"}`}>
-                          {skipPerms.value ? "on" : "off"}
-                        </span>
-                      </button>
-                      <label
-                        className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground cursor-pointer select-none px-1 py-0.5 rounded hover:bg-muted/50"
-                        title={
-                          !includeSummary
-                            ? "Include relevant context from this session"
-                            : settings?.gemini_configured === "true"
-                              ? "Smart context: Gemini extracts only what's relevant to your question"
-                              : "Basic context: truncated transcript (connect Gemini in Settings for smart extraction)"
-                        }
-                      >
-                        <input
-                          type="checkbox"
-                          checked={includeSummary}
-                          onChange={(e) => setIncludeSummary(e.target.checked)}
-                          className="h-3 w-3 rounded border-muted-foreground/30"
-                        />
-                        <span>Context</span>
-                        {includeSummary && settings?.gemini_configured !== "true" && (
-                          <AlertTriangle className="h-3 w-3 text-amber-500" />
-                        )}
-                      </label>
-                      <div className="flex-1" />
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={() => handleStartNewSession()}
-                        disabled={!newSessionMessage.trim() || !newSessionPath || startingNewSession}
-                      >
-                        {startingNewSession ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Send className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
 
             {/* Bottom bar: attach + new session + send */}
             <div className="flex items-center gap-1.5 mt-1.5 pl-0.5">
-              {/* Attach button is inside ReplyInput */}
+              {replyMode !== "issue" && (
+                <button
+                  onClick={() => replyInputRef.current?.triggerAttach()}
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground/40 hover:text-muted-foreground transition-colors px-1.5 py-1 rounded hover:bg-muted/50"
+                  title="Attach file"
+                  type="button"
+                >
+                  <Paperclip className="h-3 w-3" />
+                </button>
+              )}
 
               <div className="flex-1" />
 
@@ -1947,6 +2402,7 @@ export default function SessionDetailPage({
                   onClick={() => {
                     const next = !showNewSessionOpts;
                     setShowNewSessionOpts(next);
+                    setContextTransferState(includeSummary ? "idle" : "off");
                     if (next && !newSessionPath) {
                       const msg = replyInputRef.current?.getText() || "";
                       if (msg.trim()) handleNewSessionAutodetect(msg);
@@ -1966,10 +2422,7 @@ export default function SessionDetailPage({
               {/* Send = reply to current session */}
               <button
                 onClick={() => {
-                  if (replyMode === "reply") {
-                    const msg = replyInputRef.current?.getText()?.trim();
-                    if (msg) { handleSend(msg); replyInputRef.current?.setText(""); }
-                  }
+                  if (replyMode === "reply") replyInputRef.current?.triggerSend();
                   else if (replyMode === "issue") handleSubmitIssue();
                 }}
                 disabled={
@@ -2024,104 +2477,151 @@ export default function SessionDetailPage({
 
             {/* New session options — visible after clicking New ↗ */}
             {replyMode === "reply" && showNewSessionOpts && settings?.new_session_from_reply === "true" && (
-              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                <button
-                  onClick={() => setFolderBrowserOpen(true)}
-                  className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded min-w-0 ${
-                    newSessionPath
-                      ? "text-violet-500 hover:text-violet-600 hover:bg-violet-500/10"
-                      : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
-                  }`}
-                  title={newSessionPath || "Select folder for new session"}
-                >
-                  <FolderOpen className="h-3 w-3 shrink-0" />
-                  <span className="truncate max-w-[140px]">
-                    {newSessionPath ? newSessionPath.split(/[\\/]/).pop() : "folder..."}
-                  </span>
-                </button>
-                <button
-                  onClick={() => {
-                    const msg = replyInputRef.current?.getText() || "";
-                    handleNewSessionAutodetect(msg);
-                  }}
-                  disabled={newAutodetect.detecting}
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-violet-500 disabled:opacity-30 transition-colors px-1.5 py-0.5 rounded hover:bg-violet-500/10"
-                  title="Auto-detect project from your prompt"
-                >
-                  {newAutodetect.detecting ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3 w-3" />
-                  )}
-                  <span>auto</span>
-                </button>
-                <button
-                  onClick={skipPerms.toggle}
-                  className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
-                    skipPerms.value
-                      ? "text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
-                      : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
-                  }`}
-                  title={skipPerms.value ? "Skip permissions enabled" : "Skip permissions disabled"}
-                >
-                  <ShieldOff className="h-3 w-3" />
-                  <span>skip perms</span>
-                  <span className={`font-medium ${skipPerms.value ? "text-amber-400" : "text-muted-foreground/60"}`}>
-                    {skipPerms.value ? "on" : "off"}
-                  </span>
-                </button>
-                <label
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground cursor-pointer select-none px-1 py-0.5 rounded hover:bg-muted/50"
-                  title={
-                    !includeSummary
-                      ? "Include relevant context from this session"
-                      : settings?.gemini_configured === "true"
-                        ? "Smart context: Gemini extracts only what's relevant"
-                        : "Basic context: truncated transcript"
-                  }
-                >
-                  <input
-                    type="checkbox"
-                    checked={includeSummary}
-                    onChange={(e) => setIncludeSummary(e.target.checked)}
-                    className="h-3 w-3 rounded border-muted-foreground/30"
+              <div className="mt-2 rounded-xl border border-border bg-muted/20 p-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-medium text-foreground">New session setup</div>
+                  <div className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] ${contextTransferBadge.className}`}>
+                    {contextTransferState === "loading" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Webhook className="h-3 w-3" />}
+                    <span>{contextTransferBadge.label}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    onClick={() => setFolderBrowserOpen(true)}
+                    className={`flex items-center gap-1 text-[11px] transition-colors px-2 py-1 rounded-md min-w-0 border ${
+                      newSessionPath
+                        ? "border-violet-500/30 bg-violet-500/10 text-violet-400 hover:border-violet-500/50"
+                        : "border-border text-muted-foreground hover:text-foreground hover:bg-background/70"
+                    }`}
+                    title={newSessionPath || "Select folder for new session"}
+                  >
+                    <FolderOpen className="h-3 w-3 shrink-0" />
+                    <span className="truncate max-w-[160px]">
+                      {newSessionPath ? newSessionPath.split(/[\\/]/).pop() : "Choose folder"}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const msg = replyInputRef.current?.getText() || "";
+                      handleNewSessionAutodetect(msg);
+                    }}
+                    disabled={newAutodetect.detecting}
+                    className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-violet-400 hover:border-violet-500/30 disabled:opacity-30"
+                    title="Auto-detect project from your prompt"
+                  >
+                    {newAutodetect.detecting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    <span>Auto-detect</span>
+                  </button>
+                  <AgentToggleButton
+                    agent={newSessionAgent}
+                    onCycle={(next) => {
+                      setNewSessionAgent(next);
+                      setNewSessionModel(getDefaultModelForAgent(next, settings?.claude_model));
+                    }}
+                    size="md"
                   />
-                  <span>Context</span>
-                  {includeSummary && settings?.gemini_configured !== "true" && (
-                    <AlertTriangle className="h-3 w-3 text-amber-500" />
-                  )}
-                </label>
+                  <select
+                    value={newSessionModel}
+                    onChange={(e) => setNewSessionModel(e.target.value)}
+                    className="text-[11px] px-2 py-1 rounded-md border border-border bg-card text-muted-foreground hover:border-violet-500/30 cursor-pointer max-w-[180px]"
+                    title="Model for new session"
+                  >
+                    {getModelPresetsForAgent(newSessionAgent).map((preset) => (
+                      <option key={preset.id} value={preset.model}>{preset.name}</option>
+                    ))}
+                  </select>
+                </div>
 
-                <div className="flex-1" />
-
-                {/* Start — explicit send action */}
-                <button
-                  onClick={async () => {
-                    const msg = replyInputRef.current?.getText() || "";
-                    if (!msg.trim()) return;
-                    if (!newSessionPath) {
-                      const firstPath = await newAutodetect.detect(msg);
-                      if (firstPath) {
-                        setNewSessionPath(firstPath);
-                        setTimeout(() => handleStartNewSession(msg), 50);
-                      } else {
-                        setFolderBrowserOpen(true);
-                      }
-                      return;
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <label
+                    className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer select-none px-2 py-1 rounded-md border border-border bg-background/60"
+                    title={
+                      !includeSummary
+                        ? "Include relevant context from this session"
+                        : settings?.gemini_configured === "true"
+                          ? "Smart context: Gemini extracts only what's relevant"
+                          : "Basic context: truncated transcript"
                     }
-                    handleStartNewSession(msg);
-                    replyInputRef.current?.setText("");
-                    setShowNewSessionOpts(false);
-                  }}
-                  disabled={startingNewSession}
-                  className="text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 bg-emerald-600 text-white hover:bg-emerald-500"
-                >
-                  {startingNewSession ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    "Start ↗"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={includeSummary}
+                      onChange={(e) => {
+                        setIncludeSummary(e.target.checked);
+                        setContextTransferState(e.target.checked ? "idle" : "off");
+                      }}
+                      className="h-3 w-3 rounded border-muted-foreground/30"
+                    />
+                    <span>Attach context</span>
+                    {includeSummary && settings?.gemini_configured !== "true" && (
+                      <AlertTriangle className="h-3 w-3 text-amber-500" />
+                    )}
+                  </label>
+                  <button
+                    onClick={skipPerms.toggle}
+                    className={`flex items-center gap-1 text-[11px] transition-colors px-2 py-1 rounded-md border ${
+                      skipPerms.value
+                        ? "border-amber-500/40 bg-amber-500/10 text-amber-400 hover:border-amber-500/60"
+                        : "border-border text-muted-foreground hover:text-foreground hover:bg-background/70"
+                    }`}
+                    title={skipPerms.value ? "Skip permissions enabled" : "Skip permissions disabled"}
+                  >
+                    <ShieldOff className="h-3 w-3" />
+                    <span>Skip perms {skipPerms.value ? "on" : "off"}</span>
+                  </button>
+                  {compute.nodes.length > 0 && (
+                    <button
+                      onClick={compute.toggle}
+                      className={`flex items-center gap-1 text-[11px] transition-colors px-2 py-1 rounded-md border ${
+                        compute.isLocal
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:border-emerald-500/50"
+                          : "border-sky-500/30 bg-sky-500/10 text-sky-400 hover:border-sky-500/50"
+                      }`}
+                      title={compute.isLocal ? "Running locally — click to switch to VM" : `Running on ${compute.currentNode?.name} — click to switch`}
+                    >
+                      {compute.isLocal ? <Monitor className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
+                      <span>{compute.isLocal ? "Local" : compute.currentNode?.name ?? "VM"}</span>
+                    </button>
                   )}
-                </button>
+
+                  <div className="flex-1" />
+
+                  <button
+                    onClick={async () => {
+                      const msg = replyInputRef.current?.getText() || "";
+                      if (!msg.trim()) return;
+                      if (!newSessionPath) {
+                        const firstPath = await newAutodetect.detect(msg);
+                        if (firstPath) {
+                          setNewSessionPath(firstPath);
+                          setTimeout(() => handleStartNewSession(msg), 50);
+                        } else {
+                          setFolderBrowserOpen(true);
+                        }
+                        return;
+                      }
+                      handleStartNewSession(msg);
+                      replyInputRef.current?.setText("");
+                      setShowNewSessionOpts(false);
+                    }}
+                    disabled={startingNewSession}
+                    className={`inline-flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md transition-colors disabled:opacity-30 text-white ${
+                      newSessionAgent === "codex"
+                        ? "bg-violet-600 hover:bg-violet-500"
+                        : "bg-emerald-600 hover:bg-emerald-500"
+                    }`}
+                  >
+                    {startingNewSession ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : newSessionAgent === "codex" ? (
+                      <Terminal className="h-3.5 w-3.5" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5" />
+                    )}
+                    <span>{newSessionAgent === "codex" ? "Start in terminal" : "Start new session"}</span>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -2160,43 +2660,6 @@ export default function SessionDetailPage({
                     );
                   })}
                 </div>
-
-                {/* Description textarea — shown after category is selected */}
-                {issueCategory && (
-                  <div className="relative border rounded-lg border-input bg-muted/20">
-                    <textarea
-                      ref={issueInputRef}
-                      value={issueDescription}
-                      onChange={(e) => setIssueDescription(e.target.value)}
-                      onPaste={handleIssuePaste}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                          e.preventDefault();
-                          handleSubmitIssue();
-                        }
-                      }}
-                      placeholder="Describe the issue... (paste screenshots with Ctrl+V)"
-                      rows={6}
-                      className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-10 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                      disabled={isSubmittingIssue}
-                    />
-                    <div className="absolute bottom-1.5 right-1.5">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={handleSubmitIssue}
-                        disabled={!issueDescription.trim() || isSubmittingIssue}
-                      >
-                        {isSubmittingIssue ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Send className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>

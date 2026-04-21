@@ -7,7 +7,7 @@ import type { ActivityStatus } from "@/components/StatusBadge";
  * If process is alive but idle for >2min, it's just waiting, not "active".
  */
 export function getActivityStatus(
-  session: { is_active?: boolean; modified_at: string; last_message_role?: string | null },
+  session: { is_active?: boolean; modified_at: string; last_message_role?: string | null; has_result?: boolean | number },
   now: number = Date.now()
 ): ActivityStatus {
   const ageMs = now - new Date(session.modified_at).getTime();
@@ -19,9 +19,10 @@ export function getActivityStatus(
   // Don't show "interrupted" for tool_result here — scanner may not have caught up yet
   if (ageMs < 30_000) return "recent-30s";
   if (ageMs < 3 * 60_000) return "recent-3m";
-  // "interrupted" = Claude died mid-tool-execution (last message is a tool_result, no process)
+  // "interrupted" = Claude died mid-tool-execution (last message is a tool_result, no process, no result event)
   // Only show for sessions idle > 3min (below that, "recent" takes priority)
-  if (session.last_message_role === "tool_result" && ageMs < 2 * 60 * 60_000) return "interrupted";
+  // has_result = true means Claude exited normally — not a crash even if last msg was tool_result
+  if (session.last_message_role === "tool_result" && !session.has_result && ageMs < 2 * 60 * 60_000) return "interrupted";
   // "waiting" = Claude's last message is unanswered (only shown for recent sessions)
   if (session.last_message_role === "assistant" && ageMs < 48 * 60 * 60_000) return "waiting";
   return "inactive";

@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code Session Analytics</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f13; color: #e4e4e7; line-height: 1.5; }
+.container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; background: linear-gradient(135deg, #a78bfa, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.subtitle { color: #71717a; margin-bottom: 32px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
+.card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 20px; }
+.card-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; margin-bottom: 4px; }
+.card-value { font-size: 28px; font-weight: 700; color: #fafafa; }
+.card-sub { font-size: 12px; color: #52525b; margin-top: 2px; }
+.section { margin-bottom: 40px; }
+.section h2 { font-size: 20px; font-weight: 600; margin-bottom: 16px; color: #a1a1aa; }
+.chart-container { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+.chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+@media (max-width: 900px) { .chart-row { grid-template-columns: 1fr; } }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; padding: 10px 12px; color: #71717a; font-weight: 500; border-bottom: 1px solid #27272a; font-size: 12px; text-transform: uppercase; }
+td { padding: 8px 12px; border-bottom: 1px solid #1e1e22; }
+tr:hover td { background: #1c1c20; }
+.mono { font-family: 'SF Mono', Menlo, monospace; font-size: 13px; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; }
+.tag-green { background: #052e16; color: #4ade80; }
+.tag-blue { background: #172554; color: #60a5fa; }
+.tag-purple { background: #2e1065; color: #c084fc; }
+.tag-amber { background: #451a03; color: #fbbf24; }
+.bar { height: 6px; background: #27272a; border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #818cf8, #a78bfa); }
+.prompt { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #71717a; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Claude Code Session Analytics</h1>
+<p class="subtitle">Generated 2026-03-06 11:39 | Data from ~/.claude/projects/</p>
+
+<!-- KPI Cards -->
+<div class="grid">
+  <div class="card">
+    <div class="card-label">Sessions</div>
+    <div class="card-value">669</div>
+    <div class="card-sub">+ 1452 subagents</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Messages</div>
+    <div class="card-value">221.9K</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Tool Calls</div>
+    <div class="card-value">78.1K</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Auto-Compacts</div>
+    <div class="card-value">321</div>
+    <div class="card-sub">in 297 valid events</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Cache Read</div>
+    <div class="card-value">9375.1M</div>
+    <div class="card-sub">tokens total</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Output Tokens</div>
+    <div class="card-value">21.1M</div>
+  </div>
+</div>
+
+<!-- Daily Activity Chart -->
+<div class="section">
+  <h2>Daily Activity (Last 30 Days)</h2>
+  <div class="chart-container">
+    <canvas id="dailyChart" height="80"></canvas>
+  </div>
+</div>
+
+<!-- Charts Row -->
+<div class="chart-row">
+  <div class="chart-container">
+    <h2 style="margin-bottom:12px; font-size:16px; color:#a1a1aa;">Session Duration Distribution</h2>
+    <canvas id="durationChart" height="120"></canvas>
+  </div>
+  <div class="chart-container">
+    <h2 style="margin-bottom:12px; font-size:16px; color:#a1a1aa;">Models Used</h2>
+    <canvas id="modelChart" height="120"></canvas>
+  </div>
+</div>
+
+<div class="chart-row">
+  <div class="chart-container">
+    <h2 style="margin-bottom:12px; font-size:16px; color:#a1a1aa;">Top 15 Tools</h2>
+    <canvas id="toolChart" height="160"></canvas>
+  </div>
+  <div class="chart-container">
+    <h2 style="margin-bottom:12px; font-size:16px; color:#a1a1aa;">Compact Context Reduction</h2>
+    <canvas id="compactChart" height="160"></canvas>
+  </div>
+</div>
+
+<!-- Projects Table -->
+<div class="section">
+  <h2>Projects (20)</h2>
+  <div class="card">
+  <table>
+    <tr><th>Project</th><th>Sessions</th><th>Input Tokens</th><th>Output Tokens</th><th>Tools</th><th>Compacts</th><th></th></tr>
+    <tr>
+      <td class="mono">claude-session-manager</td>
+      <td>194</td>
+      <td>51.5K</td>
+      <td>1.3M</td>
+      <td>2.8K</td>
+      <td>16</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:100%"></div></div></td>
+    </tr><tr>
+      <td class="mono">/Users/vova</td>
+      <td>113</td>
+      <td>188.2K</td>
+      <td>3.0M</td>
+      <td>10.0K</td>
+      <td>83</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:58%"></div></div></td>
+    </tr><tr>
+      <td class="mono">improvado-notes</td>
+      <td>55</td>
+      <td>254.6K</td>
+      <td>2.7M</td>
+      <td>7.2K</td>
+      <td>44</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:28%"></div></div></td>
+    </tr><tr>
+      <td class="mono">~/Documents</td>
+      <td>42</td>
+      <td>96.7K</td>
+      <td>1.1M</td>
+      <td>3.0K</td>
+      <td>21</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:22%"></div></div></td>
+    </tr><tr>
+      <td class="mono">skillset-analytics</td>
+      <td>39</td>
+      <td>146.1K</td>
+      <td>1.8M</td>
+      <td>4.2K</td>
+      <td>28</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:20%"></div></div></td>
+    </tr><tr>
+      <td class="mono">candidate-routing</td>
+      <td>37</td>
+      <td>71.9K</td>
+      <td>1.8M</td>
+      <td>5.1K</td>
+      <td>30</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:19%"></div></div></td>
+    </tr><tr>
+      <td class="mono">skillset-ai</td>
+      <td>32</td>
+      <td>182.6K</td>
+      <td>1.3M</td>
+      <td>3.7K</td>
+      <td>31</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:16%"></div></div></td>
+    </tr><tr>
+      <td class="mono">aichill-content</td>
+      <td>20</td>
+      <td>35.0K</td>
+      <td>459.8K</td>
+      <td>1.4K</td>
+      <td>6</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:10%"></div></div></td>
+    </tr><tr>
+      <td class="mono">interview-engine</td>
+      <td>20</td>
+      <td>62.2K</td>
+      <td>518.2K</td>
+      <td>2.0K</td>
+      <td>9</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:10%"></div></div></td>
+    </tr><tr>
+      <td class="mono">/private/tmp</td>
+      <td>13</td>
+      <td>56</td>
+      <td>1.8K</td>
+      <td>18</td>
+      <td>0</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:7%"></div></div></td>
+    </tr><tr>
+      <td class="mono">~/Documents/GitHub</td>
+      <td>8</td>
+      <td>575</td>
+      <td>77.7K</td>
+      <td>122</td>
+      <td>0</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:4%"></div></div></td>
+    </tr><tr>
+      <td class="mono">context-trash-mcp</td>
+      <td>7</td>
+      <td>4.8K</td>
+      <td>194.1K</td>
+      <td>375</td>
+      <td>0</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:4%"></div></div></td>
+    </tr><tr>
+      <td class="mono">linkedin-messenger</td>
+      <td>7</td>
+      <td>8.0K</td>
+      <td>320.8K</td>
+      <td>741</td>
+      <td>4</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:4%"></div></div></td>
+    </tr><tr>
+      <td class="mono">rnd-forge</td>
+      <td>6</td>
+      <td>9.4K</td>
+      <td>116.4K</td>
+      <td>265</td>
+      <td>1</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:3%"></div></div></td>
+    </tr><tr>
+      <td class="mono">behalf-chrome-extension</td>
+      <td>5</td>
+      <td>19.4K</td>
+      <td>176.1K</td>
+      <td>389</td>
+      <td>1</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:3%"></div></div></td>
+    </tr><tr>
+      <td class="mono">teamhub</td>
+      <td>5</td>
+      <td>208</td>
+      <td>37.5K</td>
+      <td>67</td>
+      <td>0</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:3%"></div></div></td>
+    </tr><tr>
+      <td class="mono">claude-context-compact-prevent</td>
+      <td>4</td>
+      <td>298</td>
+      <td>40.0K</td>
+      <td>117</td>
+      <td>0</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:2%"></div></div></td>
+    </tr><tr>
+      <td class="mono">skillset-ads-bot</td>
+      <td>4</td>
+      <td>712</td>
+      <td>29.3K</td>
+      <td>211</td>
+      <td>2</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:2%"></div></div></td>
+    </tr><tr>
+      <td class="mono">vault-mcp</td>
+      <td>4</td>
+      <td>12.2K</td>
+      <td>78.3K</td>
+      <td>293</td>
+      <td>1</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:2%"></div></div></td>
+    </tr><tr>
+      <td class="mono">web-analytics-setup</td>
+      <td>4</td>
+      <td>1.0K</td>
+      <td>57.4K</td>
+      <td>302</td>
+      <td>3</td>
+      <td><div class="bar" style="width:120px"><div class="bar-fill" style="width:2%"></div></div></td>
+    </tr>
+  </table>
+  </div>
+</div>
+
+<!-- Tools Table -->
+<div class="section">
+  <h2>Tool Usage</h2>
+  <div class="card">
+  <table>
+    <tr><th>Tool</th><th>Calls</th><th>Sessions</th><th>Type</th></tr>
+    <tr>
+      <td class="mono">Bash</td>
+      <td>24,769</td>
+      <td>1098</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">Read</td>
+      <td>12,484</td>
+      <td>1049</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">mcp__improvado-internal-mcp__clickhouseTool</td>
+      <td>7,097</td>
+      <td>102</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">Edit</td>
+      <td>6,150</td>
+      <td>344</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">WebSearch</td>
+      <td>3,546</td>
+      <td>241</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">mcp__improvado-internal-mcp__switchWorkspaceContextTool</td>
+      <td>2,966</td>
+      <td>101</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">Write</td>
+      <td>2,453</td>
+      <td>482</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">Grep</td>
+      <td>2,399</td>
+      <td>416</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">mcp__playwright__browser_click</td>
+      <td>2,388</td>
+      <td>107</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">mcp__improvado-internal-mcp__clickhousePalantirTool</td>
+      <td>1,712</td>
+      <td>85</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">WebFetch</td>
+      <td>1,559</td>
+      <td>240</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">Glob</td>
+      <td>1,259</td>
+      <td>465</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">mcp__playwright__browser_navigate</td>
+      <td>1,227</td>
+      <td>220</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">ToolSearch</td>
+      <td>926</td>
+      <td>228</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">Task</td>
+      <td>807</td>
+      <td>168</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">TaskUpdate</td>
+      <td>750</td>
+      <td>77</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">mcp__playwright__browser_run_code</td>
+      <td>694</td>
+      <td>57</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">mcp__playwright__browser_take_screenshot</td>
+      <td>635</td>
+      <td>109</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">mcp__playwright__browser_snapshot</td>
+      <td>519</td>
+      <td>119</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">mcp__playwright__browser_evaluate</td>
+      <td>510</td>
+      <td>73</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">mcp__playwright__browser_wait_for</td>
+      <td>486</td>
+      <td>89</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">TaskOutput</td>
+      <td>428</td>
+      <td>96</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">TaskCreate</td>
+      <td>384</td>
+      <td>70</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr><tr>
+      <td class="mono">mcp__playwright__browser_type</td>
+      <td>310</td>
+      <td>61</td>
+      <td><span class="tag tag-purple">MCP</span></td>
+    </tr><tr>
+      <td class="mono">Agent</td>
+      <td>207</td>
+      <td>71</td>
+      <td><span class="tag tag-blue">Built-in</span></td>
+    </tr>
+  </table>
+  </div>
+</div>
+
+<!-- MCP Servers -->
+<div class="section">
+  <h2>MCP Servers</h2>
+  <div class="card">
+  <table>
+    <tr><th>Server</th><th>Calls</th><th>Sessions</th></tr>
+    <tr><td class="mono">improvado-internal-mcp</td><td>12,045</td><td>124</td></tr><tr><td class="mono">playwright</td><td>7,285</td><td>231</td></tr><tr><td class="mono">mermaid</td><td>54</td><td>6</td></tr><tr><td class="mono">moldsim</td><td>10</td><td>2</td></tr><tr><td class="mono">vault-mcp</td><td>7</td><td>3</td></tr><tr><td class="mono">plugin_context7_context7</td><td>4</td><td>2</td></tr><tr><td class="mono">chrome-devtools</td><td>4</td><td>3</td></tr><tr><td class="mono">vault</td><td>2</td><td>2</td></tr><tr><td class="mono">webflow</td><td>1</td><td>1</td></tr><tr><td class="mono">cdp-client</td><td>1</td><td>1</td></tr>
+  </table>
+  </div>
+</div>
+
+<!-- Compact Analysis -->
+<div class="section">
+  <h2>Auto-Compact Analysis</h2>
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+    <div class="card">
+      <div class="card-label">Avg Pre-Compact</div>
+      <div class="card-value">164.8K</div>
+      <div class="card-sub">tokens</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Avg Post-Compact</div>
+      <div class="card-value">41.9K</div>
+      <div class="card-sub">tokens</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Avg Reduction</div>
+      <div class="card-value">74%</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Avg Summary</div>
+      <div class="card-value">14.4K</div>
+      <div class="card-sub">chars</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Avg Msgs Before</div>
+      <div class="card-value">668</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+  <table>
+    <tr><th>Time</th><th>Project</th><th>Pre-Tokens</th><th>Post-Tokens</th><th>Reduction</th><th>Summary</th><th>Msgs</th></tr>
+    <tr>
+      <td class="mono">2026-03-06T05:42</td>
+      <td class="mono">candidate-routing</td>
+      <td>165,708</td>
+      <td>31,558</td>
+      <td><span class="tag tag-green">81%</span></td>
+      <td>3.6K ch</td>
+      <td>484</td>
+    </tr><tr>
+      <td class="mono">2026-03-06T04:41</td>
+      <td class="mono">candidate-routing</td>
+      <td>121,619</td>
+      <td>15,895</td>
+      <td><span class="tag tag-green">87%</span></td>
+      <td>2.0K ch</td>
+      <td>247</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T20:45</td>
+      <td class="mono">claude-context-saver</td>
+      <td>165,224</td>
+      <td>27,061</td>
+      <td><span class="tag tag-green">84%</span></td>
+      <td>2.5K ch</td>
+      <td>224</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T19:06</td>
+      <td class="mono">claude-session-manager</td>
+      <td>166,267</td>
+      <td>18,027</td>
+      <td><span class="tag tag-green">89%</span></td>
+      <td>11.5K ch</td>
+      <td>356</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T18:12</td>
+      <td class="mono">-sessions</td>
+      <td>176,755</td>
+      <td>24,708</td>
+      <td><span class="tag tag-green">86%</span></td>
+      <td>15.9K ch</td>
+      <td>850</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T17:56</td>
+      <td class="mono">claude-session-manager</td>
+      <td>160,585</td>
+      <td>19,116</td>
+      <td><span class="tag tag-green">88%</span></td>
+      <td>10.2K ch</td>
+      <td>435</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T16:29</td>
+      <td class="mono">~/Documents/TeamHub/skillset/repos/skillset/prompts</td>
+      <td>163,160</td>
+      <td>21,544</td>
+      <td><span class="tag tag-green">87%</span></td>
+      <td>10.4K ch</td>
+      <td>1764</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T16:07</td>
+      <td class="mono">claude-session-manager</td>
+      <td>160,351</td>
+      <td>19,396</td>
+      <td><span class="tag tag-green">88%</span></td>
+      <td>7.5K ch</td>
+      <td>115</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T16:04</td>
+      <td class="mono">claude-session-manager</td>
+      <td>144,210</td>
+      <td>19,513</td>
+      <td><span class="tag tag-green">86%</span></td>
+      <td>7.3K ch</td>
+      <td>77</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T15:12</td>
+      <td class="mono">~/Documents/TeamHub/skillset/repos/skillset/prompts</td>
+      <td>11,792</td>
+      <td>26,634</td>
+      <td><span class="tag tag-green">-126%</span></td>
+      <td>11.2K ch</td>
+      <td>1594</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T14:59</td>
+      <td class="mono">~/Documents/TeamHub/skillset/repos/skillset/prompts</td>
+      <td>165,429</td>
+      <td>24,605</td>
+      <td><span class="tag tag-green">85%</span></td>
+      <td>12.7K ch</td>
+      <td>1500</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T14:31</td>
+      <td class="mono">claude-session-manager-src-app-api-teamhub</td>
+      <td>166,770</td>
+      <td>21,661</td>
+      <td><span class="tag tag-green">87%</span></td>
+      <td>13.4K ch</td>
+      <td>915</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T11:22</td>
+      <td class="mono">-sessions</td>
+      <td>162,783</td>
+      <td>18,751</td>
+      <td><span class="tag tag-green">88%</span></td>
+      <td>13.0K ch</td>
+      <td>456</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T09:26</td>
+      <td class="mono">candidate-routing</td>
+      <td>166,855</td>
+      <td>23,551</td>
+      <td><span class="tag tag-green">86%</span></td>
+      <td>13.0K ch</td>
+      <td>567</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T09:05</td>
+      <td class="mono">skillset-ai</td>
+      <td>157,625</td>
+      <td>20,147</td>
+      <td><span class="tag tag-green">87%</span></td>
+      <td>9.1K ch</td>
+      <td>146</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T08:31</td>
+      <td class="mono">claude-session-manager</td>
+      <td>166,797</td>
+      <td>56,668</td>
+      <td><span class="tag tag-green">66%</span></td>
+      <td>18.2K ch</td>
+      <td>2710</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T06:51</td>
+      <td class="mono">claude-session-manager</td>
+      <td>166,926</td>
+      <td>48,467</td>
+      <td><span class="tag tag-green">71%</span></td>
+      <td>15.2K ch</td>
+      <td>2398</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T05:27</td>
+      <td class="mono">claude-session-manager</td>
+      <td>167,422</td>
+      <td>56,181</td>
+      <td><span class="tag tag-green">66%</span></td>
+      <td>18.8K ch</td>
+      <td>2057</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T05:18</td>
+      <td class="mono">claude-session-manager-src-app-api-teamhub</td>
+      <td>169,502</td>
+      <td>16,799</td>
+      <td><span class="tag tag-green">90%</span></td>
+      <td>13.1K ch</td>
+      <td>639</td>
+    </tr><tr>
+      <td class="mono">2026-03-05T04:30</td>
+      <td class="mono">claude-session-manager-src-app-api-teamhub</td>
+      <td>154,770</td>
+      <td>18,027</td>
+      <td><span class="tag tag-green">88%</span></td>
+      <td>13.1K ch</td>
+      <td>263</td>
+    </tr><tr>
+      <td class="mono">2026-03-04T18:02</td>
+      <td class="mono">candidate-routing</td>
+      <td>164,741</td>
+      <td>44,743</td>
+      <td><span class="tag tag-green">73%</span></td>
+      <td>2.8K ch</td>
+      <td>744</td>
+    </tr><tr>
+      <td class="mono">2026-03-04T17:11</td>
+      <td class="mono">claude-session-manager</td>
+      <td>166,849</td>
+      <td>46,083</td>
+      <td><span class="tag tag-green">72%</span></td>
+      <td>8.9K ch</td>
+      <td>1691</td>
+    </tr><tr>
+      <td class="mono">2026-03-04T17:10</td>
+      <td class="mono">candidate-routing</td>
+      <td>165,369</td>
+      <td>45,418</td>
+      <td><span class="tag tag-green">73%</span></td>
+      <td>3.6K ch</td>
+      <td>676</td>
+    </tr><tr>
+      <td class="mono">2026-03-04T15:28</td>
+      <td class="mono">~/Documents/TeamHub/skillset/repos/skillset/prompts</td>
+      <td>164,086</td>
+      <td>46,497</td>
+      <td><span class="tag tag-green">72%</span></td>
+      <td>13.9K ch</td>
+      <td>1131</td>
+    </tr><tr>
+      <td class="mono">2026-03-04T15:10</td>
+      <td class="mono">candidate-routing</td>
+      <td>166,780</td>
+      <td>45,519</td>
+      <td><span class="tag tag-green">73%</span></td>
+      <td>2.7K ch</td>
+      <td>546</td>
+    </tr><tr>
+      <td class="mono">2026-03-04T13:32</td>
+      <td class="mono">~/Documents/TeamHub/skillset/repos/skillset/prompts</td>
+      <td>160,419</td>
+      <td>57,354</td>
+      <td><span class="tag tag-green">64%</span></td>
+      <td>16.3K ch</td>
+      <td>905</td>
+    </tr><tr>
+      <td class="mono">2026-03-04T12:01</td>
+      <td class="mono">candidate-routing</td>
+      <td>167,289</td>
+      <td>45,562</td>
+      <td><span class="tag tag-green">73%</span></td>
+      <td>4.3K ch</td>
+      <td>307</td>
+    </tr><tr>
+      <td class="mono">2026-03-04T11:51</td>
+      <td class="mono">claude-session-manager</td>
+      <td>165,946</td>
+      <td>49,894</td>
+      <td><span class="tag tag-green">70%</span></td>
+      <td>10.5K ch</td>
+      <td>1365</td>
+    </tr><tr>
+      <td class="mono">2026-03-04T10:45</td>
+      <td class="mono">candidate-routing</td>
+      <td>161,865</td>
+      <td>46,176</td>
+      <td><span class="tag tag-green">71%</span></td>
+      <td>3.2K ch</td>
+      <td>185</td>
+    </tr><tr>
+      <td class="mono">2026-03-04T10:32</td>
+      <td class="mono">claude-session-manager</td>
+      <td>165,631</td>
+      <td>53,558</td>
+      <td><span class="tag tag-green">68%</span></td>
+      <td>15.5K ch</td>
+      <td>1043</td>
+    </tr>
+  </table>
+  </div>
+</div>
+
+<!-- Heavy Compact Sessions -->
+<div class="section">
+  <h2>Sessions with Most Compacts</h2>
+  <div class="card">
+  <table>
+    <tr><th>Session</th><th>Project</th><th>Compacts</th><th>Messages</th><th>Duration</th><th>Model</th><th>First Prompt</th></tr>
+    <tr>
+      <td class="mono">76716d43-0ad</td>
+      <td class="mono">/Users/vova</td>
+      <td><span class="tag tag-amber">16</span></td>
+      <td>2644</td>
+      <td>15.4h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt">⏺ Конфиг с /sse на месте, но Webflow MCP не загрузился. Скорее
+  всего mcp-remot</td>
+    </tr><tr>
+      <td class="mono">8fd13c82-76f</td>
+      <td class="mono">~/Documents/TeamHub/skillset/repos/skillset/prompts</td>
+      <td><span class="tag tag-amber">9</span></td>
+      <td>1915</td>
+      <td>63.0h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt">❯ Сейчас у нас будет большой гига-проект по анализу промтов. Скачали все        </td>
+    </tr><tr>
+      <td class="mono">5f78581a-876</td>
+      <td class="mono">/Users/vova</td>
+      <td><span class="tag tag-amber">9</span></td>
+      <td>3187</td>
+      <td>38.7h</td>
+      <td class="mono">sonnet-4-6</td>
+      <td class="prompt">Можешь, пожалуйста, провести анализ моих публичных репозиториев, в которые откры</td>
+    </tr><tr>
+      <td class="mono">b482d269-b1e</td>
+      <td class="mono">claude-session-manager</td>
+      <td><span class="tag tag-amber">8</span></td>
+      <td>3287</td>
+      <td>30.8h</td>
+      <td class="mono">sonnet-4-6</td>
+      <td class="prompt">Implement the following plan:
+
+# Plan: Files Tab — Dual Search + GDrive Source S</td>
+    </tr><tr>
+      <td class="mono">90e94ed2-c3b</td>
+      <td class="mono">/Users/vova</td>
+      <td><span class="tag tag-amber">8</span></td>
+      <td>1506</td>
+      <td>4.5h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt">Смотри, мы подготовили рекламу для компании Google Ads.
+
+Я сейчас тебе дам ссылк</td>
+    </tr><tr>
+      <td class="mono">4c1ce07e-324</td>
+      <td class="mono">/Users/vova</td>
+      <td><span class="tag tag-amber">8</span></td>
+      <td>1476</td>
+      <td>6.2h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt">А можешь сделать анализ прайсинга наших конкурентов и предложить варианты для от</td>
+    </tr><tr>
+      <td class="mono">6ac4c86e-3f9</td>
+      <td class="mono">inbox-processing</td>
+      <td><span class="tag tag-amber">7</span></td>
+      <td>1796</td>
+      <td>10.4h</td>
+      <td class="mono">sonnet-4-6</td>
+      <td class="prompt">Смотри, мы там начинали процесс обработки входящих данных от кандидата. Застопор</td>
+    </tr><tr>
+      <td class="mono">513c559c-577</td>
+      <td class="mono">candidate-routing</td>
+      <td><span class="tag tag-amber">7</span></td>
+      <td>2498</td>
+      <td>11.4h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt">Implement the following plan:
+
+# On-Demand Interview Links via recruiter-assista</td>
+    </tr><tr>
+      <td class="mono">66b45c55-6d4</td>
+      <td class="mono">/Users/vova</td>
+      <td><span class="tag tag-amber">7</span></td>
+      <td>1871</td>
+      <td>2.6h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt">⏺ Понял — Google заблокировал OAuth. Используем Playwright MCP. Проверю,
+  восст</td>
+    </tr><tr>
+      <td class="mono">ab7623b5-874</td>
+      <td class="mono">skillset-ai</td>
+      <td><span class="tag tag-amber">7</span></td>
+      <td>2597</td>
+      <td>13.1h</td>
+      <td class="mono">sonnet-4-6</td>
+      <td class="prompt">Implement the following plan:
+
+# Migration: Fly.io → Google Cloud Run
+
+## Contex</td>
+    </tr><tr>
+      <td class="mono">a9d9f4d5-c32</td>
+      <td class="mono">~/Documents</td>
+      <td><span class="tag tag-amber">6</span></td>
+      <td>1009</td>
+      <td>7.9h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt">https://chillai.space/p/head-of-finance-linkedin - это по сути тз на публикацию </td>
+    </tr><tr>
+      <td class="mono">2d42ff44-228</td>
+      <td class="mono">skillset-ai</td>
+      <td><span class="tag tag-amber">6</span></td>
+      <td>891</td>
+      <td>2.9h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt">У нас будет задача по анализу таблиц из Notion. https://www.notion.so/2ea44115f6</td>
+    </tr><tr>
+      <td class="mono">c9fc0504-3d7</td>
+      <td class="mono">improvado-notes</td>
+      <td><span class="tag tag-amber">5</span></td>
+      <td>1543</td>
+      <td>13.5h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt"><local-command-caveat>Caveat: The messages below were generated by the user whil</td>
+    </tr><tr>
+      <td class="mono">a0c97278-39a</td>
+      <td class="mono">improvado-notes</td>
+      <td><span class="tag tag-amber">5</span></td>
+      <td>1511</td>
+      <td>6.5h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt">Implement the following plan:
+
+# Plan: SQLite Consolidation + Portfolio Filters </td>
+    </tr><tr>
+      <td class="mono">f59db558-927</td>
+      <td class="mono">~/Documents</td>
+      <td><span class="tag tag-amber">5</span></td>
+      <td>1473</td>
+      <td>4.0h</td>
+      <td class="mono">opus-4-6</td>
+      <td class="prompt">Можешь открыть профайл номер 30? Это Владимир. Скилл сет, и я посмотрю, что там:</td>
+    </tr>
+  </table>
+  </div>
+</div>
+
+</div>
+
+<script>
+Chart.defaults.color = '#71717a';
+Chart.defaults.borderColor = '#27272a';
+const gridColor = '#1e1e22';
+
+// Daily Activity
+new Chart(document.getElementById('dailyChart'), {
+  type: 'bar',
+  data: {
+    labels: ["2026-01-30", "2026-01-31", "2026-02-10", "2026-02-12", "2026-02-13", "2026-02-14", "2026-02-15", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-21", "2026-02-22", "2026-02-23", "2026-02-24", "2026-02-25", "2026-02-26", "2026-02-27", "2026-02-28", "2026-03-01", "2026-03-02", "2026-03-03", "2026-03-04", "2026-03-05", "2026-03-06"],
+    datasets: [
+      { label: 'Sessions', data: [1, 2, 1, 2, 2, 8, 14, 7, 28, 12, 37, 29, 24, 12, 19, 12, 34, 32, 35, 20, 32, 18, 102, 24, 127, 23], backgroundColor: '#818cf8', yAxisID: 'y', borderRadius: 3 },
+      { label: 'Tokens (M)', data: [0, 0.0, 0.01, 0.04, 0.03, 0.08, 0.28, 0.13, 1.17, 0.61, 0.33, 0.58, 0.65, 0.34, 0.71, 0.91, 1.45, 1.29, 1.72, 1.16, 1.42, 0.93, 1.89, 0.69, 1.58, 0.36], type: 'line', borderColor: '#f472b6', yAxisID: 'y1', tension: 0.3, pointRadius: 2 },
+      { label: 'Compacts', data: [0, 0, 2, 2, 0, 0, 8, 1, 30, 34, 2, 17, 9, 7, 22, 23, 24, 14, 27, 12, 20, 13, 25, 13, 12, 2], type: 'line', borderColor: '#4ade80', yAxisID: 'y1', tension: 0.3, pointRadius: 2 }
+    ]
+  },
+  options: {
+    responsive: true,
+    scales: {
+      y: { position: 'left', grid: { color: gridColor } },
+      y1: { position: 'right', grid: { display: false } },
+      x: { grid: { display: false }, ticks: { maxTicksLimit: 15 } }
+    }
+  }
+});
+
+// Duration
+new Chart(document.getElementById('durationChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ["< 1 min", "1-5 min", "5-15 min", "15-30 min", "30-60 min", "1-2 hr", "2-4 hr", "4+ hr"],
+    datasets: [{ data: [214, 47, 58, 38, 58, 59, 50, 133], backgroundColor: ['#818cf8','#a78bfa','#c084fc','#e879f9','#f472b6','#fb7185','#fbbf24','#4ade80'] }]
+  },
+  options: { responsive: true, plugins: { legend: { position: 'right', labels: { font: { size: 11 } } } } }
+});
+
+// Models
+new Chart(document.getElementById('modelChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ["claude-opus-4-6", "claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-5-20251101", "<synthetic>", "claude-sonnet-4-5-20250929"],
+    datasets: [{ data: [1231, 529, 211, 71, 44, 6], backgroundColor: ['#818cf8','#4ade80','#fbbf24','#f472b6','#60a5fa','#c084fc'] }]
+  },
+  options: { responsive: true, plugins: { legend: { position: 'right', labels: { font: { size: 11 } } } } }
+});
+
+// Tools
+new Chart(document.getElementById('toolChart'), {
+  type: 'bar',
+  data: {
+    labels: ["Bash", "Read", "mcp__improvado-internal-mcp__c", "Edit", "WebSearch", "mcp__improvado-internal-mcp__s", "Write", "Grep", "mcp__playwright__browser_click", "mcp__improvado-internal-mcp__c", "WebFetch", "Glob", "mcp__playwright__browser_navig", "ToolSearch", "Task"],
+    datasets: [{ data: [24769, 12484, 7097, 6150, 3546, 2966, 2453, 2399, 2388, 1712, 1559, 1259, 1227, 926, 807], backgroundColor: '#818cf8', borderRadius: 3 }]
+  },
+  options: { responsive: true, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { grid: { color: gridColor } } } }
+});
+
+// Compact reduction scatter
+const compactData = [{"x": 165708, "y": 31558, "label": "candidate-routing"}, {"x": 121619, "y": 15895, "label": "candidate-routing"}, {"x": 165224, "y": 27061, "label": "claude-context-saver"}, {"x": 166267, "y": 18027, "label": "claude-session-manager"}, {"x": 176755, "y": 24708, "label": "-sessions"}, {"x": 160585, "y": 19116, "label": "claude-session-manager"}, {"x": 163160, "y": 21544, "label": "~/Documents/TeamHub/skillset/repos/skillset/prompts"}, {"x": 160351, "y": 19396, "label": "claude-session-manager"}, {"x": 144210, "y": 19513, "label": "claude-session-manager"}, {"x": 11792, "y": 26634, "label": "~/Documents/TeamHub/skillset/repos/skillset/prompts"}, {"x": 165429, "y": 24605, "label": "~/Documents/TeamHub/skillset/repos/skillset/prompts"}, {"x": 166770, "y": 21661, "label": "claude-session-manager-src-app-api-teamhub"}, {"x": 162783, "y": 18751, "label": "-sessions"}, {"x": 166855, "y": 23551, "label": "candidate-routing"}, {"x": 157625, "y": 20147, "label": "skillset-ai"}, {"x": 166797, "y": 56668, "label": "claude-session-manager"}, {"x": 166926, "y": 48467, "label": "claude-session-manager"}, {"x": 167422, "y": 56181, "label": "claude-session-manager"}, {"x": 169502, "y": 16799, "label": "claude-session-manager-src-app-api-teamhub"}, {"x": 154770, "y": 18027, "label": "claude-session-manager-src-app-api-teamhub"}, {"x": 164741, "y": 44743, "label": "candidate-routing"}, {"x": 166849, "y": 46083, "label": "claude-session-manager"}, {"x": 165369, "y": 45418, "label": "candidate-routing"}, {"x": 164086, "y": 46497, "label": "~/Documents/TeamHub/skillset/repos/skillset/prompts"}, {"x": 166780, "y": 45519, "label": "candidate-routing"}, {"x": 160419, "y": 57354, "label": "~/Documents/TeamHub/skillset/repos/skillset/prompts"}, {"x": 167289, "y": 45562, "label": "candidate-routing"}, {"x": 165946, "y": 49894, "label": "claude-session-manager"}, {"x": 161865, "y": 46176, "label": "candidate-routing"}, {"x": 165631, "y": 53558, "label": "claude-session-manager"}];
+new Chart(document.getElementById('compactChart'), {
+  type: 'scatter',
+  data: {
+    datasets: [{
+      data: compactData.map(d => ({ x: d.x, y: d.y })),
+      backgroundColor: '#4ade80',
+      pointRadius: 5,
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { title: { display: true, text: 'Pre-Compact Tokens' }, grid: { color: gridColor } },
+      y: { title: { display: true, text: 'Post-Compact Tokens' }, grid: { color: gridColor } }
+    }
+  }
+});
+</script>
+</body>
+</html>

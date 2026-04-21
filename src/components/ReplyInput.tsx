@@ -1,24 +1,26 @@
 "use client";
 
 import { useState, useRef, forwardRef, useImperativeHandle, useEffect } from "react";
-import { Send, Paperclip } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface ReplyInputProps {
   sessionId: string;
   onSend: (message: string) => void;
   queueSize?: number;
   isStreaming?: boolean;
+  bgClassName?: string;
+  placeholder?: string;
 }
 
 export interface ReplyInputHandle {
   focus: () => void;
   getText: () => string;
   setText: (text: string) => void;
+  triggerAttach: () => void;
+  triggerSend: () => void;
 }
 
 export const ReplyInput = forwardRef<ReplyInputHandle, ReplyInputProps>(
-function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: ReplyInputProps, ref) {
+function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgClassName, placeholder: customPlaceholder }: ReplyInputProps, ref) {
   const draftKey = `reply_draft_${sessionId}`;
   const [message, setMessage] = useState(() => {
     if (typeof window !== "undefined") return localStorage.getItem(draftKey) ?? "";
@@ -28,10 +30,13 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const handleSendRef = useRef(() => {});
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
     getText: () => message,
     setText: (text: string) => setMessage(text),
+    triggerAttach: () => fileInputRef.current?.click(),
+    triggerSend: () => handleSendRef.current(),
   }));
   const dragCounterRef = useRef(0);
 
@@ -65,20 +70,20 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
 
+    const paths: string[] = [];
     for (const file of files) {
       const fd = new FormData();
       fd.append("file", file);
       try {
         const res = await fetch("/api/upload", { method: "POST", body: fd });
         const data = await res.json();
-        if (data.path) {
-          insertAtCursor(data.path);
-        } else {
-          insertAtCursor(file.name);
-        }
+        paths.push(data.path || file.name);
       } catch {
-        insertAtCursor(file.name);
+        paths.push(file.name);
       }
+    }
+    if (paths.length > 0) {
+      insertAtCursor(paths.join("\n"));
     }
   };
 
@@ -113,29 +118,6 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
     e.dataTransfer.dropEffect = "copy";
   };
 
-  const handlePaste = async (e: React.ClipboardEvent) => {
-    const items = Array.from(e.clipboardData?.items ?? []);
-    const imageItems = items.filter((item) => item.type.startsWith("image/"));
-    if (imageItems.length === 0) return; // let default text paste happen
-
-    e.preventDefault();
-    for (const item of imageItems) {
-      const blob = item.getAsFile();
-      if (!blob) continue;
-      const ext = blob.type.split("/")[1] || "png";
-      const file = new File([blob], `clipboard-${Date.now()}.${ext}`, { type: blob.type });
-      const fd = new FormData();
-      fd.append("file", file);
-      try {
-        const res = await fetch("/api/upload", { method: "POST", body: fd });
-        const data = await res.json();
-        insertAtCursor(data.path || file.name);
-      } catch {
-        insertAtCursor(file.name);
-      }
-    }
-  };
-
   const handleSend = () => {
     if (!message.trim()) return;
     onSend(message.trim());
@@ -143,33 +125,37 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
     localStorage.removeItem(draftKey);
     textareaRef.current?.focus();
   };
+  handleSendRef.current = handleSend;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && (e.metaKey || e.altKey)) {
       e.preventDefault();
       handleSend();
     }
   };
 
-  const handleFileClick = () => {
-    fileInputRef.current?.click();
-  };
-
   const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
+    const paths: string[] = [];
     for (const file of files) {
       const fd = new FormData();
       fd.append("file", file);
       try {
         const res = await fetch("/api/upload", { method: "POST", body: fd });
         const data = await res.json();
-        insertAtCursor(data.path || file.name);
+        paths.push(data.path || file.name);
       } catch {
-        insertAtCursor(file.name);
+        paths.push(file.name);
       }
+    }
+    if (paths.length > 0) {
+      insertAtCursor(paths.join("\n"));
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  const defaultBg = isDragging ? "border-ring border-dashed bg-muted/40" : "border-input bg-background";
+  const containerBg = isDragging ? "border-ring border-dashed bg-muted/40" : (bgClassName || defaultBg);
 
   return (
     <div
@@ -187,7 +173,7 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
         onChange={handleFileInput}
       />
 
-      <div className={`relative rounded-lg border transition-colors ${isDragging ? "border-ring border-dashed bg-muted/40" : "border-input bg-background"}`}>
+      <div className={`relative rounded-lg border transition-colors ${containerBg}`}>
         {/* Drop overlay */}
         {isDragging && (
           <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-muted/60 pointer-events-none">
@@ -200,37 +186,16 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false }: R
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
           placeholder={
-            queueSize > 0
-              ? `${queueSize} queued — type next...`
-              : "Reply to Claude…"
+            customPlaceholder
+              ? customPlaceholder
+              : queueSize > 0
+                ? `${queueSize} queued — type next...`
+                : "Reply to Claude… (⌘Enter to send)"
           }
-          rows={4}
-          className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-9 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+          rows={16}
+          className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
         />
-
-        {/* Bottom bar: attach + send */}
-        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between">
-          <button
-            onClick={handleFileClick}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
-            title="Attach file or drag & drop"
-            type="button"
-          >
-            <Paperclip className="h-3 w-3" />
-            <span>Attach</span>
-          </button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
-            onClick={handleSend}
-            disabled={!message.trim()}
-          >
-            <Send className="h-3.5 w-3.5" />
-          </Button>
-        </div>
       </div>
     </div>
   );

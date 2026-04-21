@@ -191,6 +191,37 @@ Each web reply spawns a **one-shot** `claude -p` process. Claude receives your m
 - **Quick follow-ups** — web UI works great
 - **Autonomous web work** — enable Skip Permissions + set Max turns to 100-200
 
+## Session Self-Alarm
+
+Sessions can arm themselves with a wake-up alarm — useful for long-running or risky tasks where a crash or stall would lose context.
+
+```bash
+# Set alarm: if I'm inactive for 3 min, resume me with this message
+curl -s -X POST "http://localhost:3000/api/sessions/SESSION_ID/alarm" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Continue with the deploy — run smoke tests next", "check_after_ms": 180000}'
+
+# Cancel alarm
+curl -s -X DELETE "http://localhost:3000/api/sessions/SESSION_ID/alarm"
+```
+
+**How it works:**
+- While alarm is active → babysitter skips crash/stall auto-retry for that session
+- When time expires AND process is dead → babysitter resumes session with the alarm message
+- If process is still alive when time expires → alarm stays armed, fires when it eventually dies
+
+**All sessions are tracked** — Claude CLI, Codex TUI, Forge. Every session visible in the UI has a `session_id` and can use the alarm regardless of how it was started.
+
+Sessions started via CSM get their ID injected automatically in `[Session Manager Context]`. Sessions started directly in terminal can find their ID:
+```bash
+# by project dir
+curl -s "http://localhost:3000/api/sessions/peers?path=$(pwd)" | jq '.peers[0].session_id'
+# or just list all active sessions
+curl -s "http://localhost:3000/api/sessions/peers" | jq '.peers[] | {session_id, project_path}'
+```
+
+The active alarm is visible in the session detail UI (⏰ indicator with remaining time + cancel button).
+
 ## Architecture
 
 ```

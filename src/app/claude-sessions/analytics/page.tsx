@@ -207,7 +207,7 @@ export default function AnalyticsPage() {
                 width={60}
               />
               <Tooltip
-                formatter={(v: number | undefined) => [chartFormatter(v ?? 0), view]}
+                formatter={(v: unknown) => [chartFormatter(typeof v === "number" ? v : 0), view]}
                 labelStyle={{ fontSize: 11 }}
                 contentStyle={{
                   background: "var(--card)",

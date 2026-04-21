@@ -11,10 +11,19 @@ let _db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (!_db) {
+    const dataDir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
     _db = new Database(DB_PATH);
     _db.pragma("journal_mode = WAL");
     _db.pragma("foreign_keys = ON");
+    // Auto-checkpoint when WAL grows beyond 4MB (default is 1000 pages ≈ 4MB)
+    // This prevents WAL from growing to 70MB+ and consuming memory via mmap
+    _db.pragma("wal_autocheckpoint = 1000");
     initTables(_db);
+    // Checkpoint any accumulated WAL from previous runs
+    try { _db.pragma("wal_checkpoint(TRUNCATE)"); } catch { /* non-critical */ }
   }
   return _db;
 }
@@ -131,6 +140,41 @@ function initTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_autodetect_log_created ON autodetect_log(created_at DESC);
   `);
 
+  // ── Workers + Worker Tasks ──────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workers (
+      worker_id TEXT PRIMARY KEY,
+      project_domain TEXT NOT NULL,
+      phase TEXT NOT NULL DEFAULT 'offline',
+      registered_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_heartbeat_at TEXT,
+      heartbeat_interval_ms INTEGER NOT NULL DEFAULT 30000,
+      missed_heartbeats INTEGER DEFAULT 0,
+      meta TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_workers_domain ON workers(project_domain);
+    CREATE INDEX IF NOT EXISTS idx_workers_phase ON workers(phase);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS worker_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      worker_id TEXT NOT NULL,
+      task_id TEXT NOT NULL UNIQUE,
+      project_domain TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      task_prompt TEXT,
+      dispatched_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT,
+      fallback_used TEXT,
+      result_summary TEXT,
+      contact_email TEXT,
+      FOREIGN KEY (worker_id) REFERENCES workers(worker_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_tasks_worker ON worker_tasks(worker_id, status);
+    CREATE INDEX IF NOT EXISTS idx_worker_tasks_domain ON worker_tasks(project_domain, status);
+  `);
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS context_source_groups (
       id TEXT PRIMARY KEY,
@@ -154,6 +198,14 @@ function initTables(db: Database.Database) {
       FOREIGN KEY (group_id) REFERENCES context_source_groups(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_context_sources_group ON context_sources(group_id);
+
+    CREATE TABLE IF NOT EXISTS session_alarms (
+      session_id TEXT PRIMARY KEY,
+      message TEXT NOT NULL,
+      check_after_ms INTEGER NOT NULL DEFAULT 180000,
+      set_at INTEGER NOT NULL,
+      disabled INTEGER NOT NULL DEFAULT 0
+    );
   `);
 
   // Migrations: add columns that may not exist in older DBs
@@ -174,11 +226,51 @@ function initTables(db: Database.Database) {
   if (!colNames.has("titled_at_count")) {
     db.exec("ALTER TABLE sessions ADD COLUMN titled_at_count INTEGER DEFAULT 0");
   }
+  if (!colNames.has("has_result")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN has_result INTEGER DEFAULT 0");
+  }
+  if (!colNames.has("summary")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN summary TEXT");
+  }
+  if (!colNames.has("learnings")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN learnings TEXT");
+  }
+  if (!colNames.has("agent_type")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN agent_type TEXT DEFAULT 'claude'");
+  }
+  if (!colNames.has("previous_session_id")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN previous_session_id TEXT");
+  }
+  // Delegation contract columns
+  if (!colNames.has("reply_to_session_id")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN reply_to_session_id TEXT");
+  }
+  if (!colNames.has("delegation_task")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN delegation_task TEXT");
+  }
+  if (!colNames.has("delegation_status")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN delegation_status TEXT");
+  }
+  if (!colNames.has("delegation_ping_count")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN delegation_ping_count INTEGER DEFAULT 0");
+  }
+  if (!colNames.has("delegation_last_ping_at")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN delegation_last_ping_at INTEGER");
+  }
   // actions_log migrations
   const actionCols = db.prepare("PRAGMA table_info(actions_log)").all() as { name: string }[];
   const actionColNames = new Set(actionCols.map((c) => c.name));
   if (!actionColNames.has("payload")) {
     db.exec("ALTER TABLE actions_log ADD COLUMN payload TEXT");
+  }
+  // session_alarms migrations
+  const alarmCols = db.prepare("PRAGMA table_info(session_alarms)").all() as { name: string }[];
+  const alarmColNames = new Set(alarmCols.map((c) => c.name));
+  if (!alarmColNames.has("disabled")) {
+    db.exec("ALTER TABLE session_alarms ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!alarmColNames.has("mode")) {
+    db.exec("ALTER TABLE session_alarms ADD COLUMN mode TEXT NOT NULL DEFAULT 'persistent'");
   }
 }
 
@@ -232,11 +324,15 @@ export function indexSessionContent(sessionId: string, text: string): void {
 export function searchSessionContent(query: string): string[] {
   try {
     const db = getDb();
-    // Escape FTS5 special chars and wrap in quotes for phrase-safe matching
-    const escaped = query.replace(/"/g, '""');
+    const terms = query.match(/[\p{L}\p{N}_-]+/gu)?.filter((t) => t.length >= 2) ?? [];
+    const escaped = terms
+      .slice(0, 8)
+      .map((t) => `${t.replace(/"/g, '""')}*`)
+      .join(" AND ");
+    const ftsQuery = escaped || `"${query.replace(/"/g, '""')}"`;
     const rows = db
       .prepare("SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH ? ORDER BY rank LIMIT 100")
-      .all(`"${escaped}"`) as { session_id: string }[];
+      .all(ftsQuery) as { session_id: string }[];
     return rows.map((r) => r.session_id);
   } catch {
     return [];
@@ -365,12 +461,56 @@ const SETTING_DEFAULTS: Record<string, string> = {
   orchestrator_crash_retry_delay_ms: "30000",
   orchestrator_stall_continue_delay_ms: "10000",
   orchestrator_max_retries: "3",
+  // Permission wait detection — auto kill+resume when Claude is stuck on tool approval
+  auto_escalate_permissions: "true",
+  permission_wait_threshold_ms: "120000",
+  // Interval (ms) for periodic permission-wait checker (0 = disabled)
+  permission_check_interval_ms: "180000",
+  // Test word: if set and found in last assistant text, triggers permission escalation (for testing)
+  permission_escalation_test_word: "",
+  // Auto-close terminal windows after permission escalation completes
+  auto_close_escalation_terminals: "true",
+  // Claude CLI model (used for terminal sessions)
+  claude_model: "claude-sonnet-4-6",
   // Remote relay settings
   relay_enabled: "false",
   relay_node_id: "",
   relay_server_url: "wss://csm-relay.chillai.workers.dev",
   // Remote nodes registry (JSON array)
   remote_nodes: "[]",
+  // Default compute node — if set, new sessions run on this remote node
+  default_compute_node: "",
+  // Title generation (uses summary as input)
+  title_model: "gemini-2.5-flash-lite",
+  // Summary & learnings generation (direct API, no CLI sessions spawned)
+  summary_model: "gemini-2.5-flash-lite",
+  summary_incremental_model: "gemini-2.5-flash-lite",
+  learnings_model: "gemini-2.5-flash-lite",
+  auto_generate_summary: "true",
+  auto_generate_learnings: "true",
+  openai_api_key: "",
+  anthropic_api_key: "",
+  google_ai_api_key: "",
+  // Worker integration
+  worker_heartbeat_timeout_ms: "300000",
+  worker_fallback_enabled: "true",
+  worker_fallback_model: "claude-sonnet-4-6",
+  worker_fallback_use_vertex: "false",
+  worker_fallback_vertex_project: "",
+  worker_fallback_vertex_region: "us-east5",
+  worker_notify_smtp_host: "",
+  worker_notify_smtp_port: "587",
+  worker_notify_smtp_user: "",
+  worker_notify_smtp_pass: "",
+  worker_notify_from: "",
+  worker_notify_to: "",
+  worker_notify_webhook_url: "",
+  // Agent selection — which AI agent to use for new sessions
+  default_agent: "claude",
+  // Session choreography — inject session context (session_id + callback URL) into system prompt
+  inject_session_context: "true",
+  // Base URL for callback URLs injected into sessions (e.g. http://localhost:3000 or relay URL)
+  csm_base_url: "http://localhost:3000",
 };
 
 // Settings cache — avoids reading JSON file on every getSetting() call
@@ -482,4 +622,140 @@ export function getIssues(opts: { status?: string; limit?: number } = {}): Issue
 
 export function updateIssueStatus(id: number, status: "new" | "seen" | "resolved"): void {
   getDb().prepare("UPDATE issues SET status = ? WHERE id = ?").run(status, id);
+}
+
+/**
+ * Pre-insert a Forge session placeholder into sessions.db immediately when
+ * the user clicks Start — before key rotation or process spawn. This ensures
+ * the session appears in the list right away and the first_prompt is preserved
+ * even if Forge fails to start. The forge-scanner upsert will fill in real
+ * data once Forge writes to ~/forge/.forge.db.
+ */
+export function insertPendingForgeSession(
+  conversationId: string,
+  projectPath: string,
+  message: string
+): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const projectDir = projectPath.replace(/[\\/]/g, "-");
+  const jsonlPath = `forge://${conversationId}`;
+  try {
+    db.prepare(`
+      INSERT OR IGNORE INTO sessions (
+        session_id, jsonl_path, project_dir, project_path,
+        git_branch, claude_version, model, agent_type,
+        first_prompt, last_message, last_message_role, has_result,
+        message_count, total_input_tokens, total_output_tokens,
+        created_at, modified_at, file_mtime, file_size, last_scanned_at
+      ) VALUES (
+        ?, ?, ?, ?,
+        NULL, NULL, NULL, 'forge',
+        ?, NULL, NULL, 0,
+        0, 0, 0,
+        ?, ?, ?, 0, ?
+      )
+    `).run(
+      conversationId, jsonlPath, projectDir, projectPath,
+      message.slice(0, 500),
+      now, now, Date.now(), now
+    );
+  } catch { /* non-critical — real data arrives via scanner */ }
+}
+
+// ── Session Alarms ───────────────────────────────────────────────────────────────
+// A session can set a self-alarm: "if I'm inactive for X ms, resume me with this message."
+// While an alarm is active (or disabled), the babysitter skips normal crash/stall handling.
+// DELETE /alarm sets disabled=1 — a permanent "leave me alone" signal until cleared.
+//
+// Two modes:
+//   "persistent" (default) — fires when the session has been idle for check_after_ms
+//     since its last activity (file_mtime). After firing, re-arms itself automatically.
+//     Use this for coordinators: set once, never needs to be re-set.
+//   "once" — fires once when set_at + check_after_ms elapses, then deletes itself.
+//     Use for explicit one-shot reminders.
+
+export interface SessionAlarm {
+  session_id: string;
+  message: string;
+  check_after_ms: number;
+  set_at: number;
+  disabled: number; // 1 = babysitter disabled for this session
+  mode: "persistent" | "once";
+}
+
+export function setSessionAlarm(
+  sessionId: string,
+  message: string,
+  checkAfterMs = 180_000,
+  mode: "persistent" | "once" = "persistent"
+): void {
+  getDb()
+    .prepare(`INSERT OR REPLACE INTO session_alarms (session_id, message, check_after_ms, set_at, disabled, mode) VALUES (?, ?, ?, ?, 0, ?)`)
+    .run(sessionId, message, checkAfterMs, Date.now(), mode);
+}
+
+/** Reset the clock on a persistent alarm after it fires (so it won't fire again immediately). */
+export function rearmPersistentAlarm(sessionId: string): void {
+  getDb()
+    .prepare("UPDATE session_alarms SET set_at = ? WHERE session_id = ? AND mode = 'persistent'")
+    .run(Date.now(), sessionId);
+}
+
+/** Returns the alarm if active (not disabled). */
+export function getSessionAlarm(sessionId: string): SessionAlarm | null {
+  const row = getDb()
+    .prepare("SELECT * FROM session_alarms WHERE session_id = ?")
+    .get(sessionId) as SessionAlarm | undefined;
+  if (!row || row.disabled) return null;
+  return row;
+}
+
+/** Returns true if babysitter is disabled for this session (disabled=1). */
+export function isBabysitterDisabled(sessionId: string): boolean {
+  const row = getDb()
+    .prepare("SELECT disabled FROM session_alarms WHERE session_id = ?")
+    .get(sessionId) as { disabled: number } | undefined;
+  return row?.disabled === 1;
+}
+
+/** Disable babysitter for this session. Persists until clearSessionAlarm(). */
+export function disableSessionAlarm(sessionId: string): void {
+  getDb()
+    .prepare(`INSERT OR REPLACE INTO session_alarms (session_id, message, check_after_ms, set_at, disabled, mode) VALUES (?, '', 0, ?, 1, 'once')`)
+    .run(sessionId, Date.now());
+}
+
+export function clearSessionAlarm(sessionId: string): void {
+  getDb().prepare("DELETE FROM session_alarms WHERE session_id = ?").run(sessionId);
+}
+
+/**
+ * Returns alarms that should fire now.
+ *
+ * "once" alarms: fire when set_at + check_after_ms <= now (time since set).
+ * "persistent" alarms: fire when MAX(file_mtime, set_at) + check_after_ms <= now
+ *   i.e. the session has been idle for check_after_ms since its last activity.
+ *   file_mtime is the JSONL file's last modification time — best proxy for "session last did something".
+ */
+export function getExpiredAlarms(): SessionAlarm[] {
+  const now = Date.now();
+  return getDb()
+    .prepare(`
+      SELECT sa.*
+      FROM session_alarms sa
+      LEFT JOIN sessions s ON s.session_id = sa.session_id
+      WHERE sa.disabled = 0
+        AND (
+          (sa.mode = 'once' AND sa.set_at + sa.check_after_ms <= ?)
+          OR
+          (sa.mode = 'persistent' AND
+            CASE WHEN COALESCE(s.file_mtime, sa.set_at) > sa.set_at
+              THEN COALESCE(s.file_mtime, sa.set_at)
+              ELSE sa.set_at
+            END + sa.check_after_ms <= ?
+          )
+        )
+    `)
+    .all(now, now) as SessionAlarm[];
 }

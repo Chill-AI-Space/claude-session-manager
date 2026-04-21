@@ -1,8 +1,11 @@
 import { NextRequest } from "next/server";
 import { getDb, getSetting, logAction } from "@/lib/db";
-import { SessionRow } from "@/lib/types";
-import { openInTerminal, WindowsTerminalPref } from "@/lib/terminal-launcher";
 import { getClaudePath } from "@/lib/claude-bin";
+import { getCodexPath } from "@/lib/codex-bin";
+import { buildCodexOpenArgs } from "@/lib/codex-command";
+import { buildResumeShellCommand } from "@/lib/session-terminal";
+import { openInTerminal, WindowsTerminalPref } from "@/lib/terminal-launcher";
+import { SessionRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,26 +24,35 @@ export async function POST(
     return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
+  const shellCmd = buildResumeShellCommand(session);
   const cwd = session.project_path;
-  const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
-
-  // Build args for claude CLI
-  const claudeArgs = ["--resume", sessionId];
-  if (skipPermissions) claudeArgs.push("--dangerously-skip-permissions");
-
-  // On Windows, pass executable + args directly to avoid OEM codepage
-  // issues with non-ASCII paths in shell command strings
   const isWin = process.platform === "win32";
-  const claudePath = getClaudePath();
-  const skipFlag = skipPermissions ? " --dangerously-skip-permissions" : "";
-  const shellCmd = `cd "${cwd}" && claude --resume "${sessionId}"${skipFlag}`;
+  const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
+  const preferredTerminal = (getSetting("preferred_terminal") || "auto") as WindowsTerminalPref;
+  const agentType = (session as SessionRow & { agent_type?: string }).agent_type ?? "claude";
+
+  let windowsLaunch:
+    | { executable: string; args: string[]; preferredTerminal: WindowsTerminalPref }
+    | undefined;
+
+  if (isWin && agentType === "claude") {
+    const args = ["--resume", sessionId];
+    if (skipPermissions) args.push("--dangerously-skip-permissions");
+    windowsLaunch = {
+      executable: getClaudePath(),
+      args,
+      preferredTerminal,
+    };
+  } else if (isWin && agentType === "codex") {
+    windowsLaunch = {
+      executable: getCodexPath(),
+      args: buildCodexOpenArgs({ sessionId, skipPermissions }),
+      preferredTerminal,
+    };
+  }
 
   try {
-    const { terminal } = await openInTerminal(
-      shellCmd,
-      cwd,
-      isWin ? { executable: claudePath, args: claudeArgs, preferredTerminal: (getSetting("preferred_terminal") || "auto") as WindowsTerminalPref } : undefined
-    );
+    const { terminal } = await openInTerminal(shellCmd, cwd, windowsLaunch);
     logAction("service", "open_in_terminal", terminal, sessionId);
     return Response.json({ ok: true, terminal });
   } catch (err) {

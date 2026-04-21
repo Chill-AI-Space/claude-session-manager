@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight, ChevronDown, Wrench, Check, Copy, FolderOpen } from "lucide-react";
+import { ChevronRight, ChevronDown, Wrench, Check, Copy, FolderOpen, Circle, CircleDot, CheckCircle2, ListTodo } from "lucide-react";
 
 interface ToolUseBlockProps {
   name: string;
@@ -24,6 +24,7 @@ function getToolLabel(name: string): string {
     EnterPlanMode: "Plan Mode",
     ExitPlanMode: "Exit Plan",
     NotebookEdit: "Notebook Edit",
+    TodoWrite: "Tasks",
   };
   return labels[name] || name;
 }
@@ -51,9 +52,60 @@ function getToolSummary(
       return (input.url as string) || "";
     case "WebSearch":
       return (input.query as string) || "";
+    case "TodoWrite": {
+      const todos = input.todos as Array<{ status?: string }> | undefined;
+      if (!todos?.length) return "";
+      const done = todos.filter((t) => t.status === "completed").length;
+      return `${done}/${todos.length} completed`;
+    }
     default:
       return "";
   }
+}
+
+interface TodoItem {
+  id?: string;
+  content: string;
+  status?: string;
+  priority?: string;
+}
+
+const STATUS_CONFIG: Record<string, { icon: typeof Circle; color: string; bg: string; label: string }> = {
+  pending: { icon: Circle, color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Pending" },
+  in_progress: { icon: CircleDot, color: "text-blue-500", bg: "bg-blue-500/10", label: "In Progress" },
+  completed: { icon: CheckCircle2, color: "text-emerald-500", bg: "bg-emerald-500/10", label: "Done" },
+};
+
+function TodoWriteBlock({ todos }: { todos: TodoItem[] }) {
+  const completed = todos.filter((t) => t.status === "completed").length;
+  const inProgress = todos.filter((t) => t.status === "in_progress").length;
+  const total = todos.length;
+
+  return (
+    <div className="px-3 py-2 space-y-1.5">
+      <div className="flex items-center gap-2 text-[10px] text-muted-foreground mb-1">
+        <span>{completed}/{total} done</span>
+        {inProgress > 0 && (
+          <span className="text-blue-500">{inProgress} in progress</span>
+        )}
+      </div>
+      {todos.map((todo, i) => {
+        const cfg = STATUS_CONFIG[todo.status || "pending"] || STATUS_CONFIG.pending;
+        const Icon = cfg.icon;
+        return (
+          <div
+            key={todo.id || i}
+            className={`flex items-start gap-2 rounded-md px-2 py-1.5 ${cfg.bg}`}
+          >
+            <Icon className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${cfg.color}`} />
+            <span className={`text-[11px] leading-snug ${todo.status === "completed" ? "line-through text-muted-foreground" : ""}`}>
+              {todo.content}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 const PATH_TOOLS = new Set(["Read", "Write", "Edit"]);
@@ -110,6 +162,38 @@ export function ToolUseBlock({ name, input, result }: ToolUseBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const summary = getToolSummary(name, input);
   const isCopyable = PATH_TOOLS.has(name) && summary;
+  const isTodoWrite = name === "TodoWrite";
+  const todos = isTodoWrite ? (input.todos as TodoItem[] | undefined) : undefined;
+
+  // TodoWrite with todos: always show inline, expand for raw JSON
+  if (isTodoWrite && todos?.length) {
+    return (
+      <div className="group/tool border border-border rounded-md overflow-hidden text-xs">
+        <div className="flex items-center gap-2 px-3 py-1.5">
+          <ListTodo className="h-3 w-3 shrink-0 text-blue-500" />
+          <span className="font-medium text-blue-500">{getToolLabel(name)}</span>
+          <span className="text-muted-foreground font-mono">{summary}</span>
+        </div>
+        <div className="border-t border-border bg-muted/20">
+          <TodoWriteBlock todos={todos} />
+        </div>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center gap-1 px-3 py-1 text-[10px] text-muted-foreground hover:text-foreground border-t border-border hover:bg-muted/50 transition-colors"
+        >
+          {expanded ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+          Raw JSON
+        </button>
+        {expanded && (
+          <div className="px-3 py-2 border-t border-border bg-muted/30">
+            <pre className="font-mono text-[11px] whitespace-pre-wrap break-all max-h-[300px] overflow-y-auto">
+              {JSON.stringify(input, null, 2)}
+            </pre>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="group/tool border border-border rounded-md overflow-hidden text-xs">

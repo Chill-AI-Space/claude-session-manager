@@ -19,6 +19,7 @@ interface MessageViewProps {
   projectPath?: string;
   onLoadEarlier?: () => void;
   loadingEarlier?: boolean;
+  children?: React.ReactNode;
 }
 
 /** Extract a short preview text from a message's content */
@@ -87,6 +88,7 @@ export function MessageView({
   projectPath,
   onLoadEarlier,
   loadingEarlier,
+  children,
 }: MessageViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -94,8 +96,11 @@ export function MessageView({
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const isNearBottomRef = useRef(true);
+  const userDetachedRef = useRef(false);
 
-  // Track whether user is scrolled near the bottom of the viewport
+  // Track whether user is scrolled near the bottom of the viewport.
+  // Uses wheel/touchmove to detect user-initiated scrolls (programmatic scrollTo
+  // never fires these), preventing smooth-scroll from fighting the user.
   useEffect(() => {
     const root = scrollAreaRef.current;
     if (!root) return;
@@ -105,10 +110,59 @@ export function MessageView({
     const THRESHOLD = 150; // px from bottom
     const onScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = viewport;
-      isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < THRESHOLD;
+      const nearBottom = scrollHeight - scrollTop - clientHeight < THRESHOLD;
+      isNearBottomRef.current = nearBottom;
+      if (nearBottom) userDetachedRef.current = false;
+    };
+    const onUserInteraction = () => {
+      if (!isNearBottomRef.current) {
+        userDetachedRef.current = true;
+      }
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
-    return () => viewport.removeEventListener("scroll", onScroll);
+    viewport.addEventListener("wheel", onUserInteraction, { passive: true });
+    viewport.addEventListener("touchmove", onUserInteraction, { passive: true });
+    return () => {
+      viewport.removeEventListener("scroll", onScroll);
+      viewport.removeEventListener("wheel", onUserInteraction);
+      viewport.removeEventListener("touchmove", onUserInteraction);
+    };
+  }, [sessionId]);
+
+  // Preserve scroll position when earlier messages are prepended
+  const prevFirstUuidRef = useRef<string | null>(null);
+  const prevScrollHeightRef = useRef<number>(0);
+  const prevScrollTopRef = useRef<number>(0);
+
+  // Snapshot scroll state before DOM update (called in render via ref tracking)
+  useEffect(() => {
+    const root = scrollAreaRef.current;
+    if (!root) return;
+    const viewport = root.querySelector<HTMLElement>("[data-slot='scroll-area-viewport']");
+    if (!viewport) return;
+
+    const firstUuid = messages[0]?.uuid ?? null;
+    // If first message changed (earlier messages prepended), restore scroll
+    if (prevFirstUuidRef.current && firstUuid !== prevFirstUuidRef.current && prevScrollHeightRef.current > 0) {
+      const heightDelta = viewport.scrollHeight - prevScrollHeightRef.current;
+      viewport.scrollTop = prevScrollTopRef.current + heightDelta;
+    }
+    prevFirstUuidRef.current = firstUuid;
+  }, [messages]);
+
+  // Continuously track scroll height so we have it before next render
+  useEffect(() => {
+    const root = scrollAreaRef.current;
+    if (!root) return;
+    const viewport = root.querySelector<HTMLElement>("[data-slot='scroll-area-viewport']");
+    if (!viewport) return;
+    const save = () => {
+      prevScrollHeightRef.current = viewport.scrollHeight;
+      prevScrollTopRef.current = viewport.scrollTop;
+    };
+    save();
+    viewport.addEventListener("scroll", save, { passive: true });
+    return () => viewport.removeEventListener("scroll", save);
   }, [sessionId]);
 
   // Auto-load earlier messages when scrolling to the top
@@ -137,15 +191,19 @@ export function MessageView({
   // Scroll to bottom on session switch (always)
   useEffect(() => {
     isNearBottomRef.current = true;
+    userDetachedRef.current = false;
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
   }, [sessionId]);
 
-  // Scroll to bottom when streaming or when new messages arrive — only if user is near bottom
+  // Scroll to bottom when streaming or when new messages arrive — only if user hasn't scrolled away.
+  // Uses userDetachedRef (set by wheel/touch) instead of just isNearBottom,
+  // because smooth scrollTo generates scroll events that pollute isNearBottom.
   const prevCountRef = useRef(messages.length);
   useEffect(() => {
     const grew = messages.length > prevCountRef.current;
     prevCountRef.current = messages.length;
-    if (!isNearBottomRef.current) return;
+
+    if (userDetachedRef.current) return;
     if (streamingText || isStreaming || grew) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
@@ -255,6 +313,7 @@ export function MessageView({
           </div>
         )}
 
+        {children}
         <div ref={bottomRef} />
       </div>
     </ScrollArea>

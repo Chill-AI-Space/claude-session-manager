@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import "../../node_modules/shadcn/dist/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -131,4 +131,64 @@
     -moz-osx-font-smoothing: auto;
     --muted-foreground: oklch(0.42 0 0);
   }
+}
+
+/* Markdown details/summary (Thinking, Results) */
+.markdown-body details {
+  margin: 0.5rem 0;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.markdown-body details summary {
+  cursor: pointer;
+  padding: 0.4rem 0.75rem;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--muted) 40%, transparent);
+  user-select: none;
+  list-style: none;
+}
+.markdown-body details summary::-webkit-details-marker {
+  display: none;
+}
+.markdown-body details summary::before {
+  content: "▶ ";
+  font-size: 10px;
+  margin-right: 4px;
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.markdown-body details[open] summary::before {
+  transform: rotate(90deg);
+}
+.markdown-body details > :not(summary) {
+  padding: 0 0.75rem 0 1rem;
+}
+.markdown-body details > pre {
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+/* Code blocks: wrap long lines instead of horizontal scroll */
+.markdown-body pre {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.markdown-body pre code {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+/* Gap between consecutive code blocks (e.g. file path + diff) */
+.markdown-body .not-prose + .not-prose,
+.markdown-body pre + pre,
+.markdown-body div.group\/code + div.group\/code {
+  margin-top: 0.5rem;
 }

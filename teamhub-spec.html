@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TeamHub — Technical Specification</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2333; --border: #30363d;
+    --text: #e6edf3; --text-dim: #8b949e; --accent: #58a6ff; --accent2: #7ee787;
+    --accent3: #d2a8ff; --orange: #f0883e; --red: #f85149; --yellow: #d29922;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+  .hero {
+    background: linear-gradient(135deg, #0d1117 0%, #1a1e2e 50%, #0d1117 100%);
+    border-bottom: 1px solid var(--border); padding: 60px 40px 40px; text-align: center;
+  }
+  .hero h1 {
+    font-size: 2.4em; font-weight: 800;
+    background: linear-gradient(135deg, var(--accent3), var(--accent));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 12px;
+  }
+  .hero .subtitle { font-size: 1.1em; color: var(--text-dim); max-width: 750px; margin: 0 auto; }
+  .hero .version { font-size: 0.85em; color: var(--text-dim); margin-top: 8px; }
+  .container { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+  h2 { font-size: 1.6em; font-weight: 700; color: var(--accent); margin: 50px 0 16px; padding-bottom: 6px; border-bottom: 2px solid var(--border); }
+  h3 { font-size: 1.2em; font-weight: 600; color: var(--accent3); margin: 28px 0 10px; }
+  h4 { font-size: 1.05em; font-weight: 600; color: var(--accent2); margin: 20px 0 8px; }
+  p { margin: 10px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  ul, ol { padding-left: 24px; margin: 10px 0; }
+  li { margin: 5px 0; }
+  code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; color: var(--accent2); }
+  pre { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; margin: 12px 0; }
+  pre code { background: none; padding: 0; color: var(--text); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin: 16px 0; }
+  .card.highlight { border-color: var(--accent); background: linear-gradient(135deg, rgba(88,166,255,0.05), rgba(210,168,255,0.05)); }
+  .card.success { border-color: var(--accent2); background: rgba(126,231,135,0.05); }
+  .card.warning { border-color: var(--orange); background: rgba(240,136,62,0.05); }
+  .card.danger { border-color: var(--red); background: rgba(248,81,73,0.05); }
+  .card.phase { border-left: 4px solid var(--accent3); }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 0.92em; }
+  th, td { padding: 10px 14px; border: 1px solid var(--border); text-align: left; }
+  th { background: var(--surface2); color: var(--accent); font-weight: 600; }
+  td { background: var(--surface); }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.8em; font-weight: 700; margin-left: 4px; }
+  .badge.p0 { background: rgba(248,81,73,0.2); color: var(--red); }
+  .badge.p1 { background: rgba(240,136,62,0.2); color: var(--orange); }
+  .badge.p2 { background: rgba(210,168,255,0.2); color: var(--accent3); }
+  .badge.done { background: rgba(126,231,135,0.2); color: var(--accent2); }
+  .comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  .file-tree { font-family: monospace; font-size: 0.9em; line-height: 1.8; }
+  .file-tree .dir { color: var(--accent); }
+  .file-tree .file { color: var(--text); }
+  .file-tree .desc { color: var(--text-dim); font-family: -apple-system, sans-serif; font-size: 0.85em; }
+  .toc { margin: 20px 0; }
+  .toc a { display: block; padding: 4px 0; color: var(--text-dim); }
+  .toc a:hover { color: var(--accent); }
+  footer { text-align: center; padding: 30px; color: var(--text-dim); font-size: 0.85em; border-top: 1px solid var(--border); margin-top: 40px; }
+  @media (max-width: 700px) { .hero h1 { font-size: 1.6em; } .comparison-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>TeamHub</h1>
+  <p class="subtitle">Shared team knowledge base for Claude Code. Auto-inject project context, team standards, and documentation into every session.</p>
+  <p class="version">Technical Specification v1.0 &mdash; npm package <code>teamhub</code></p>
+</div>
+
+<div class="container">
+
+<!-- ============================================================ -->
+<h2>0. Table of Contents</h2>
+<div class="toc">
+  <a href="#problem">1. Problem & Vision</a>
+  <a href="#concepts">2. Core Concepts</a>
+  <a href="#architecture">3. Architecture</a>
+  <a href="#cli">4. CLI Interface</a>
+  <a href="#config">5. Configuration</a>
+  <a href="#hook">6. Claude Code Hook Integration</a>
+  <a href="#search">7. Search Pipeline</a>
+  <a href="#web">8. Web UI (Claude Session Manager integration)</a>
+  <a href="#structure">9. File Structure</a>
+  <a href="#phases">10. Implementation Phases</a>
+  <a href="#testing">11. Testing Plan</a>
+  <a href="#risks">12. Risks & Mitigations</a>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="problem">1. Problem & Vision</h2>
+
+<div class="card highlight">
+  <h4>Problem</h4>
+  <p>Teams using Claude Code have <strong>no shared memory</strong>. Each developer starts every session from scratch. Team conventions, API standards, architecture decisions, deployment procedures &mdash; all of this lives in people's heads, scattered docs, or Notion pages that Claude never sees.</p>
+  <p>Result: Claude reinvents the wheel, writes code that violates team standards, and each team member spends time re-explaining the same context.</p>
+</div>
+
+<div class="card success">
+  <h4>Vision</h4>
+  <p><strong>TeamHub</strong> &mdash; shared knowledge base that automatically injects relevant team context into Claude Code sessions. The developer writes a message, TeamHub finds the most relevant docs from the team's knowledge base, and prepends them to the message before Claude sees it.</p>
+  <p>Claude gets <code>&lt;teamhub_context&gt;</code> with team standards, API docs, architecture decisions &mdash; and writes code that fits the team from the first try.</p>
+</div>
+
+<h3>Before / After</h3>
+
+<div class="comparison-grid">
+  <div class="card">
+    <h4>Without TeamHub</h4>
+    <pre><code>Developer: "Add a new API endpoint for users"
+
+Claude: *writes Express-style route*
+Developer: "No, we use Hono..."
+Claude: *rewrites with Hono*
+Developer: "And we always validate with Zod..."
+Claude: *adds Zod*
+Developer: "And our error format is..."
+Claude: *changes error handling*
+
+4 iterations to get basic endpoint right.</code></pre>
+  </div>
+  <div class="card success">
+    <h4>With TeamHub</h4>
+    <pre><code>Developer: "Add a new API endpoint for users"
+
+TeamHub auto-injects:
+  &lt;teamhub_context hub="acme-backend"&gt;
+  ## API Standards
+  - Framework: Hono
+  - Validation: Zod schemas in /schemas
+  - Error format: { error: string, code: number }
+  - Auth: Bearer token middleware
+  &lt;/teamhub_context&gt;
+
+Claude: *writes correct Hono + Zod endpoint*
+
+1 iteration. Done.</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="concepts">2. Core Concepts</h2>
+
+<table>
+  <tr><th>Concept</th><th>Description</th></tr>
+  <tr>
+    <td><strong>Hub</strong></td>
+    <td>A directory with team knowledge files (markdown, text, code snippets). One hub per team/project. Lives on disk at a configured path (e.g. <code>~/team-hubs/acme-backend</code>).</td>
+  </tr>
+  <tr>
+    <td><strong>Document</strong></td>
+    <td>A single file in the hub. Typically markdown: <code>api-standards.md</code>, <code>deployment.md</code>, <code>architecture.md</code>. Can also be code files as examples.</td>
+  </tr>
+  <tr>
+    <td><strong>Project mapping</strong></td>
+    <td>Links a working directory to a hub: "when I'm in <code>/Users/dev/acme-api</code>, use the <code>acme-backend</code> hub." Multiple projects can share one hub.</td>
+  </tr>
+  <tr>
+    <td><strong>Context injection</strong></td>
+    <td>Automatic prepending of relevant hub documents to user messages before Claude sees them. Triggered by Claude Code hook or web UI reply.</td>
+  </tr>
+  <tr>
+    <td><strong>Search</strong></td>
+    <td>Semantic search over hub documents. Given a user message, find the 3-5 most relevant docs. Uses BM25 (local) + optional Gemini reranking.</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="architecture">3. Architecture</h2>
+
+<div class="card">
+<pre><code>                                    ┌──────────────────────┐
+                                    │   Hub directory       │
+                                    │   ~/team-hubs/acme/   │
+                                    │   ├── api-standards.md│
+                                    │   ├── deployment.md   │
+                                    │   └── architecture.md │
+                                    └──────────┬───────────┘
+                                               │ read
+                                               ▼
+┌─────────────┐   hook/CLI    ┌─────────────────────────────┐
+│ Claude Code │ ────────────→ │        TeamHub CLI           │
+│             │               │                             │
+│  User types │               │  1. Detect project → hub    │
+│  a message  │               │  2. BM25 search over docs   │
+│             │  context back  │  3. (opt) Gemini rerank     │
+│             │ ←──────────── │  4. Return top-K docs       │
+└─────────────┘               └─────────────────────────────┘
+                                               │
+                                    ┌──────────┴───────────┐
+                                    │  ~/.teamhub/          │
+                                    │   config.yaml         │
+                                    │   index/              │
+                                    │    └── acme.json      │
+                                    └──────────────────────┘</code></pre>
+</div>
+
+<h3>Two integration modes</h3>
+
+<table>
+  <tr><th>Mode</th><th>How</th><th>When</th></tr>
+  <tr>
+    <td><strong>Claude Code Hook</strong></td>
+    <td><code>PreToolUse</code> or <code>Notification</code> hook that runs <code>teamhub inject</code> and prepends context to messages</td>
+    <td>Every Claude Code session, automatically. Works in terminal &mdash; no web UI needed.</td>
+  </tr>
+  <tr>
+    <td><strong>Web UI (Session Manager)</strong></td>
+    <td><code>/api/sessions/[id]/reply</code> calls <code>teamhub search</code> before sending message</td>
+    <td>When using Claude Session Manager web interface. Already implemented.</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="cli">4. CLI Interface</h2>
+
+<h3>Installation</h3>
+<pre><code>npm install -g teamhub</code></pre>
+
+<h3>Commands</h3>
+
+<table>
+  <tr><th>Command</th><th>Description</th><th>Status</th></tr>
+  <tr>
+    <td><code>teamhub init &lt;path&gt; --name &lt;hub-name&gt;</code></td>
+    <td>Create a new hub directory with template docs and register in config</td>
+    <td><span class="badge p0">P0</span></td>
+  </tr>
+  <tr>
+    <td><code>teamhub add &lt;file&gt; [-p &lt;project&gt;]</code></td>
+    <td>Add a document to the hub. Auto-detects hub from current directory.</td>
+    <td><span class="badge p0">P0</span></td>
+  </tr>
+  <tr>
+    <td><code>teamhub search &lt;query&gt; [-p &lt;project&gt;] [--top N] [--raw]</code></td>
+    <td>Search hub for documents relevant to query. Returns formatted context block.</td>
+    <td><span class="badge p0">P0</span></td>
+  </tr>
+  <tr>
+    <td><code>teamhub inject [-p &lt;project&gt;] [--max-tokens N]</code></td>
+    <td>Return full hub context (all docs, truncated to token budget). Fallback when search returns nothing.</td>
+    <td><span class="badge p0">P0</span></td>
+  </tr>
+  <tr>
+    <td><code>teamhub link &lt;project-path&gt; &lt;hub-name&gt;</code></td>
+    <td>Map a project directory to a hub in config.</td>
+    <td><span class="badge p0">P0</span></td>
+  </tr>
+  <tr>
+    <td><code>teamhub list</code></td>
+    <td>List all hubs and their project mappings.</td>
+    <td><span class="badge p1">P1</span></td>
+  </tr>
+  <tr>
+    <td><code>teamhub index [hub-name]</code></td>
+    <td>Rebuild BM25 index for a hub (or all hubs). Automatic on first search.</td>
+    <td><span class="badge p1">P1</span></td>
+  </tr>
+  <tr>
+    <td><code>teamhub hook install</code></td>
+    <td>Register TeamHub as a Claude Code hook in <code>~/.claude/settings.json</code>.</td>
+    <td><span class="badge p0">P0</span></td>
+  </tr>
+  <tr>
+    <td><code>teamhub hook uninstall</code></td>
+    <td>Remove the Claude Code hook.</td>
+    <td><span class="badge p1">P1</span></td>
+  </tr>
+  <tr>
+    <td><code>teamhub docs [hub-name]</code></td>
+    <td>List all documents in a hub with token counts.</td>
+    <td><span class="badge p1">P1</span></td>
+  </tr>
+  <tr>
+    <td><code>teamhub remove &lt;file&gt;</code></td>
+    <td>Remove a document from the hub and re-index.</td>
+    <td><span class="badge p2">P2</span></td>
+  </tr>
+</table>
+
+<h3>Examples</h3>
+<pre><code># Create a hub for backend team
+teamhub init ~/team-hubs/acme-backend --name acme-backend
+
+# Add documentation
+teamhub add api-standards.md
+teamhub add deployment-guide.md
+teamhub add error-handling.md
+
+# Link projects to hub
+teamhub link ~/code/acme-api acme-backend
+teamhub link ~/code/acme-workers acme-backend
+
+# Search (used by hook/web UI automatically)
+teamhub search "add new API endpoint" -p ~/code/acme-api --top 3
+
+# Install Claude Code hook
+teamhub hook install
+
+# Now every Claude Code session in ~/code/acme-api
+# automatically gets relevant context from acme-backend hub</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="config">5. Configuration</h2>
+
+<h3>Config file: <code>~/.teamhub/config.yaml</code></h3>
+
+<pre><code>hubs:
+  acme-backend:
+    path: ~/team-hubs/acme-backend
+    team:
+      - alice@acme.com
+      - bob@acme.com
+    search:
+      bm25_keep_ratio: 0.3       # BM25 filtering: keep top 30% of docs
+      gemini_input_tokens: 100000 # Token budget for Gemini reranking input
+      gemini_output_tokens: 800   # Token budget for Gemini reranking output
+      top_k: 3                    # Return top 3 docs
+
+  acme-frontend:
+    path: ~/team-hubs/acme-frontend
+    team:
+      - alice@acme.com
+      - charlie@acme.com
+    search:
+      bm25_keep_ratio: 0.3
+      top_k: 5
+
+projects:
+  ~/code/acme-api: acme-backend
+  ~/code/acme-workers: acme-backend
+  ~/code/acme-web: acme-frontend
+  ~/code/acme-mobile: acme-frontend</code></pre>
+
+<h3>Search settings explained</h3>
+<table>
+  <tr><th>Setting</th><th>Range</th><th>Default</th><th>What it does</th></tr>
+  <tr><td><code>bm25_keep_ratio</code></td><td>0.05 - 1.0</td><td>0.3</td><td>After BM25 scoring, keep top N% of documents. Lower = stricter filtering, faster. Higher = more context, risk of noise.</td></tr>
+  <tr><td><code>gemini_input_tokens</code></td><td>10K - 500K</td><td>100K</td><td>Max input tokens for Gemini reranking. 0 = skip Gemini (BM25 only).</td></tr>
+  <tr><td><code>gemini_output_tokens</code></td><td>500 - 8K</td><td>800</td><td>Max output tokens from Gemini reranking.</td></tr>
+  <tr><td><code>top_k</code></td><td>1 - 10</td><td>3</td><td>Number of documents to return in context block.</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="hook">6. Claude Code Hook Integration</h2>
+
+<div class="card highlight">
+  <h4>This is the key feature</h4>
+  <p>TeamHub works as a <strong>Claude Code hook</strong> &mdash; it automatically injects context into every session without any action from the developer. No web UI needed. Works in terminal. Zero friction.</p>
+</div>
+
+<h3>Hook registration</h3>
+
+<p><code>teamhub hook install</code> adds this to <code>~/.claude/settings.json</code>:</p>
+
+<pre><code>{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "command": "teamhub hook-handler --event UserPromptSubmit"
+      }
+    ]
+  }
+}</code></pre>
+
+<h3>How the hook works</h3>
+
+<div class="card">
+<pre><code>Event: UserPromptSubmit
+  │
+  ▼
+teamhub hook-handler receives:
+  - session_id
+  - user message text
+  - cwd (project directory)
+  │
+  ▼
+1. getHubForProject(cwd) → hub name
+   If no hub → exit (no context needed)
+  │
+  ▼
+2. messageNeedsContext(message)?
+   Skip trivial messages: "ok", "continue", "y", short commands
+   If no → exit
+  │
+  ▼
+3. teamhub search "{message}" -p {cwd} --top {top_k} --raw
+   BM25 + optional Gemini rerank
+  │
+  ▼
+4. Output context block to stdout:
+   &lt;teamhub_context hub="acme-backend"&gt;
+   ## API Standards
+   - Framework: Hono
+   ...
+   &lt;/teamhub_context&gt;
+  │
+  ▼
+Claude sees: context block + original message</code></pre>
+</div>
+
+<h3>messageNeedsContext logic</h3>
+
+<p>Not every message needs context injection. Skip to avoid wasting tokens:</p>
+
+<table>
+  <tr><th>Message type</th><th>Inject?</th><th>Example</th></tr>
+  <tr><td>Trivially short (&lt;10 chars)</td><td>No</td><td>"ok", "y", "done"</td></tr>
+  <tr><td>Continuation patterns</td><td>No</td><td>"continue", "go ahead", "keep going", "lgtm"</td></tr>
+  <tr><td>Short without question or code</td><td>No</td><td>"sounds good", "nice work"</td></tr>
+  <tr><td>Substantive question</td><td><strong>Yes</strong></td><td>"Add a new endpoint for user profiles"</td></tr>
+  <tr><td>Code reference</td><td><strong>Yes</strong></td><td>"Fix the UserService.getById method"</td></tr>
+  <tr><td>Question with ?</td><td><strong>Yes</strong></td><td>"How do we handle auth in this project?"</td></tr>
+</table>
+
+<h3>Multiple hooks can coexist</h3>
+
+<div class="card success">
+  <h4>TeamHub + Context Trash = best combo</h4>
+  <p>Claude Code supports multiple hooks on the same event. TeamHub (inject context) and Context Trash (compress tool results) work together:</p>
+<pre><code>{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "command": "teamhub hook-handler --event UserPromptSubmit"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "command": "context-trash-hook --event PostToolUse"
+      }
+    ]
+  }
+}</code></pre>
+  <p><strong>TeamHub</strong> adds relevant context IN. <strong>Context Trash</strong> compresses bloated results OUT. Together they maximize useful context density.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="search">7. Search Pipeline</h2>
+
+<h3>Two-stage search</h3>
+
+<div class="card">
+<pre><code>Stage 1: BM25 (local, free, fast)
+  ├── Tokenize query into terms
+  ├── Score each document in hub
+  ├── Keep top bm25_keep_ratio (default 30%)
+  └── Return ranked docs
+       │
+       ▼
+Stage 2: Gemini rerank (optional, ~$0.001)
+  ├── Send query + BM25 candidates to Gemini Flash
+  ├── "Which of these documents are most relevant to: {query}"
+  ├── Gemini returns ranked list with relevance scores
+  └── Return top_k documents</code></pre>
+</div>
+
+<h3>BM25 indexing</h3>
+
+<ul>
+  <li>Index stored at <code>~/.teamhub/index/{hub-name}.json</code></li>
+  <li>Auto-rebuilt when hub files change (mtime check)</li>
+  <li>Fields: document path, title (first H1), body text, tokens</li>
+  <li>Implementation: lightweight BM25 in ~100 lines of TypeScript, no external dependencies</li>
+</ul>
+
+<h3>When Gemini is skipped</h3>
+
+<ul>
+  <li><code>gemini_input_tokens: 0</code> in config &mdash; BM25 only mode</li>
+  <li>No Gemini API key configured</li>
+  <li>Hub has &le;5 documents (BM25 is sufficient)</li>
+  <li>Gemini API call fails &mdash; graceful fallback to BM25 results</li>
+</ul>
+
+<h3>Context block format</h3>
+
+<pre><code>&lt;teamhub_context hub="acme-backend" docs="3" tokens="~2400"&gt;
+
+## From: api-standards.md (relevance: 0.92)
+- Framework: Hono v4
+- All routes in /src/routes/, grouped by resource
+- Validation: Zod schemas in /src/schemas/
+- Error format: { error: string, code: string, details?: any }
+- Auth: Bearer token via middleware, never inline
+
+## From: database.md (relevance: 0.78)
+- ORM: Drizzle
+- Migrations in /drizzle/
+- Always use transactions for multi-table writes
+
+## From: naming.md (relevance: 0.65)
+- Files: kebab-case
+- Variables: camelCase
+- DB columns: snake_case
+
+&lt;/teamhub_context&gt;</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="web">8. Web UI (Claude Session Manager)</h2>
+
+<div class="card done">
+  <h4><span class="badge done">Already implemented</span></h4>
+  <p>Web UI integration in Claude Session Manager is already working:</p>
+  <ul>
+    <li><strong>Settings page</strong> &mdash; enable/disable TeamHub, configure search params per hub (BM25 ratio, Gemini tokens, top_k)</li>
+    <li><strong>Reply handler</strong> &mdash; <code>/api/sessions/[id]/reply</code> calls <code>teamhub search</code> before sending message</li>
+    <li><strong>Action log</strong> &mdash; every injection logged with hub name, token estimate, context content</li>
+    <li><strong>Health check</strong> &mdash; <code>/api/health</code> reports TeamHub availability</li>
+    <li><strong>Status API</strong> &mdash; <code>/api/teamhub/status</code> GET/PATCH for hub list and settings</li>
+  </ul>
+</div>
+
+<h3>What's missing in web UI</h3>
+
+<table>
+  <tr><th>Feature</th><th>Priority</th><th>Description</th></tr>
+  <tr><td>Hub document browser</td><td><span class="badge p1">P1</span></td><td>View and edit hub documents directly from web UI</td></tr>
+  <tr><td>Search preview</td><td><span class="badge p1">P1</span></td><td>"Test search" button: enter query, see which docs would be injected</td></tr>
+  <tr><td>Injection history</td><td><span class="badge p2">P2</span></td><td>Per-session view of all TeamHub injections with relevance scores</td></tr>
+  <tr><td>Hub analytics</td><td><span class="badge p2">P2</span></td><td>Which docs are used most, which never get injected, token cost per session</td></tr>
+  <tr><td>Team sync</td><td><span class="badge p2">P2</span></td><td>Sync hub via git: pull latest team docs automatically</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="structure">9. File Structure</h2>
+
+<div class="card">
+<pre class="file-tree"><code><span class="dir">teamhub/</span>
+├── <span class="file">package.json</span>          <span class="desc">// name: "teamhub", bin: "teamhub"</span>
+├── <span class="file">tsconfig.json</span>
+├── <span class="file">README.md</span>
+├── <span class="dir">src/</span>
+│   ├── <span class="file">index.ts</span>           <span class="desc">// CLI entry: parse commands, dispatch</span>
+│   ├── <span class="file">config.ts</span>          <span class="desc">// Read/write ~/.teamhub/config.yaml</span>
+│   ├── <span class="file">hub.ts</span>             <span class="desc">// Hub CRUD: init, add, remove, list docs</span>
+│   ├── <span class="file">search.ts</span>          <span class="desc">// BM25 search + Gemini rerank pipeline</span>
+│   ├── <span class="file">bm25.ts</span>            <span class="desc">// BM25 implementation (~100 lines)</span>
+│   ├── <span class="file">index-builder.ts</span>   <span class="desc">// Build/rebuild BM25 index from hub files</span>
+│   ├── <span class="file">inject.ts</span>          <span class="desc">// Full context injection (all docs, truncated)</span>
+│   ├── <span class="file">hook.ts</span>            <span class="desc">// Claude Code hook handler</span>
+│   ├── <span class="file">hook-install.ts</span>    <span class="desc">// Register/unregister hook in settings.json</span>
+│   ├── <span class="file">context.ts</span>         <span class="desc">// messageNeedsContext + formatContextBlock</span>
+│   ├── <span class="file">gemini.ts</span>          <span class="desc">// Optional Gemini Flash reranking</span>
+│   └── <span class="file">yaml.ts</span>            <span class="desc">// Minimal YAML parser/serializer (no deps)</span>
+├── <span class="dir">templates/</span>
+│   ├── <span class="file">api-standards.md</span>   <span class="desc">// Template doc for new hubs</span>
+│   ├── <span class="file">architecture.md</span>    <span class="desc">// Template</span>
+│   └── <span class="file">conventions.md</span>     <span class="desc">// Template</span>
+├── <span class="dir">test/</span>
+│   ├── <span class="file">bm25.test.ts</span>
+│   ├── <span class="file">search.test.ts</span>
+│   ├── <span class="file">config.test.ts</span>
+│   ├── <span class="file">hook.test.ts</span>
+│   ├── <span class="file">context.test.ts</span>
+│   └── <span class="dir">fixtures/</span>
+│       ├── <span class="dir">sample-hub/</span>     <span class="desc">// Hub with 5 test docs</span>
+│       └── <span class="file">config.yaml</span>    <span class="desc">// Test config</span>
+└── <span class="dir">dist/</span></code></pre>
+</div>
+
+<div class="card success">
+  <h4>Zero runtime dependencies (like Context Trash)</h4>
+  <p>BM25 is ~100 lines of TypeScript. YAML parser is minimal. Gemini uses <code>fetch()</code>. No <code>node_modules</code> bloat = fast <code>npx</code>.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="phases">10. Implementation Phases</h2>
+
+<div class="card phase">
+  <h3>Phase 1: Core CLI <span class="badge p0">P0 &mdash; MVP</span></h3>
+  <ul>
+    <li><code>teamhub init</code> &mdash; create hub directory with template docs</li>
+    <li><code>teamhub add</code> &mdash; copy file into hub</li>
+    <li><code>teamhub link</code> &mdash; map project → hub in config</li>
+    <li><code>teamhub inject</code> &mdash; return all docs (truncated to max tokens)</li>
+    <li>Config read/write (<code>~/.teamhub/config.yaml</code>)</li>
+  </ul>
+  <p><strong>Test:</strong> <code>teamhub init ~/test-hub --name test && teamhub inject -p .</code> returns docs.</p>
+</div>
+
+<div class="card phase">
+  <h3>Phase 2: BM25 Search <span class="badge p0">P0</span></h3>
+  <ul>
+    <li>BM25 implementation (tokenize, score, rank)</li>
+    <li>Auto-index on first search (store at <code>~/.teamhub/index/</code>)</li>
+    <li>Re-index when files change (mtime check)</li>
+    <li><code>teamhub search "query"</code> &mdash; returns top-K relevant docs</li>
+  </ul>
+  <p><strong>Test:</strong> Hub with 10 docs. Search "deployment" returns deployment.md, not api-standards.md.</p>
+</div>
+
+<div class="card phase">
+  <h3>Phase 3: Claude Code Hook <span class="badge p0">P0 &mdash; Key UX</span></h3>
+  <ul>
+    <li><code>teamhub hook install</code> &mdash; register in <code>~/.claude/settings.json</code></li>
+    <li><code>teamhub hook-handler</code> &mdash; receive event, search, output context</li>
+    <li><code>messageNeedsContext()</code> &mdash; skip trivial messages</li>
+    <li>Verbose logging to stderr (hub name, docs found, tokens)</li>
+  </ul>
+  <p><strong>Test:</strong> Start Claude Code in linked project directory. Type a question. Verify context was injected (check <code>~/.claude/projects/*/actions.log</code> or verbose output).</p>
+</div>
+
+<div class="card phase">
+  <h3>Phase 4: Gemini Reranking <span class="badge p1">P1</span></h3>
+  <ul>
+    <li>Optional Gemini Flash integration for semantic reranking</li>
+    <li>Falls back to BM25-only if no API key or Gemini fails</li>
+    <li>Config: <code>gemini_input_tokens</code>, <code>gemini_output_tokens</code></li>
+    <li>API key stored in <code>~/.teamhub/config.yaml</code> or env var <code>GEMINI_API_KEY</code></li>
+  </ul>
+</div>
+
+<div class="card phase">
+  <h3>Phase 5: Polish & Publish <span class="badge p1">P1</span></h3>
+  <ul>
+    <li><code>teamhub list</code>, <code>teamhub docs</code>, <code>teamhub remove</code></li>
+    <li>README with examples and screenshots</li>
+    <li><code>teamhub hook uninstall</code></li>
+    <li>npm publish as <code>teamhub</code></li>
+  </ul>
+</div>
+
+<div class="card phase">
+  <h3>Phase 6 (Future): Team Sync <span class="badge p2">P2</span></h3>
+  <ul>
+    <li>Hub backed by git repo &mdash; <code>teamhub sync</code> pulls latest</li>
+    <li>Team members can push updates to shared hub</li>
+    <li>Conflict resolution for concurrent edits</li>
+    <li>Hub versioning (tag releases of team knowledge)</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="testing">11. Testing Plan</h2>
+
+<h3>Unit Tests</h3>
+<table>
+  <tr><th>Module</th><th>Tests</th></tr>
+  <tr>
+    <td><code>bm25.ts</code></td>
+    <td>
+      <ul>
+        <li>Score calculation with known documents</li>
+        <li>Ranking order matches expected relevance</li>
+        <li>Handle empty hub (no docs)</li>
+        <li>Handle query with no matching terms</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td><code>config.ts</code></td>
+    <td>
+      <ul>
+        <li>Parse config with multiple hubs</li>
+        <li>getHubForProject: exact match, prefix match, hub path match</li>
+        <li>Write config preserves comments and order</li>
+        <li>Handle missing config gracefully</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td><code>context.ts</code></td>
+    <td>
+      <ul>
+        <li>messageNeedsContext: skip "ok", "continue", "y"</li>
+        <li>messageNeedsContext: accept questions, code references</li>
+        <li>formatContextBlock: correct XML wrapper</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td><code>hook.ts</code></td>
+    <td>
+      <ul>
+        <li>Parse hook event payload</li>
+        <li>No hub configured → empty output</li>
+        <li>Trivial message → empty output</li>
+        <li>Substantive message → context block on stdout</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td><code>search.ts</code></td>
+    <td>
+      <ul>
+        <li>BM25-only mode (gemini_input_tokens: 0)</li>
+        <li>BM25 + Gemini pipeline</li>
+        <li>Gemini failure → fallback to BM25</li>
+        <li>top_k respected</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+<h3>Integration Tests</h3>
+<table>
+  <tr><th>Scenario</th><th>How</th></tr>
+  <tr><td>Full init → add → search flow</td><td>Create temp hub, add 5 docs, search, verify results</td></tr>
+  <tr><td>Hook end-to-end</td><td>Mock hook event → verify context block output</td></tr>
+  <tr><td>Config round-trip</td><td>Write config → read → verify identical</td></tr>
+  <tr><td>Re-indexing on file change</td><td>Add doc → search → add another doc → search again → verify new doc appears</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="risks">12. Risks & Mitigations</h2>
+
+<table>
+  <tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr>
+  <tr>
+    <td>Context injection wastes tokens on irrelevant docs</td>
+    <td>High &mdash; pushes toward compact faster</td>
+    <td>Strict <code>messageNeedsContext</code> filtering. Configurable <code>top_k</code> and <code>bm25_keep_ratio</code>. User can disable per-project.</td>
+  </tr>
+  <tr>
+    <td>BM25 returns wrong docs for ambiguous queries</td>
+    <td>Medium &mdash; Claude gets misleading context</td>
+    <td>Gemini reranking as second stage. Relevance score threshold (don't inject low-relevance docs). User can test search before relying on it.</td>
+  </tr>
+  <tr>
+    <td>Hook latency slows down every message</td>
+    <td>Medium &mdash; bad UX</td>
+    <td>BM25 is local and fast (&lt;50ms). Gemini adds 1-2s but is optional. Hook timeout: 5 seconds max, then skip.</td>
+  </tr>
+  <tr>
+    <td>YAML parser breaks on edge cases</td>
+    <td>Low &mdash; config corruption</td>
+    <td>Minimal parser only handles known structure. Test with all real-world configs. Backup config before write.</td>
+  </tr>
+  <tr>
+    <td>npm name <code>teamhub</code> taken</td>
+    <td>Medium &mdash; need rename</td>
+    <td>Check npm registry. Fallbacks: <code>@teamhub/cli</code>, <code>teamhub-ai</code>, <code>teamhub-claude</code>.</td>
+  </tr>
+  <tr>
+    <td>Hub docs get stale / outdated</td>
+    <td>Medium &mdash; Claude follows old standards</td>
+    <td>Phase 6 git sync. <code>teamhub docs</code> shows last-modified dates. README warns about maintenance.</td>
+  </tr>
+  <tr>
+    <td>Conflict with Context Trash hook</td>
+    <td>Low &mdash; hooks are independent</td>
+    <td>Different events: TeamHub on <code>UserPromptSubmit</code>, Context Trash on <code>PostToolUse</code>. No conflict.</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>13. npm Package Config</h2>
+
+<div class="card">
+<pre><code>{
+  "name": "teamhub",
+  "version": "0.1.0",
+  "description": "Shared team knowledge base for Claude Code. Auto-inject project context into every session.",
+  "bin": {
+    "teamhub": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "claude", "claude-code", "mcp", "team", "knowledge-base",
+    "context", "injection", "ai", "coding-assistant",
+    "documentation", "standards", "hooks"
+  ],
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4",
+    "vitest": "^1.6"
+  }
+}</code></pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>14. Relationship to Context Trash</h2>
+
+<div class="card highlight">
+  <h4>Two products, one ecosystem</h4>
+  <table>
+    <tr><th></th><th>TeamHub</th><th>Context Trash</th></tr>
+    <tr><td><strong>Direction</strong></td><td>Adds context IN</td><td>Compresses bloat OUT</td></tr>
+    <tr><td><strong>Mechanism</strong></td><td>Claude Code hook (UserPromptSubmit)</td><td>MCP proxy (wraps tool servers)</td></tr>
+    <tr><td><strong>What it handles</strong></td><td>Team knowledge, standards, docs</td><td>Screenshots, DOM snapshots, large tool results</td></tr>
+    <tr><td><strong>Token effect</strong></td><td>+500-3000 tokens per message</td><td>-50,000 to -250,000 tokens per tool call</td></tr>
+    <tr><td><strong>Net effect together</strong></td><td colspan="2">Claude gets relevant team context AND has room for it because tool results are compressed. Best of both worlds.</td></tr>
+  </table>
+</div>
+
+</div>
+
+<footer>
+  TeamHub &mdash; Technical Specification v1.0 | March 2026<br>
+  Author: Vladimir Kobzev<br>
+  Related: <a href="https://chillai.space/p/context-trash-spec?password=rYRpQ-Y8">Context Trash Spec</a> |
+  <a href="https://chillai.space/p/compression-comparison?password=U-MxB1lX">Compression Comparison</a> |
+  <a href="https://chillai.space/p/context-overload-research?password=CcgMUHeG">Context Overload Research</a>
+</footer>
+
+</body>
+</html>

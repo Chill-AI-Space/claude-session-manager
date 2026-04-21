@@ -75,6 +75,26 @@ export const MessageBubble = memo(function MessageBubble({ message, projectPath 
   const hasToolResults = toolResultBlocks.length > 0;
   const hasThinking = thinkingBlocks.length > 0;
 
+  // Build result lookup for O(1) pairing — used when rendering in block order
+  const resultMap = new Map<string, ContentBlock>();
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block.type === "tool_result" && block.tool_use_id) {
+        resultMap.set(block.tool_use_id, block);
+      }
+    }
+  }
+  // True when content has interleaved text+tools (Codex style) — render in order
+  const isInterleaved =
+    Array.isArray(content) && textBlocks.length > 0 && toolUseBlocks.length > 0 && (() => {
+      let sawTool = false;
+      for (const b of content) {
+        if (b.type === "tool_use") sawTool = true;
+        else if (b.type === "text" && b.text.trim() && sawTool) return true;
+      }
+      return false;
+    })();
+
   // Detect Claude Code's auto-generated context summary (injected as user message)
   const fullText = textBlocks.join("");
   if (isUser && fullText.trimStart().startsWith(CONTEXT_SUMMARY_PREFIX)) {
@@ -208,31 +228,65 @@ export const MessageBubble = memo(function MessageBubble({ message, projectPath 
             <ThinkingBlock key={`thinking-${i}`} content={thinking} />
           ))}
 
-        {hasText && (
-          <div className="text-[13.5px] leading-[1.7]">
-            <MarkdownContent content={textBlocks.join("")} projectPath={projectPath} />
-          </div>
-        )}
+        {isInterleaved && Array.isArray(content)
+          ? content.map((block, i) => {
+              if (block.type === "text" && block.text.trim()) {
+                return (
+                  <div key={i} className="text-[13.5px] leading-[1.7]">
+                    <MarkdownContent content={block.text} projectPath={projectPath} />
+                  </div>
+                );
+              }
+              if (block.type === "tool_use") {
+                const matchingResult = resultMap.get(block.id ?? "");
+                const resultContent =
+                  matchingResult?.type === "tool_result"
+                    ? typeof matchingResult.content === "string"
+                      ? matchingResult.content
+                      : ""
+                    : undefined;
+                return (
+                  <ToolUseBlock
+                    key={block.id || i}
+                    name={block.name}
+                    input={block.input}
+                    result={resultContent}
+                  />
+                );
+              }
+              if (block.type === "thinking" && block.thinking) {
+                return <ThinkingBlock key={i} content={block.thinking} />;
+              }
+              return null; // tool_result rendered with its tool_use
+            })
+          : <>
+              {hasText && (
+                <div className="text-[13.5px] leading-[1.7]">
+                  <MarkdownContent content={textBlocks.join("")} projectPath={projectPath} />
+                </div>
+              )}
 
-        {hasTools &&
-          toolUseBlocks.map((block, i) => {
-            if (block.type !== "tool_use") return null;
-            const matchingResult = toolResultBlocks.find(
-              (r) => r.type === "tool_result" && r.tool_use_id === block.id
-            );
-            let resultContent: string | undefined;
-            if (matchingResult && matchingResult.type === "tool_result") {
-              resultContent = typeof matchingResult.content === "string" ? matchingResult.content : "";
-            }
-            return (
-              <ToolUseBlock
-                key={block.id || i}
-                name={block.name}
-                input={block.input}
-                result={resultContent}
-              />
-            );
-          })}
+              {hasTools &&
+                toolUseBlocks.map((block, i) => {
+                  if (block.type !== "tool_use") return null;
+                  const matchingResult = toolResultBlocks.find(
+                    (r) => r.type === "tool_result" && r.tool_use_id === block.id
+                  );
+                  let resultContent: string | undefined;
+                  if (matchingResult && matchingResult.type === "tool_result") {
+                    resultContent = typeof matchingResult.content === "string" ? matchingResult.content : "";
+                  }
+                  return (
+                    <ToolUseBlock
+                      key={block.id || i}
+                      name={block.name}
+                      input={block.input}
+                      result={resultContent}
+                    />
+                  );
+                })}
+            </>
+        }
       </div>
     </div>
   );

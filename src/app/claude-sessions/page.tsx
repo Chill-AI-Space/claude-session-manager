@@ -1,13 +1,17 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { FolderOpen, Send, Loader2, Sparkles, FolderPlus, ShieldOff, Paperclip } from "lucide-react";
+import { FolderOpen, Send, Loader2, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud } from "lucide-react";
+import { AgentToggleButton, type AgentType, DEFAULT_MODEL } from "@/components/AgentToggleButton";
+import { ModelSelector } from "@/components/settings/ModelSelector";
+import { useSettings } from "@/lib/settings";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { useSessionStart } from "@/hooks/useSessionStart";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
+import { useComputeNode } from "@/hooks/useComputeNode";
 
 export default function SessionsEmptyState() {
   const [message, setMessage] = useState("");
@@ -19,8 +23,26 @@ export default function SessionsEmptyState() {
   const dragCounterRef = useRef(0);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
+  const [selectedAgent, setSelectedAgent] = useState<AgentType>("claude");
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
+  const compute = useComputeNode();
   const autodetect = useAutodetect();
   const session = useSessionStart();
+  const { settings } = useSettings();
+
+  useEffect(() => {
+    if (selectedAgent === "forge") {
+      setSelectedModel(
+        settings.claude_model === "claude-sonnet-4-6"
+          ? "models/gemini-2.5-flash"
+          : settings.claude_model,
+      );
+    } else if (selectedAgent === "codex") {
+      setSelectedModel("gpt-5.4");
+    } else {
+      setSelectedModel(undefined);
+    }
+  }, [settings.claude_model, selectedAgent]);
 
   const insertAtCursor = (text: string) => {
     const textarea = textareaRef.current;
@@ -91,14 +113,28 @@ export default function SessionsEmptyState() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handleAutodetect = async () => {
-    const firstPath = await autodetect.detect(message);
-    if (firstPath) setFolderPath(firstPath);
+  const doStart = (path: string) => {
+    session.start(path, message, { agent: selectedAgent, model: selectedModel });
   };
 
-  const handleStart = () => {
-    if (folderPath) session.start(folderPath, message);
+  // Smart start: if folder known → start; else autodetect → start; else open picker
+  const handleSmartStart = async () => {
+    if (!message.trim() || session.starting || autodetect.detecting) return;
+    if (folderPath) {
+      doStart(folderPath);
+      return;
+    }
+    const firstPath = await autodetect.detect(message);
+    if (firstPath) {
+      setFolderPath(firstPath);
+      doStart(firstPath);
+    } else if (autodetect.suggestions.length === 0) {
+      setFolderBrowserOpen(true);
+    }
+    // if suggestions > 0, they're shown below and user clicks one to start
   };
+
+  const isBusy = session.starting || autodetect.detecting;
 
   return (
     <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -137,79 +173,99 @@ export default function SessionsEmptyState() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
-                folderPath ? handleStart() : handleAutodetect();
+                handleSmartStart();
               }
             }}
-            placeholder="What would you like Claude to do?"
+            placeholder={`What would you like ${selectedAgent === "forge" ? "Forge" : selectedAgent === "codex" ? "Codex" : "Claude"} to do? (⌘Enter to start)`}
             rows={5}
-            className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pb-10 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none"
-            disabled={session.starting}
+            className={`w-full resize-none bg-transparent rounded-lg px-3 py-2.5 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none ${selectedAgent === "forge" ? "pb-16" : "pb-10"}`}
+            disabled={isBusy}
           />
-          <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center gap-1.5">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted/50"
-              title="Attach file or drag & drop"
-              type="button"
-            >
-              <Paperclip className="h-3 w-3" />
-            </button>
-            <button
-              onClick={() => setFolderBrowserOpen(true)}
-              className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded min-w-0 ${
-                autodetect.autodetected
-                  ? "text-violet-500 hover:text-violet-600 hover:bg-violet-500/10"
-                  : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50"
-              }`}
-              title={folderPath || "Select project folder"}
-            >
-              <FolderOpen className="h-3 w-3 shrink-0" />
-              <span className="truncate max-w-[150px]">
-                {folderPath ? folderPath.split(/[\\/]/).pop() : "folder..."}
-              </span>
-            </button>
-            <button
-              onClick={handleAutodetect}
-              disabled={!message.trim() || autodetect.detecting}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-violet-500 disabled:opacity-30 transition-colors px-1.5 py-0.5 rounded hover:bg-violet-500/10"
-              title="Auto-detect project from your prompt"
-            >
-              {autodetect.detecting ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Sparkles className="h-3 w-3" />
+          <div className="absolute bottom-1.5 left-1.5 right-1.5 flex flex-col gap-1">
+            {/* Model row — only when Forge is selected */}
+            {selectedAgent === "forge" && (
+              <div className="flex items-center gap-1.5 px-0.5">
+                <ModelSelector
+                  settingKey="claude_model"
+                  currentModel={selectedModel || ""}
+                  onUpdate={(_, model) => setSelectedModel(model)}
+                  label="Model"
+                />
+              </div>
+            )}
+            {/* Controls row */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="p-1 text-muted-foreground/40 hover:text-muted-foreground transition-colors rounded hover:bg-muted/50"
+                title="Attach file (or drag & drop)"
+                type="button"
+              >
+                <Paperclip className="h-3 w-3" />
+              </button>
+              <button
+                onClick={() => setFolderBrowserOpen(true)}
+                className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded min-w-0 ${
+                  folderPath
+                    ? "text-violet-500 hover:text-violet-600 hover:bg-violet-500/10"
+                    : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
+                }`}
+                title={folderPath ? `Project: ${folderPath}` : "Select project folder (optional — auto-detected from prompt)"}
+              >
+                <FolderOpen className="h-3 w-3 shrink-0" />
+                {folderPath && (
+                  <span className="truncate max-w-[120px]">{folderPath.split(/[\\/]/).pop()}</span>
+                )}
+              </button>
+              <button
+                onClick={skipPerms.toggle}
+                className={`p-1 transition-colors rounded ${
+                  skipPerms.value
+                    ? "text-amber-500 hover:bg-amber-500/10"
+                    : "text-muted-foreground/30 hover:text-muted-foreground hover:bg-muted/50"
+                }`}
+                title={skipPerms.value ? "Skip permissions: ON — click to disable" : "Skip permissions: OFF — click to enable"}
+              >
+                <ShieldOff className="h-3 w-3" />
+              </button>
+              <AgentToggleButton
+                agent={selectedAgent}
+                onCycle={(next) => {
+                  setSelectedAgent(next);
+                  setSelectedModel(DEFAULT_MODEL[next] || undefined);
+                }}
+              />
+              {compute.nodes.length > 0 && (
+                <button
+                  onClick={compute.toggle}
+                  className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
+                    compute.isLocal
+                      ? "text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10"
+                      : "text-sky-500 hover:text-sky-400 hover:bg-sky-500/10"
+                  }`}
+                  title={compute.isLocal ? "Running locally — click to switch to VM" : `Running on ${compute.currentNode?.name} — click to switch`}
+                >
+                  {compute.isLocal ? <Monitor className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
+                  <span className="font-medium">
+                    {compute.isLocal ? "local" : compute.currentNode?.name ?? "vm"}
+                  </span>
+                </button>
               )}
-              <span>auto</span>
-            </button>
-            <button
-              onClick={skipPerms.toggle}
-              className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded ${
-                skipPerms.value
-                  ? "text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
-                  : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
-              }`}
-              title={skipPerms.value ? "Skip permissions enabled — click to disable" : "Skip permissions disabled — click to enable"}
-            >
-              <ShieldOff className="h-3 w-3" />
-              <span>skip perms</span>
-              <span className={`font-medium ${skipPerms.value ? "text-amber-400" : "text-muted-foreground/60"}`}>
-                {skipPerms.value ? "on" : "off"}
-              </span>
-            </button>
-            <div className="flex-1" />
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7"
-              onClick={handleStart}
-              disabled={!message.trim() || !folderPath || session.starting}
-            >
-              {session.starting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Send className="h-3.5 w-3.5" />
-              )}
-            </Button>
+              <div className="flex-1" />
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                onClick={handleSmartStart}
+                disabled={!message.trim() || isBusy}
+              >
+                {isBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Send className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -223,7 +279,7 @@ export default function SessionsEmptyState() {
                   onClick={() => {
                     setFolderPath(s.project_path);
                     autodetect.setAutodetected(true);
-                    setTimeout(() => textareaRef.current?.focus(), 50);
+                    doStart(s.project_path);
                   }}
                   className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition-colors ${
                     isSelected

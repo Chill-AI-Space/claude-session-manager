@@ -1,73 +1,159 @@
 import { NextRequest } from "next/server";
 import { getDb } from "@/lib/db";
-import { SessionRow, ContentBlock } from "@/lib/types";
-import { readSessionMessages } from "@/lib/session-reader";
+import { SessionRow } from "@/lib/types";
+import { sessionToMarkdownPaginated } from "@/lib/jsonl-to-md";
+import { resolveNode, proxyJSON } from "@/lib/remote-compute";
 
 export const dynamic = "force-dynamic";
 
+/** Default: render last 30 messages. Use ?limit=0 for all, ?offset=X&limit=Y for explicit range. */
+const DEFAULT_MESSAGE_LIMIT = 30;
+
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   const { sessionId } = await params;
 
+  // Check if this is a remote session
+  const nodeId = req.nextUrl.searchParams.get("node");
+  const node = resolveNode(nodeId);
+
+  if (node) {
+    try {
+      const remoteParams = new URLSearchParams(req.nextUrl.searchParams);
+      remoteParams.delete("node");
+      const qs = remoteParams.toString();
+      const res = await proxyJSON(node, `/api/sessions/${sessionId}/md${qs ? `?${qs}` : ""}`);
+      const data = await res.json();
+      return Response.json(data, { status: res.status });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return Response.json({ error: `Remote MD fetch failed: ${msg}` }, { status: 502 });
+    }
+  }
+
   const db = getDb();
   const session = db
-    .prepare("SELECT jsonl_path FROM sessions WHERE session_id = ?")
-    .get(sessionId) as Pick<SessionRow, "jsonl_path"> | undefined;
+    .prepare("SELECT jsonl_path, project_path, previous_session_id, agent_type FROM sessions WHERE session_id = ?")
+    .get(sessionId) as (Pick<SessionRow, "jsonl_path" | "project_path" | "previous_session_id"> & { agent_type?: string }) | undefined;
 
   if (!session) {
     return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
-  try {
-    const messages = readSessionMessages(session.jsonl_path);
+  const limitParam = req.nextUrl.searchParams.get("limit");
+  const offsetParam = req.nextUrl.searchParams.get("offset");
+
+  // limit=0 means "all messages" (no pagination)
+  const messageLimit = limitParam != null
+    ? (parseInt(limitParam) || undefined)
+    : DEFAULT_MESSAGE_LIMIT;
+  const messageOffset = offsetParam != null ? parseInt(offsetParam) : undefined;
+
+  // ── Codex sessions: render from rollout JSONL ────────────────────────────
+  if (session.agent_type === "codex") {
+    const { readCodexMessages } = await import("@/lib/codex-db");
+    const allMessages = readCodexMessages(session.jsonl_path);
+    const totalMessages = allMessages.length;
+    const renderStart = messageLimit === 0 || messageLimit == null
+      ? 0
+      : Math.max(0, totalMessages - messageLimit - (messageOffset ?? 0));
+    const renderEnd = messageLimit === 0 || messageLimit == null
+      ? totalMessages
+      : Math.max(renderStart, totalMessages - (messageOffset ?? 0));
+    const messages = allMessages.slice(renderStart, renderEnd);
     const parts: string[] = [];
-
-    for (const msg of messages) {
-      if (msg.type === "compact_boundary") continue;
-
-      const role = msg.type === "user" ? "**You**" : "**Claude**";
-      let text = "";
-
-      if (typeof msg.content === "string") {
-        text = msg.content;
-      } else if (Array.isArray(msg.content)) {
-        const textBlocks = (msg.content as ContentBlock[])
-          .filter((b): b is ContentBlock & { type: "text" } => b.type === "text" && !!(b as { text?: string }).text)
-          .map((b) => (b as { text: string }).text)
-          .join("\n\n");
-        const toolBlocks = (msg.content as ContentBlock[])
-          .filter((b): b is ContentBlock & { type: "tool_use" } => b.type === "tool_use")
-          .map((b) => {
-            const tu = b as { name: string; input?: Record<string, unknown> };
-            const inputStr = tu.input ? JSON.stringify(tu.input, null, 2) : "";
-            return `\`\`\`\n[Tool: ${tu.name}]\n${inputStr}\n\`\`\``;
-          })
-          .join("\n\n");
-        const resultBlocks = (msg.content as ContentBlock[])
-          .filter((b): b is ContentBlock & { type: "tool_result" } => b.type === "tool_result")
-          .map((b) => {
-            const tr = b as { content?: string | Array<{ type: string; text?: string }> };
-            const rc = typeof tr.content === "string"
-              ? tr.content
-              : Array.isArray(tr.content)
-                ? tr.content.filter((x) => x.type === "text").map((x) => x.text).join("")
-                : "";
-            return rc ? `<details><summary>Tool result</summary>\n\n\`\`\`\n${rc.slice(0, 2000)}\n\`\`\`\n</details>` : "";
-          })
-          .filter(Boolean)
-          .join("\n\n");
-        text = [textBlocks, toolBlocks, resultBlocks].filter(Boolean).join("\n\n");
+    for (const m of messages) {
+      if (m.type === "user") {
+        parts.push(`**You**\n\n${m.content as string}\n`);
+      } else if (m.type === "assistant") {
+        const blocks = Array.isArray(m.content) ? m.content : [];
+        const textParts: string[] = [];
+        const toolParts: string[] = [];
+        const toolResultParts: string[] = [];
+        for (const b of blocks) {
+          if (b.type === "text" && b.text?.trim()) {
+            textParts.push(b.text);
+          } else if (b.type === "tool_use") {
+            const input = b.input as Record<string, unknown>;
+            const cmd = input.command ?? input.file_path ?? input.query ?? input.url ?? Object.values(input)[0];
+            const detail = cmd ? `: \`${String(cmd).slice(0, 120)}\`` : "";
+            toolParts.push(`🔧 **${b.name}**${detail}`);
+          } else if (b.type === "tool_result") {
+            const result = typeof b.content === "string" ? b.content.trim() : String(b.content ?? "").trim();
+            if (result) {
+              toolResultParts.push(`\`\`\`text\n${result}\n\`\`\``);
+            }
+          }
+        }
+        const text = [...textParts, ...toolParts, ...toolResultParts].join("\n\n");
+        if (text) parts.push(`${text}\n`);
       }
-
-      if (!text.trim()) continue;
-      parts.push(`### ${role}\n\n${text.trim()}`);
     }
+    const markdown = parts.length > 0 ? parts.join("\n---\n\n") : "*(No messages yet)*\n";
+    return Response.json({
+      markdown,
+      session_id: sessionId,
+      total_messages: totalMessages,
+      render_start: renderStart,
+      render_end: renderEnd,
+      has_earlier: renderStart > 0,
+    });
+  }
 
-    const markdown = parts.join("\n\n---\n\n");
-    return Response.json({ markdown });
-  } catch {
-    return Response.json({ error: "Could not read session file" }, { status: 500 });
+  // ── Forge sessions: render from Forge SQLite ─────────────────────────────
+  if (session.jsonl_path?.startsWith("forge://")) {
+    const { readForgeMessages } = await import("@/lib/forge-db");
+    const allMessages = readForgeMessages(sessionId);
+    const totalMessages = allMessages.length;
+    const renderStart = messageLimit === 0 || messageLimit == null
+      ? 0
+      : Math.max(0, totalMessages - messageLimit - (messageOffset ?? 0));
+    const renderEnd = messageLimit === 0 || messageLimit == null
+      ? totalMessages
+      : Math.max(renderStart, totalMessages - (messageOffset ?? 0));
+    const messages = allMessages.slice(renderStart, renderEnd);
+    const parts: string[] = [];
+    for (const m of messages) {
+      if (m.type === "user") {
+        parts.push(`**You**\n\n${m.content as string}\n`);
+      } else if (m.type === "assistant") {
+        const text = Array.isArray(m.content)
+          ? m.content.filter(b => b.type === "text").map(b => (b as { type: "text"; text: string }).text).join("\n\n")
+          : String(m.content ?? "");
+        if (text) parts.push(`${text}\n`);
+      }
+    }
+    const markdown = parts.length > 0 ? parts.join("\n---\n\n") : "*(No messages yet)*\n";
+    return Response.json({
+      markdown,
+      session_id: sessionId,
+      total_messages: totalMessages,
+      render_start: renderStart,
+      render_end: renderEnd,
+      has_earlier: renderStart > 0,
+    });
+  }
+
+  try {
+    const result = sessionToMarkdownPaginated(session.jsonl_path, {
+      sessionId,
+      projectPath: session.project_path,
+      previousSessionId: session.previous_session_id ?? undefined,
+      messageLimit: messageLimit === 0 ? undefined : messageLimit,
+      messageOffset,
+    });
+    return Response.json({
+      markdown: result.markdown,
+      session_id: sessionId,
+      total_messages: result.totalMessages,
+      render_start: result.renderStart,
+      render_end: result.renderEnd,
+      has_earlier: result.renderStart > 0,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return Response.json({ error: msg }, { status: 500 });
   }
 }

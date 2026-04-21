@@ -6,7 +6,7 @@ import { SessionListItem } from "@/lib/types";
 import { StatusBadge } from "./StatusBadge";
 import { cn, formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
-import { GitBranch, Archive } from "lucide-react";
+import { GitBranch, Archive, Cloud } from "lucide-react";
 
 interface SessionListItemProps {
   session: SessionListItem;
@@ -61,8 +61,11 @@ function getSessionTitle(session: SessionListItem): string {
   if (session.custom_name) return session.custom_name;
   if (session.generated_title) return session.generated_title;
   if (session.first_prompt) {
-    const text = session.first_prompt;
+    let text = session.first_prompt;
     if (text.startsWith("[Request interrupted")) return session.session_id.slice(0, 8) + "...";
+    // Strip <context> blocks (before or after user message) so list shows actual content
+    text = text.replace(/<context>[\s\S]*?<\/context>/gi, "").trim();
+    if (!text) return session.session_id.slice(0, 8) + "...";
     const firstLine = text.split("\n")[0].trim();
     return firstLine.length > 100 ? firstLine.slice(0, 100) + "..." : firstLine;
   }
@@ -89,13 +92,15 @@ export const SessionListItemComponent = memo(
     const lastMessagePreview = truncatePreview(session.last_message, 120);
     const totalTokens = session.total_input_tokens + session.total_output_tokens;
 
-    const href = highlightQuery
-      ? `/claude-sessions/${session.session_id}?q=${encodeURIComponent(highlightQuery)}`
-      : `/claude-sessions/${session.session_id}`;
+    const nodeParam = session._remote && session._nodeId ? `node=${session._nodeId}` : "";
+    const qParam = highlightQuery ? `q=${encodeURIComponent(highlightQuery)}` : "";
+    const queryString = [nodeParam, qParam].filter(Boolean).join("&");
+    const href = `/claude-sessions/${session.session_id}${queryString ? `?${queryString}` : ""}`;
 
     return (
       <Link
         href={href}
+        prefetch={false}
         className={cn(
           "group/item block py-2.5 mx-1 rounded cursor-pointer transition-colors relative",
           selected
@@ -116,6 +121,11 @@ export const SessionListItemComponent = memo(
           <StatusBadge status={activityStatus} className="mt-1" />
           <div className="flex-1 min-w-0">
             <div className="flex items-baseline gap-1.5 min-w-0">
+              {session._remote && (
+                <span title={session._nodeName || "Remote"}>
+                  <Cloud className="h-3 w-3 text-sky-500 shrink-0 relative top-[1px]" />
+                </span>
+              )}
               <span className="text-[13px] font-medium min-w-0 flex-1 leading-snug line-clamp-2">
                 {title}
               </span>
@@ -164,6 +174,12 @@ export const SessionListItemComponent = memo(
                   {session.git_branch}
                 </span>
               )}
+              {session.agent_type === "forge" && (
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-orange-400/80 px-1 py-0.5 rounded border border-orange-400/20 bg-orange-500/5">forge</span>
+              )}
+              {session.agent_type === "codex" && (
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-violet-400/80 px-1 py-0.5 rounded border border-violet-400/20 bg-violet-500/5">codex</span>
+              )}
             </div>
           </div>
         </div>
@@ -183,6 +199,7 @@ export const SessionListItemComponent = memo(
       prev.session.message_count === next.session.message_count &&
       prev.session.is_active === next.session.is_active &&
       prev.session.last_message_role === next.session.last_message_role &&
+      prev.session._remote === next.session._remote &&
       prev.selected === next.selected &&
       prev.snippet === next.snippet &&
       prev.highlightQuery === next.highlightQuery &&

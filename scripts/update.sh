@@ -8,7 +8,24 @@ echo "=== Claude Session Manager — Update ==="
 
 # 1. Pull latest from GitHub
 echo "[1/4] Pulling latest code..."
-git pull --ff-only origin main
+
+STASHED=false
+if ! git diff --quiet HEAD; then
+  git stash
+  STASHED=true
+fi
+
+if ! git pull --rebase origin main; then
+  echo "ERROR: git pull failed"
+  exit 1
+fi
+
+if [ "$STASHED" = true ]; then
+  if ! git stash pop; then
+    echo "ERROR: Merge conflict during git stash pop. Please resolve manually."
+    exit 1
+  fi
+fi
 
 # 2. Install dependencies (only if package.json changed)
 if git diff HEAD~1 --name-only 2>/dev/null | grep -q "package.json"; then

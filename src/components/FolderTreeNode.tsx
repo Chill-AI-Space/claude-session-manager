@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronRight, Folder, FolderOpen, Loader2 } from "lucide-react";
+import { useState, useRef } from "react";
+import { ChevronRight, Folder, FolderOpen, FolderPlus, Loader2 } from "lucide-react";
 import { QuasarIcon } from "@/components/QuasarIcon";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface FolderEntry {
@@ -35,23 +37,56 @@ export function FolderTreeNode({
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FolderEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const newFolderRef = useRef<HTMLInputElement>(null);
+
+  const loadChildren = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/browse?path=${encodeURIComponent(path)}`);
+      const data = await res.json();
+      setChildren(data.entries || []);
+    } catch {
+      setChildren([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const toggle = async () => {
-    if (!hasChildren) return;
+    if (!hasChildren && !expanded) return;
 
     if (!expanded && children === null) {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/browse?path=${encodeURIComponent(path)}`);
-        const data = await res.json();
-        setChildren(data.entries || []);
-      } catch {
-        setChildren([]);
-      } finally {
-        setLoading(false);
-      }
+      await loadChildren();
     }
     setExpanded(!expanded);
+  };
+
+  const createFolder = async () => {
+    const folderName = newFolderName.trim();
+    if (!folderName) return;
+    try {
+      const res = await fetch("/api/browse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentPath: path, name: folderName }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setCreatingFolder(false);
+        setNewFolderName("");
+        // Refresh children
+        await loadChildren();
+        if (!expanded) setExpanded(true);
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleCreateClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCreatingFolder(true);
+    setTimeout(() => newFolderRef.current?.focus(), 50);
   };
 
   const isLaunching = launchingPath === path;
@@ -65,7 +100,7 @@ export function FolderTreeNode({
         <button
           onClick={toggle}
           className="flex items-center gap-1 flex-1 min-w-0 text-left"
-          disabled={!hasChildren}
+          disabled={!hasChildren && !expanded}
         >
           <ChevronRight
             className={cn(
@@ -80,6 +115,13 @@ export function FolderTreeNode({
             <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
           )}
           <span className="text-xs text-foreground truncate">{name}</span>
+        </button>
+        <button
+          onClick={handleCreateClick}
+          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground"
+          title="New subfolder"
+        >
+          <FolderPlus className="h-3.5 w-3.5" />
         </button>
         {onSelect ? (
           <button
@@ -116,6 +158,33 @@ export function FolderTreeNode({
           </>
         )}
       </div>
+
+      {/* Inline create folder input */}
+      {creatingFolder && (
+        <div
+          className="flex items-center gap-1.5 py-1 px-2"
+          style={{ paddingLeft: (depth + 1) * 20 + 8 }}
+        >
+          <FolderPlus className="h-3 w-3 text-muted-foreground shrink-0" />
+          <Input
+            ref={newFolderRef}
+            placeholder="New folder name..."
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") createFolder();
+              if (e.key === "Escape") { setCreatingFolder(false); setNewFolderName(""); }
+            }}
+            className="h-6 text-xs flex-1"
+          />
+          <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={createFolder} disabled={!newFolderName.trim()}>
+            Create
+          </Button>
+          <Button size="sm" variant="ghost" className="h-6 px-1 text-xs text-muted-foreground" onClick={() => { setCreatingFolder(false); setNewFolderName(""); }}>
+            ✕
+          </Button>
+        </div>
+      )}
 
       {expanded && (
         <div>

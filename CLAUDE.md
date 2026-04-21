@@ -18,6 +18,38 @@ npm run build        # production build
 npm run start        # production server (http://localhost:3000)
 ```
 
+## macOS quick start
+
+Prerequisites: **Node.js 18+** (20+ recommended), **Git**.
+
+```bash
+git clone https://github.com/Chill-AI-Space/claude-session-manager.git
+cd claude-session-manager
+npm install
+scripts/install-mac.sh
+```
+
+`install-mac.sh` does everything: builds the project, creates a launchd service (auto-starts on login), and verifies the server + menu bar icon are running.
+
+After install: white spiral icon appears in the menu bar (Open Session Manager / Babysitter ON-OFF / Quit).
+
+**Uninstall:** `scripts/install-mac.sh --uninstall`
+
+Optional extras:
+- **Claude CLI** (`npm i -g @anthropic-ai/claude-code`) — needed to start/reply to sessions from the UI
+- **ripgrep** (`brew install ripgrep`) — faster text search across sessions
+- **Gemini API key** — free at https://aistudio.google.com/apikey, add `GEMINI_API_KEY=your_key` to `.env.local` for AI-powered search
+
+After starting, go to **Settings → System Setup** to see which components are detected and what's missing.
+
+### Smoke test
+
+```bash
+scripts/smoke-test.sh
+```
+
+Works on both fresh installs (0 sessions) and populated instances. On clean install, data-dependent checks are skipped gracefully.
+
 ## Windows setup (one-click)
 
 Prerequisites: **Node.js 18+** (https://nodejs.org). Git optional (can download zip).
@@ -44,6 +76,28 @@ To update later: `scripts\update.bat`
 
 Always test on dev first, then deploy to production.
 **MANDATORY: After every deploy, run the health checks (step 3). If any check fails — fix and redeploy. Do NOT consider the deploy done until all checks pass.**
+
+### Hotfix rule for this repo
+
+For this repository, default to hotfixing safe, atomic, user-visible issues immediately:
+- fix the issue locally
+- verify with the smallest meaningful test or smoke check
+- commit and push to `main`
+- restart production or the local production-like server right away
+
+Do not leave a confirmed hotfix sitting only in the working tree unless the change is risky, broad, or explicitly blocked by the user.
+
+### Commit and push rule
+
+For this repository, do not leave completed feature work only in the working tree.
+
+After a feature or hotfix is verified locally with the smallest meaningful check:
+- commit it immediately
+- push directly to `main`
+- run the required health check or focused verification for the changed behavior
+- report the commit hash and what was verified
+
+Do not accumulate multiple finished changes in one uncommitted batch unless the user explicitly asks for that.
 
 ### 1. Start dev server and verify
 
@@ -85,7 +139,19 @@ sleep 3
 
 ### 3. Post-deploy health checks (MANDATORY)
 
-Run ALL of these after every deploy. If any returns non-200 or error — the deploy is broken.
+Run the smoke test after every deploy. It verifies server, APIs, data loading, MD pagination, and content rendering — not just HTTP 200.
+
+```bash
+# API smoke test (fast, 13 checks — server, APIs, data)
+scripts/smoke-test.sh
+
+# Browser smoke test (headless Chrome — catches React errors, hangs, empty UI)
+node scripts/browser-smoke-test.mjs
+```
+
+Both must pass. If any check fails — fix before considering the deploy done.
+
+For individual manual checks:
 
 ```bash
 # 1. Server process is alive
@@ -104,11 +170,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/settings
 tail -20 ~/Library/Logs/claude-session-manager.log
 tail -20 ~/Library/Logs/claude-session-manager-error.log
 
-# 6. Reply (spawn claude) works — critical check
-curl -s -X POST http://localhost:3000/api/sessions/$(curl -s http://localhost:3000/api/sessions | python3 -c "import json,sys; s=json.load(sys.stdin); print(s[0]['session_id'])" 2>/dev/null)/reply \
-  -H "Content-Type: application/json" -d '{"message":"ping"}' --max-time 30 | head -c 200
-
-# 7. Debug log pipeline ping (non-blocking — skip if debug_log_endpoint not set)
+# 6. Debug log pipeline ping (non-blocking — skip if debug_log_endpoint not set)
 curl -s -X POST http://localhost:3000/api/debug/ping | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'Debug ping: {d[\"status\"]} ({d.get(\"totalMs\",\"?\")}{\"ms\" if \"totalMs\" in d else \"\"})')"
 ```
 
@@ -128,6 +190,40 @@ curl -s -X POST http://localhost:3000/api/debug/ping | python3 -c "import json,s
 - **`spawn claude ENOENT`** — launchd PATH doesn't include `/Users/vova/.local/bin`. Fix: edit `~/Library/LaunchAgents/com.vova.claude-sessions.plist`, add `/Users/vova/.local/bin` to PATH, reload launchd.
 - **Tray icon not appearing** — run `node scripts/tray.js` manually to debug. If `tray_darwin_release` gets EACCES: `find ~/.cache/node-systray -name 'tray_darwin_*' -exec chmod +x {} \;`
 - **launchd keeps restarting/dying** — check `launchctl list com.vova.claude-sessions` for LastExitStatus; check both log files.
+
+### Scheduled jobs for Codex
+
+Use the built-in scheduler helper when you want Codex to "set up a cron job" without editing `crontab` manually.
+
+Install the minute-runner once:
+
+```bash
+node scripts/cron-runner.js install
+```
+
+Add a scheduled job:
+
+```bash
+node scripts/cron-runner.js add \
+  --name morning-review \
+  --cron "0 9 * * 1-5" \
+  --cwd /absolute/project/path \
+  --command "codex 'review the repo, summarize blockers, and update STATUS.md'"
+```
+
+Inspect jobs:
+
+```bash
+node scripts/cron-runner.js list
+```
+
+Remove a job:
+
+```bash
+node scripts/cron-runner.js remove --name morning-review
+```
+
+Details: [docs/cron-jobs.md](docs/cron-jobs.md)
 
 ### Common issues (Windows)
 
@@ -173,6 +269,101 @@ curl -X PUT http://localhost:3000/api/settings \
 
 Settings are immediately available — no restart needed. The UI reads them on page load.
 
+## Session Orchestrator (`src/lib/orchestrator.ts`)
+
+Centralized session lifecycle manager. All session operations (start, resume, stop, crash retry, stall continue) go through the orchestrator. API routes are thin wrappers.
+
+### Architecture
+
+```
+  Consumers (UI routes, remote relay, CLI, GCP VM)
+       │
+       ▼
+  SessionOrchestrator (singleton via globalThis)
+       │
+       ├── start(projectPath, message) → ReadableStream (SSE)
+       ├── resume(sessionId, message, projectPath) → ReadableStream (SSE)
+       ├── stop(sessionId) → { killed, pids }
+       ├── status(sessionId) → SessionState | null
+       ├── enqueueCrashRetry(sessionId, jsonlPath)
+       ├── enqueueStallContinue(sessionId)
+       ├── enqueueIncompleteExitResume(sessionId, jsonlPath)
+       ├── enqueuePermissionEscalation(sessionId)
+       └── enqueue({ sessionId, type, message, priority, delayMs }) → taskId
+                │
+                ▼
+           TaskQueue (priority + concurrency + dedup)
+```
+
+### Key concepts
+
+- **TaskQueue** — priority queue (high/normal/low) with concurrency limit (`orchestrator_max_concurrent`, default 3). Dedup by task ID (`type:sessionId`). Tasks can have delay (replaces old `setTimeout`). Delayed tasks wait in a timer, then enter the pending queue.
+- **State machine** — per-session phases: `idle → running → completed | crashed → retrying → running | stalled → continuing → running | failed`. States are in-memory only (not persisted to DB). Scanner re-detects crashes/stalls from JSONL on restart.
+- **EventEmitter** — emits `session:started`, `session:completed`, `session:crashed`, `session:retrying`, `session:stalled`, `session:continuing`, `session:failed`, `session:stopped`, `session:resumed`, `task:queued`.
+- **Singleton** — survives Next.js hot reload via `globalThis.__sessionOrchestrator`.
+- **Shared helpers** — `buildCliArgs()` and `parseStreamLine()` eliminate duplication between start/reply routes.
+
+### API endpoints
+
+```bash
+# Get orchestrator status (queue + all session states)
+curl http://localhost:3000/api/orchestrator
+
+# Enqueue a task (e.g. resume a session remotely)
+curl -X POST http://localhost:3000/api/orchestrator \
+  -H "Content-Type: application/json" \
+  -d '{"type":"resume","sessionId":"UUID","message":"continue please"}'
+```
+
+Task types: `start`, `resume`, `crash_retry`, `stall_continue`, `incomplete_exit`, `permission_escalation`.
+
+### Settings
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `orchestrator_max_concurrent` | `3` | Max simultaneous Claude processes |
+| `orchestrator_crash_retry_delay_ms` | `30000` | Delay before auto-retry after crash |
+| `orchestrator_stall_continue_delay_ms` | `10000` | Delay before auto-continue on stall |
+| `orchestrator_max_retries` | `3` | Max crash retries per session before marking as failed |
+
+### How scanner integrates (Session Babysitter)
+
+Scanner detects crashes/stalls/incomplete exits during JSONL scan and delegates to orchestrator. Four detection modes:
+
+- **Crash** (`last_message_role === "tool_result"`, new or repeated via `file_mtime` change) → `orchestrator.enqueueCrashRetry(sessionId, jsonlPath)`. The orchestrator checks for permission loops internally and escalates to terminal if needed. Repeated crashes (same `tool_result` role, different mtime) are now detected too.
+- **Stall** (`last_message_role === "assistant"`, silent >5min, process still alive) → `orchestrator.enqueueStallContinue(sessionId)`. The orchestrator asks Haiku LLM if Claude is waiting for user input before continuing.
+- **Incomplete exit** (`last_message_role === "assistant"`, `has_result = 0`, process dead) → `orchestrator.enqueueIncompleteExitResume(sessionId, jsonlPath)`. This is the "dead zone" case: Claude said "I'll do X" then the process died before executing. The `has_result` flag (presence of `type: "result"` event in JSONL) distinguishes genuine "waiting for reply" from abnormal exit. Post-scan `detectIncompleteExits()` also catches sessions skipped by incremental scan.
+- **Permission loop** (repeated permission errors in last 30 JSONL lines) → `orchestrator.enqueuePermissionEscalation(sessionId)`. Opens a terminal session with `--dangerously-skip-permissions`.
+
+### Using from external programs
+
+Any process that can make HTTP requests can control sessions:
+
+```bash
+# Start a new session
+curl -X POST http://localhost:3000/api/sessions/start \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/path/to/project","message":"fix the bug in auth.ts","agent":"claude"}'
+
+# Resume an existing session
+curl -X POST http://localhost:3000/api/sessions/{sessionId}/reply \
+  -H "Content-Type: application/json" \
+  -d '{"message":"now add tests"}'
+
+# Kill a session
+curl -X POST http://localhost:3000/api/sessions/{sessionId}/kill
+
+# Check orchestrator state
+curl http://localhost:3000/api/orchestrator
+
+# Enqueue a fire-and-forget task (no SSE stream back)
+curl -X POST http://localhost:3000/api/orchestrator \
+  -H "Content-Type: application/json" \
+  -d '{"type":"resume","sessionId":"UUID","message":"continue","priority":"high"}'
+```
+
+Start and reply return SSE streams (`text/event-stream`). Events: `session_id`, `text`, `status`, `done`, `error`.
+
 ## Cross-platform development rules
 
 When writing new code, follow these rules to keep Windows compatibility:
@@ -186,3 +377,28 @@ When writing new code, follow these rules to keep Windows compatibility:
 - **Signals**: `SIGTERM`/`SIGKILL` work differently. Use `proc.kill()` without arguments for cross-platform compatibility
 - **Line endings**: JSONL parsing should handle `\r\n` (use `split(/\r?\n/)`)
 - **Path in Claude projects dir**: `pathToProjectDir()` replaces both `/` and `\` with `-`
+
+## Sessions Choreography
+
+The babysitter watches all sessions and auto-retries crashes and stalls. For explicit control — delegation, self-alarm, coordinator pattern — see the dedicated guides:
+
+- **[Delegation Guide](docs/delegation-guide.md)** — simple delegation, commit rules, alarm, Codex specifics, coordinator pattern overview
+- **[Coordinator Prompt Template](docs/coordinator-prompt-template.md)** — full template for running a multi-iteration plan with workers
+
+**Quick reference — your session ID:**
+```bash
+curl -s "http://localhost:3000/api/sessions/my-id?path=$(pwd)"
+```
+
+**Quick reference — spawn a sub-session:**
+```bash
+curl -s -X POST "http://localhost:3000/api/sessions/start" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/abs/path","message":"task","reply_to_session_id":"YOUR_ID","agent":"claude"}'
+```
+
+**Rule: commit before passing work to another session.** Uncommitted changes are invisible across session boundaries.
+
+### Приоритет задач — не спрашивай, действуй
+
+Если все задачи нужны и вопрос только в порядке выполнения — **не спрашивай**. Выбери наиболее логичный порядок (критический баг → блокеры → параллельные задачи) и начинай. Спрашивать о порядке имеет смысл только если одна задача **отменяет** другую.

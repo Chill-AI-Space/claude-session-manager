@@ -21,11 +21,12 @@ export async function GET() {
   }
 
   const encoder = new TextEncoder();
+  let closed = false;
+  let keepalive: ReturnType<typeof setInterval>;
+  let unsubscribe: () => void;
 
   const stream = new ReadableStream({
     start(controller) {
-      let closed = false;
-
       function send(entry: LogEntry) {
         if (closed) return;
         try {
@@ -54,7 +55,7 @@ export async function GET() {
       sendComment("live stream starting");
 
       // Subscribe to new entries
-      const unsubscribe = subscribe((entry) => {
+      unsubscribe = subscribe((entry) => {
         if (closed) {
           unsubscribe();
           return;
@@ -63,7 +64,7 @@ export async function GET() {
       });
 
       // Keepalive
-      const keepalive = setInterval(() => {
+      keepalive = setInterval(() => {
         if (closed) {
           clearInterval(keepalive);
           unsubscribe();
@@ -71,6 +72,11 @@ export async function GET() {
         }
         sendComment("keepalive");
       }, 15_000);
+    },
+    cancel() {
+      closed = true;
+      clearInterval(keepalive);
+      unsubscribe?.();
     },
   });
 

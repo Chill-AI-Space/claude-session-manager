@@ -7,12 +7,30 @@ echo === Claude Session Manager — Update ===
 
 REM 1. Pull latest
 echo [1/4] Pulling latest code...
-git pull --ff-only origin main
+
+REM Check for local changes
+git diff --quiet HEAD
 if errorlevel 1 (
-    echo ERROR: git pull failed. Do you have uncommitted changes?
-    echo Try: git stash && scripts\update.bat && git stash pop
+    set HAS_CHANGES=1
+    git stash
+) else (
+    set HAS_CHANGES=0
+)
+
+git pull --rebase origin main
+if errorlevel 1 (
+    echo ERROR: git pull failed
     pause
     exit /b 1
+)
+
+if %HAS_CHANGES%==1 (
+    git stash pop
+    if errorlevel 1 (
+        echo ERROR: Merge conflict during git stash pop. Please resolve manually.
+        pause
+        exit /b 1
+    )
 )
 
 REM 2. Install dependencies

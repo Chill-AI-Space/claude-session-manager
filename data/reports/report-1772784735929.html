@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token Cost by Project — Last 30 Days</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0a; color: #e5e5e5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 2rem 1rem; }
+.container { max-width: 900px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin-bottom: 0.3rem; }
+.subtitle { color: #888; margin-bottom: 1.5rem; font-size: 0.9rem; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+.metric { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1rem; }
+.metric .label { color: #888; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.metric .value { font-size: 1.4rem; font-weight: 600; margin-top: 0.3rem; }
+.card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }
+.card h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+canvas { max-height: 400px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #2a2a2a; }
+th { color: #888; font-weight: 500; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
+td:nth-child(n+3) { text-align: right; }
+th:nth-child(n+3) { text-align: right; }
+tr:hover { background: #222; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>Token Cost by Project</h1>
+    <p class="subtitle">Last 30 days (since 2026-02-04) — main sessions only</p>
+
+    <div class="metrics">
+        <div class="metric"><div class="label">Total Tokens</div><div class="value">7.8B</div></div>
+        <div class="metric"><div class="label">Est. Cost</div><div class="value" style="color:#f59e0b">$16982</div></div>
+        <div class="metric"><div class="label">Projects</div><div class="value">49</div></div>
+        <div class="metric"><div class="label">Sessions</div><div class="value">654</div></div>
+    </div>
+
+    <div class="card">
+        <h2>Top Projects by Token Usage</h2>
+        <canvas id="barChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h2>Estimated Cost (USD) — Top 10</h2>
+        <canvas id="costChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h2>All Projects</h2>
+        <table>
+            <thead><tr><th>#</th><th>Project</th><th>Sessions</th><th>Tokens</th><th>Share</th><th>Est. Cost</th></tr></thead>
+            <tbody><tr>
+        <td>1</td>
+        <td>vova</td>
+        <td>110</td>
+        <td>1805.5M</td>
+        <td>23.2%</td>
+        <td>$3814.56</td>
+    </tr><tr>
+        <td>2</td>
+        <td>improvado/notes</td>
+        <td>55</td>
+        <td>1114.9M</td>
+        <td>14.3%</td>
+        <td>$2435.43</td>
+    </tr><tr>
+        <td>3</td>
+        <td>candidate/routing</td>
+        <td>33</td>
+        <td>872.3M</td>
+        <td>11.2%</td>
+        <td>$1807.44</td>
+    </tr><tr>
+        <td>4</td>
+        <td>skillset/analytics</td>
+        <td>38</td>
+        <td>713.5M</td>
+        <td>9.2%</td>
+        <td>$1493.13</td>
+    </tr><tr>
+        <td>5</td>
+        <td>skillset/ai</td>
+        <td>32</td>
+        <td>617.8M</td>
+        <td>7.9%</td>
+        <td>$1280.04</td>
+    </tr><tr>
+        <td>6</td>
+        <td>Documents</td>
+        <td>42</td>
+        <td>488.3M</td>
+        <td>6.3%</td>
+        <td>$1081.16</td>
+    </tr><tr>
+        <td>7</td>
+        <td>claude/session/manager</td>
+        <td>193</td>
+        <td>425.9M</td>
+        <td>5.5%</td>
+        <td>$1061.62</td>
+    </tr><tr>
+        <td>8</td>
+        <td>interview/engine</td>
+        <td>19</td>
+        <td>323.8M</td>
+        <td>4.2%</td>
+        <td>$673.21</td>
+    </tr><tr>
+        <td>9</td>
+        <td>aichill/content</td>
+        <td>20</td>
+        <td>206.1M</td>
+        <td>2.6%</td>
+        <td>$445.37</td>
+    </tr><tr>
+        <td>10</td>
+        <td>inbox/processing</td>
+        <td>3</td>
+        <td>145.1M</td>
+        <td>1.9%</td>
+        <td>$294.65</td>
+    </tr><tr>
+        <td>11</td>
+        <td>linkedin/messenger</td>
+        <td>7</td>
+        <td>128.8M</td>
+        <td>1.7%</td>
+        <td>$251.46</td>
+    </tr><tr>
+        <td>12</td>
+        <td>prompts</td>
+        <td>2</td>
+        <td>109.9M</td>
+        <td>1.4%</td>
+        <td>$329.69</td>
+    </tr><tr>
+        <td>13</td>
+        <td>skillset/landing/pages</td>
+        <td>2</td>
+        <td>87.2M</td>
+        <td>1.1%</td>
+        <td>$191.42</td>
+    </tr><tr>
+        <td>14</td>
+        <td>behalf/chrome/extension</td>
+        <td>5</td>
+        <td>65.6M</td>
+        <td>0.8%</td>
+        <td>$145.64</td>
+    </tr><tr>
+        <td>15</td>
+        <td>/sessions</td>
+        <td>2</td>
+        <td>64.4M</td>
+        <td>0.8%</td>
+        <td>$217.94</td>
+    </tr><tr>
+        <td>16</td>
+        <td>claude/session/manager/src/app/api/teamhub</td>
+        <td>1</td>
+        <td>52.3M</td>
+        <td>0.7%</td>
+        <td>$125.98</td>
+    </tr><tr>
+        <td>17</td>
+        <td>web/analytics/setup</td>
+        <td>4</td>
+        <td>49.5M</td>
+        <td>0.6%</td>
+        <td>$108.26</td>
+    </tr><tr>
+        <td>18</td>
+        <td>ispy/recruiter</td>
+        <td>1</td>
+        <td>49.4M</td>
+        <td>0.6%</td>
+        <td>$97.90</td>
+    </tr><tr>
+        <td>19</td>
+        <td>vault/mcp</td>
+        <td>4</td>
+        <td>46.3M</td>
+        <td>0.6%</td>
+        <td>$109.74</td>
+    </tr><tr>
+        <td>20</td>
+        <td>context/trash/mcp</td>
+        <td>4</td>
+        <td>45.0M</td>
+        <td>0.6%</td>
+        <td>$131.52</td>
+    </tr><tr>
+        <td>21</td>
+        <td>improvado</td>
+        <td>3</td>
+        <td>41.2M</td>
+        <td>0.5%</td>
+        <td>$106.39</td>
+    </tr><tr>
+        <td>22</td>
+        <td>rnd/forge</td>
+        <td>6</td>
+        <td>34.4M</td>
+        <td>0.4%</td>
+        <td>$82.92</td>
+    </tr><tr>
+        <td>23</td>
+        <td>gitlab</td>
+        <td>2</td>
+        <td>32.9M</td>
+        <td>0.4%</td>
+        <td>$61.86</td>
+    </tr><tr>
+        <td>24</td>
+        <td>skillset/ads/bot</td>
+        <td>4</td>
+        <td>31.8M</td>
+        <td>0.4%</td>
+        <td>$67.60</td>
+    </tr><tr>
+        <td>25</td>
+        <td>claude/context/saver</td>
+        <td>1</td>
+        <td>20.9M</td>
+        <td>0.3%</td>
+        <td>$52.95</td>
+    </tr><tr>
+        <td>26</td>
+        <td>chillai/website</td>
+        <td>1</td>
+        <td>20.7M</td>
+        <td>0.3%</td>
+        <td>$51.98</td>
+    </tr><tr>
+        <td>27</td>
+        <td>/sessions/improvado/2</td>
+        <td>3</td>
+        <td>20.0M</td>
+        <td>0.3%</td>
+        <td>$44.77</td>
+    </tr><tr>
+        <td>28</td>
+        <td>recruiter/ai/coach</td>
+        <td>1</td>
+        <td>19.5M</td>
+        <td>0.3%</td>
+        <td>$46.56</td>
+    </tr><tr>
+        <td>29</td>
+        <td>/sessions/ispy/2</td>
+        <td>1</td>
+        <td>18.1M</td>
+        <td>0.2%</td>
+        <td>$32.62</td>
+    </tr><tr>
+        <td>30</td>
+        <td>moldsim/mcp</td>
+        <td>1</td>
+        <td>16.4M</td>
+        <td>0.2%</td>
+        <td>$33.59</td>
+    </tr><tr>
+        <td>31</td>
+        <td>vibe/sec</td>
+        <td>3</td>
+        <td>14.7M</td>
+        <td>0.2%</td>
+        <td>$37.84</td>
+    </tr><tr>
+        <td>32</td>
+        <td>/sessions/skillset/3</td>
+        <td>1</td>
+        <td>13.8M</td>
+        <td>0.2%</td>
+        <td>$25.62</td>
+    </tr><tr>
+        <td>33</td>
+        <td>payment/duties</td>
+        <td>3</td>
+        <td>12.2M</td>
+        <td>0.2%</td>
+        <td>$24.86</td>
+    </tr><tr>
+        <td>34</td>
+        <td>GitHub</td>
+        <td>8</td>
+        <td>11.4M</td>
+        <td>0.1%</td>
+        <td>$36.29</td>
+    </tr><tr>
+        <td>35</td>
+        <td>job/posting</td>
+        <td>1</td>
+        <td>9.4M</td>
+        <td>0.1%</td>
+        <td>$20.27</td>
+    </tr><tr>
+        <td>36</td>
+        <td>skillset</td>
+        <td>3</td>
+        <td>8.8M</td>
+        <td>0.1%</td>
+        <td>$25.72</td>
+    </tr><tr>
+        <td>37</td>
+        <td>claude/context/compact/prevent</td>
+        <td>4</td>
+        <td>8.1M</td>
+        <td>0.1%</td>
+        <td>$23.91</td>
+    </tr><tr>
+        <td>38</td>
+        <td>skillset/candidate/bot</td>
+        <td>1</td>
+        <td>6.6M</td>
+        <td>0.1%</td>
+        <td>$12.96</td>
+    </tr><tr>
+        <td>39</td>
+        <td>/sessions/chillai/2</td>
+        <td>1</td>
+        <td>6.4M</td>
+        <td>0.1%</td>
+        <td>$11.71</td>
+    </tr><tr>
+        <td>40</td>
+        <td>teamhub</td>
+        <td>4</td>
+        <td>5.2M</td>
+        <td>0.1%</td>
+        <td>$21.06</td>
+    </tr><tr>
+        <td>41</td>
+        <td>multi/playwright</td>
+        <td>3</td>
+        <td>5.1M</td>
+        <td>0.1%</td>
+        <td>$13.74</td>
+    </tr><tr>
+        <td>42</td>
+        <td>claude/session/anonymizer</td>
+        <td>1</td>
+        <td>2.5M</td>
+        <td>0.0%</td>
+        <td>$10.22</td>
+    </tr><tr>
+        <td>43</td>
+        <td>context/saver</td>
+        <td>2</td>
+        <td>2.3M</td>
+        <td>0.0%</td>
+        <td>$10.56</td>
+    </tr><tr>
+        <td>44</td>
+        <td>linkedin/job/posting/prompts</td>
+        <td>2</td>
+        <td>2.1M</td>
+        <td>0.0%</td>
+        <td>$4.17</td>
+    </tr><tr>
+        <td>45</td>
+        <td>claude/session/manager/src/app/claude/sessions</td>
+        <td>1</td>
+        <td>2.1M</td>
+        <td>0.0%</td>
+        <td>$9.64</td>
+    </tr><tr>
+        <td>46</td>
+        <td>ai/doer/platform</td>
+        <td>1</td>
+        <td>1.6M</td>
+        <td>0.0%</td>
+        <td>$6.96</td>
+    </tr><tr>
+        <td>47</td>
+        <td>personal/gateway</td>
+        <td>1</td>
+        <td>1.2M</td>
+        <td>0.0%</td>
+        <td>$3.51</td>
+    </tr><tr>
+        <td>48</td>
+        <td>skillset/core</td>
+        <td>1</td>
+        <td>0.5M</td>
+        <td>0.0%</td>
+        <td>$2.59</td>
+    </tr><tr>
+        <td>49</td>
+        <td>tmp</td>
+        <td>13</td>
+        <td>0.4M</td>
+        <td>0.0%</td>
+        <td>$2.51</td>
+    </tr></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+const colors = ['#6366f1','#8b5cf6','#a78bfa','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899','#14b8a6','#f97316','#84cc16','#78716c','#94a3b8'];
+Chart.defaults.color = '#888';
+Chart.defaults.borderColor = '#2a2a2a';
+
+new Chart(document.getElementById('barChart'), {
+    type: 'bar',
+    data: {
+        labels: ["vova", "improvado/notes", "candidate/routing", "skillset/analytics", "skillset/ai", "Documents", "claude/session/manager", "interview/engine", "aichill/content", "inbox/processing", "linkedin/messenger", "prompts", "Other"],
+        datasets: [
+            { label: 'Input', data: [186969, 254632, 71901, 146083, 182587, 96729, 51506, 62222, 35022, 4877, 8016, 10073, 117174], backgroundColor: '#6366f1' },
+            { label: 'Output', data: [3043161, 2699395, 1792911, 1761833, 1281648, 1100754, 1314136, 518188, 459768, 213611, 320818, 537490, 2110662], backgroundColor: '#8b5cf6' },
+            { label: 'Cache', data: [1802243150, 1111949172, 870402317, 711549072, 616353709, 487104671, 424553839, 323208012, 205602483, 144836008, 128490486, 109400852, 827761894], backgroundColor: '#06b6d4' }
+        ]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+            x: { stacked: true, ticks: { maxRotation: 45 } },
+            y: { stacked: true, ticks: { callback: v => (v/1e6).toFixed(0)+'M' } }
+        }
+    }
+});
+
+new Chart(document.getElementById('costChart'), {
+    type: 'bar',
+    data: {
+        labels: ["vova", "improvado/notes", "candidate/routing", "skillset/analytics", "skillset/ai", "Documents", "claude/session/manager", "interview/engine", "aichill/content", "inbox/processing"],
+        datasets: [{ label: 'Est. USD', data: [3814.56, 2435.43, 1807.44, 1493.13, 1280.04, 1081.16, 1061.62, 673.21, 445.37, 294.65], backgroundColor: colors.slice(0, 10) }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { x: { ticks: { callback: v => '$'+v } } }
+    }
+});
+</script>
+</body>
+</html>

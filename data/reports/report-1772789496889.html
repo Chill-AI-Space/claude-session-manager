@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сессии с долгими объяснениями</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; color: #e5e5e5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 2rem 1rem; }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; color: #a78bfa; }
+  .subtitle { color: #888; font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem; }
+  .metric-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1rem; text-align: center; }
+  .metric-value { font-size: 1.8rem; font-weight: 700; color: #6366f1; }
+  .metric-label { font-size: 0.8rem; color: #888; margin-top: 0.25rem; }
+  .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem; }
+  .card h2 { font-size: 1rem; color: #8b5cf6; margin-bottom: 1rem; }
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th { text-align: left; padding: 0.5rem; color: #888; border-bottom: 1px solid #2a2a2a; font-weight: 500; }
+  td { padding: 0.5rem; border-bottom: 1px solid #1a1a1a; }
+  tr:hover { background: #151515; }
+  .project-tag { background: #2a2a2a; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; color: #a78bfa; }
+  .prompt-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #999; }
+  .mini-bar { width: 50px; height: 4px; background: #2a2a2a; border-radius: 2px; margin-top: 2px; display: inline-block; }
+  .mini-bar-fill { height: 100%; background: #ef4444; border-radius: 2px; }
+  canvas { max-height: 220px; }
+  .explanation { color: #777; font-size: 0.8rem; margin-top: 0.75rem; line-height: 1.4; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Сессии с долгими объяснениями</h1>
+  <p class="subtitle">Где вы тратили много сообщений на уточнения, а Claude мало делал (инструменты не вызывал)</p>
+
+  <div class="metrics">
+    <div class="metric-card">
+      <div class="metric-value">3</div>
+      <div class="metric-label">Сессий с высоким effort (score 5+)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">78%</div>
+      <div class="metric-label">Средний % уточнений в топ-20</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">16</div>
+      <div class="metric-label">Макс. user-сообщений в топ-1</div>
+    </div>
+  </div>
+
+  <div class="charts-row">
+    <div class="card">
+      <h2>Распределение Effort Score</h2>
+      <canvas id="distChart"></canvas>
+      <p class="explanation">Effort = (user_msgs / tool_calls) * log(user_msgs). Чем выше — тем больше объясняли.</p>
+    </div>
+    <div class="card">
+      <h2>User Messages vs Tool Calls (топ-20)</h2>
+      <canvas id="scatterChart"></canvas>
+      <p class="explanation">Верхний левый угол = много сообщений, мало действий.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Топ-20 сессий с наибольшим количеством уточнений</h2>
+    <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>#</th><th>Проект</th><th>Первый промпт</th><th>User msgs</th><th>Tools</th><th>% уточнений</th><th>Время</th><th>Дата</th></tr>
+      </thead>
+      <tbody>
+        
+    <tr>
+        <td>1</td>
+        <td><span class="project-tag">-Users-vova</span></td>
+        <td class="prompt-cell" title="Мы с тобой делали задачу, которая заключается в разработке приложения. Ну, я и не знаю, или какого-то тула внутреннего д">Мы с тобой делали задачу, которая заключается в разработке приложения. Ну, я и н...</td>
+        <td>16</td>
+        <td>0</td>
+        <td>100%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:100%"></div></div>
+        </td>
+        <td>5.8m</td>
+        <td>2026-02-17</td>
+    </tr>
+    <tr>
+        <td>2</td>
+        <td><span class="project-tag">skillset-analytics</span></td>
+        <td class="prompt-cell" title="лимит есть?">лимит есть?</td>
+        <td>8</td>
+        <td>0</td>
+        <td>100%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:100%"></div></div>
+        </td>
+        <td>5571.7m</td>
+        <td>2026-02-27</td>
+    </tr>
+    <tr>
+        <td>3</td>
+        <td><span class="project-tag">-Users-vova</span></td>
+        <td class="prompt-cell" title="Открой google.com через playwright и скажи, какой порт
+  используется
+
+">Открой google.com через playwright и скажи, какой порт
+  используется
+
+</td>
+        <td>17</td>
+        <td>3</td>
+        <td>80%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:80%"></div></div>
+        </td>
+        <td>4.4m</td>
+        <td>2026-02-19</td>
+    </tr>
+    <tr>
+        <td>4</td>
+        <td><span class="project-tag">-Users-vova-Documents</span></td>
+        <td class="prompt-cell" title="А ты можешь сказать, в каком профиле Хрома ты находишься? В личном или с Killset AI? ">А ты можешь сказать, в каком профиле Хрома ты находишься? В личном или с Killset...</td>
+        <td>6</td>
+        <td>0</td>
+        <td>100%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:100%"></div></div>
+        </td>
+        <td>1587.0m</td>
+        <td>2026-03-01</td>
+    </tr>
+    <tr>
+        <td>5</td>
+        <td><span class="project-tag">-Users-vova-Documents</span></td>
+        <td class="prompt-cell" title="Три помогаю коллеги настроить клод. Сейчас мы столкнулись с тем, что он не может анализировать Excel.У нее очень древнен">Три помогаю коллеги настроить клод. Сейчас мы столкнулись с тем, что он не может...</td>
+        <td>6</td>
+        <td>0</td>
+        <td>100%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:100%"></div></div>
+        </td>
+        <td>22.0m</td>
+        <td>2026-02-24</td>
+    </tr>
+    <tr>
+        <td>6</td>
+        <td><span class="project-tag">-Users-vova-Documents</span></td>
+        <td class="prompt-cell" title="Слушай, какая-то беда: у меня все клауд-коды сессии постоянно отваливаются и перестают работать. Это у меня локально или">Слушай, какая-то беда: у меня все клауд-коды сессии постоянно отваливаются и пер...</td>
+        <td>6</td>
+        <td>0</td>
+        <td>100%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:100%"></div></div>
+        </td>
+        <td>0.5m</td>
+        <td>2026-02-25</td>
+    </tr>
+    <tr>
+        <td>7</td>
+        <td><span class="project-tag">-Users-vova</span></td>
+        <td class="prompt-cell" title="Мне появилась такая идея, дикая достаточно.
+
+У нас сейчас есть такая тема, как session-оркестратор, который между всеми ">Мне появилась такая идея, дикая достаточно.
+
+У нас сейчас есть такая тема, как s...</td>
+        <td>31</td>
+        <td>10</td>
+        <td>89%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:89%"></div></div>
+        </td>
+        <td>38.1m</td>
+        <td>2026-02-20</td>
+    </tr>
+    <tr>
+        <td>8</td>
+        <td><span class="project-tag">candidate-routing</span></td>
+        <td class="prompt-cell" title="давай ты будем моим асистантом в линкидине. я буду отправлять тебе всю информацию по кандидату. ты будеш его добавлять в">давай ты будем моим асистантом в линкидине. я буду отправлять тебе всю информаци...</td>
+        <td>388</td>
+        <td>223</td>
+        <td>72%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:72%"></div></div>
+        </td>
+        <td>1667.6m</td>
+        <td>2026-03-04</td>
+    </tr>
+    <tr>
+        <td>9</td>
+        <td><span class="project-tag">-Users-vova</span></td>
+        <td class="prompt-cell" title="Не могу понять, как сделать Git &quot;Pool&quot; в Obsidian. ">Не могу понять, как сделать Git &quot;Pool&quot; в Obsidian. </td>
+        <td>28</td>
+        <td>10</td>
+        <td>86%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:86%"></div></div>
+        </td>
+        <td>11.7m</td>
+        <td>2026-02-21</td>
+    </tr>
+    <tr>
+        <td>10</td>
+        <td><span class="project-tag">-Users-vova</span></td>
+        <td class="prompt-cell" title="А ты можешь от имени Google Chrome профайла Skillset открыть этот ноушен-документ по CastDev и прочитать его?
+
+Как сможе">А ты можешь от имени Google Chrome профайла Skillset открыть этот ноушен-докумен...</td>
+        <td>40</td>
+        <td>16</td>
+        <td>71%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:71%"></div></div>
+        </td>
+        <td>9.5m</td>
+        <td>2026-02-19</td>
+    </tr>
+    <tr>
+        <td>11</td>
+        <td><span class="project-tag">-Users-vova</span></td>
+        <td class="prompt-cell" title="ls">ls</td>
+        <td>575</td>
+        <td>511</td>
+        <td>92%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:92%"></div></div>
+        </td>
+        <td>6369.5m</td>
+        <td>2026-02-10</td>
+    </tr>
+    <tr>
+        <td>12</td>
+        <td><span class="project-tag">vibe-sec</span></td>
+        <td class="prompt-cell" title="А ты можешь открыть Chrome в профайле Айчил и там настроить на M-chip правильную конфигурацию домена?
+
+Заверши создание ">А ты можешь открыть Chrome в профайле Айчил и там настроить на M-chip правильную...</td>
+        <td>7</td>
+        <td>1</td>
+        <td>100%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:100%"></div></div>
+        </td>
+        <td>5.0m</td>
+        <td>2026-02-19</td>
+    </tr>
+    <tr>
+        <td>13</td>
+        <td><span class="project-tag">-Users-vova</span></td>
+        <td class="prompt-cell" title="⏺ Настройки правильные (skillset), но MCP всё ещё         
+  запускает старый chillai профиль. Значит, есть override 
+  ">⏺ Настройки правильные (skillset), но MCP всё ещё         
+  запускает старый ch...</td>
+        <td>172</td>
+        <td>113</td>
+        <td>67%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:67%"></div></div>
+        </td>
+        <td>1030.9m</td>
+        <td>2026-02-19</td>
+    </tr>
+    <tr>
+        <td>14</td>
+        <td><span class="project-tag">-Users-vova</span></td>
+        <td class="prompt-cell" title="Можешь, пожалуйста, провести анализ моих публичных репозиториев, в которые открыты, и выбрать все, которые нужно скрыть?">Можешь, пожалуйста, провести анализ моих публичных репозиториев, в которые откры...</td>
+        <td>1138</td>
+        <td>977</td>
+        <td>55%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:55%"></div></div>
+        </td>
+        <td>2324.9m</td>
+        <td>2026-02-17</td>
+    </tr>
+    <tr>
+        <td>15</td>
+        <td><span class="project-tag">-Users-vova</span></td>
+        <td class="prompt-cell" title="Сегодня мы с тобой сделали репозиторий по сканированию безопасности. Была вот такая команда для рана:
+
+&quot;Как сказать, как">Сегодня мы с тобой сделали репозиторий по сканированию безопасности. Была вот та...</td>
+        <td>635</td>
+        <td>542</td>
+        <td>58%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:58%"></div></div>
+        </td>
+        <td>1057.2m</td>
+        <td>2026-02-18</td>
+    </tr>
+    <tr>
+        <td>16</td>
+        <td><span class="project-tag">claude-session-manager</span></td>
+        <td class="prompt-cell" title="Implement the following plan:
+
+# Plan: Files Tab — Dual Search + GDrive Source Switcher
+
+## Context
+User wants two featu">Implement the following plan:
+
+# Plan: Files Tab — Dual Search + GDrive Source S...</td>
+        <td>1254</td>
+        <td>1110</td>
+        <td>48%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:48%"></div></div>
+        </td>
+        <td>1846.9m</td>
+        <td>2026-03-04</td>
+    </tr>
+    <tr>
+        <td>17</td>
+        <td><span class="project-tag">-Users-vova</span></td>
+        <td class="prompt-cell" title="⏺ Конфиг с /sse на месте, но Webflow MCP не загрузился. Скорее
+  всего mcp-remote не смог подключиться к
+  https://mcp.w">⏺ Конфиг с /sse на месте, но Webflow MCP не загрузился. Скорее
+  всего mcp-remot...</td>
+        <td>875</td>
+        <td>829</td>
+        <td>66%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:66%"></div></div>
+        </td>
+        <td>926.0m</td>
+        <td>2026-02-17</td>
+    </tr>
+    <tr>
+        <td>18</td>
+        <td><span class="project-tag">inbox-processing</span></td>
+        <td class="prompt-cell" title="Смотри, мы там начинали процесс обработки входящих данных от кандидата. Застопорились на том моменте, что я точно не зна">Смотри, мы там начинали процесс обработки входящих данных от кандидата. Застопор...</td>
+        <td>611</td>
+        <td>539</td>
+        <td>57%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:57%"></div></div>
+        </td>
+        <td>622.2m</td>
+        <td>2026-02-23</td>
+    </tr>
+    <tr>
+        <td>19</td>
+        <td><span class="project-tag">-sessions</span></td>
+        <td class="prompt-cell" title="ТЗ готово и опубликовано: https://chillai.space/p/context-trash-spec?password=rYRpQ-Y8
+                                 ">ТЗ готово и опубликовано: https://chillai.space/p/context-trash-spec?password=rY...</td>
+        <td>528</td>
+        <td>447</td>
+        <td>54%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:54%"></div></div>
+        </td>
+        <td>863.6m</td>
+        <td>2026-03-05</td>
+    </tr>
+    <tr>
+        <td>20</td>
+        <td><span class="project-tag">candidate-routing</span></td>
+        <td class="prompt-cell" title="Implement the following plan:
+
+# On-Demand Interview Links via recruiter-assistant.com
+
+## Context
+
+Daily.co rooms e">Implement the following plan:
+
+# On-Demand Interview Links via recruiter-assista...</td>
+        <td>886</td>
+        <td>839</td>
+        <td>58%
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:58%"></div></div>
+        </td>
+        <td>685.4m</td>
+        <td>2026-02-26</td>
+    </tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="explanation">% уточнений = доля ответов Claude без вызова инструментов (чистый текст). Высокий % = Claude переспрашивал или объяснял вместо того, чтобы делать.</p>
+  </div>
+</div>
+
+<script>
+const colors = ['#6366f1','#8b5cf6','#a78bfa','#06b6d4','#10b981','#f59e0b','#ef4444'];
+Chart.defaults.color = '#888';
+Chart.defaults.borderColor = '#2a2a2a';
+
+new Chart(document.getElementById('distChart'), {
+  type: 'bar',
+  data: {
+    labels: ["0-1", "1-2", "2-3", "3-5", "5-8", "8-12", "12+"],
+    datasets: [{ data: [28, 203, 216, 22, 2, 0, 1], backgroundColor: colors, borderRadius: 4 }]
+  },
+  options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { grid: { color: '#1a1a1a' } }, x: { grid: { display: false } } } }
+});
+
+const scatterData = [{"x": 0, "y": 16, "label": "-Users-vova"}, {"x": 0, "y": 8, "label": "skillset-analytics"}, {"x": 3, "y": 17, "label": "-Users-vova"}, {"x": 0, "y": 6, "label": "-Users-vova-Documents"}, {"x": 0, "y": 6, "label": "-Users-vova-Documents"}, {"x": 0, "y": 6, "label": "-Users-vova-Documents"}, {"x": 10, "y": 31, "label": "-Users-vova"}, {"x": 223, "y": 388, "label": "candidate-routing"}, {"x": 10, "y": 28, "label": "-Users-vova"}, {"x": 16, "y": 40, "label": "-Users-vova"}, {"x": 511, "y": 575, "label": "-Users-vova"}, {"x": 1, "y": 7, "label": "vibe-sec"}, {"x": 113, "y": 172, "label": "-Users-vova"}, {"x": 977, "y": 1138, "label": "-Users-vova"}, {"x": 542, "y": 635, "label": "-Users-vova"}, {"x": 1110, "y": 1254, "label": "claude-session-manager"}, {"x": 829, "y": 875, "label": "-Users-vova"}, {"x": 539, "y": 611, "label": "inbox-processing"}, {"x": 447, "y": 528, "label": "-sessions"}, {"x": 839, "y": 886, "label": "candidate-routing"}];
+new Chart(document.getElementById('scatterChart'), {
+  type: 'scatter',
+  data: {
+    datasets: [{
+      data: scatterData,
+      backgroundColor: '#ef4444aa',
+      borderColor: '#ef4444',
+      pointRadius: 6,
+      pointHoverRadius: 8
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => scatterData[ctx.dataIndex].label + ': ' + ctx.parsed.y + ' msgs, ' + ctx.parsed.x + ' tools'
+        }
+      }
+    },
+    scales: {
+      x: { title: { display: true, text: 'Tool Calls' }, grid: { color: '#1a1a1a' } },
+      y: { title: { display: true, text: 'User Messages' }, grid: { color: '#1a1a1a' } }
+    }
+  }
+});
+</script>
+</body>
+</html>
