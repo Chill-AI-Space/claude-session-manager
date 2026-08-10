@@ -61,6 +61,24 @@ function psQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+function encodePowerShellCommand(script: string): string {
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
+function startDetachedConsole(executable: string, args: string[], cwd?: string): void {
+  const startArgs = ["/c", "start", "\"\""];
+  if (cwd) {
+    startArgs.push("/D", cwd);
+  }
+  startArgs.push(executable, ...args);
+  spawn("cmd.exe", startArgs, {
+    detached: true,
+    stdio: "ignore",
+    cwd,
+    windowsHide: true,
+  }).unref();
+}
+
 /**
  * Open a shell command in a terminal window.
  * Supports macOS (iTerm2/Terminal.app), Windows (Windows Terminal/cmd.exe), and Linux (common terminals).
@@ -213,6 +231,9 @@ async function openInWindowsTerminal(
   opts?: WindowsLaunchOptions
 ): Promise<{ terminal: string }> {
   const spawnOpts = { detached: true, stdio: "ignore" as const, cwd, windowsHide: true };
+  // wt.exe is the visible terminal window itself — hiding it (windowsHide) would
+  // launch Windows Terminal invisibly, which looks like "nothing happened".
+  const visibleSpawnOpts = { ...spawnOpts, windowsHide: false };
   const pref = opts?.preferredTerminal || "auto";
 
   // When executable + args are provided, launch directly to avoid OEM codepage
@@ -226,9 +247,11 @@ async function openInWindowsTerminal(
       const psArgs = args.map(psQuote).join(", ");
       const script = [
         `Set-Location -LiteralPath ${psQuote(cwd || ".")}`,
-        `& ${psQuote(exe)} @(${psArgs})`,
+        `$csmArgs = @(${psArgs})`,
+        `& ${psQuote(exe)} @csmArgs`,
       ].join("; ");
-      spawn(psExe, ["-NoExit", "-Command", script], { ...spawnOpts, windowsHide: false }).unref();
+      const encoded = encodePowerShellCommand(script);
+      startDetachedConsole(psExe, ["-NoExit", "-EncodedCommand", encoded], cwd || undefined);
       return { terminal: psExe === "pwsh.exe" ? "PowerShell 7" : "PowerShell" };
     };
 
@@ -240,7 +263,7 @@ async function openInWindowsTerminal(
       const wtArgs = cwd
         ? ["-d", cwd, exe, ...args]
         : [exe, ...args];
-      spawn("wt.exe", wtArgs, spawnOpts).unref();
+      spawn("wt.exe", wtArgs, visibleSpawnOpts).unref();
       return { terminal: "Windows Terminal" };
     }
 
@@ -256,7 +279,8 @@ async function openInWindowsTerminal(
   // Fallback: shell command string (legacy / macOS-style callers)
   if (pref === "pwsh") {
     const psExe = hasBinary("pwsh.exe") ? "pwsh.exe" : "powershell.exe";
-    spawn(psExe, ["-NoExit", "-Command", shellCmd], { ...spawnOpts, windowsHide: false }).unref();
+    const encoded = encodePowerShellCommand(shellCmd);
+    startDetachedConsole(psExe, ["-NoExit", "-EncodedCommand", encoded], cwd || undefined);
     return { terminal: psExe === "pwsh.exe" ? "PowerShell 7" : "PowerShell" };
   }
 
@@ -264,7 +288,7 @@ async function openInWindowsTerminal(
     const args = cwd
       ? ["-d", cwd, "cmd", "/k", shellCmd]
       : ["cmd", "/k", shellCmd];
-    spawn("wt.exe", args, spawnOpts).unref();
+    spawn("wt.exe", args, visibleSpawnOpts).unref();
     return { terminal: "Windows Terminal" };
   }
 
