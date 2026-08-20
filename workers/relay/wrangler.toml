@@ -9,4 +9,4 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["RelayNode"]
+new_sqlite_classes = ["RelayNode"]
