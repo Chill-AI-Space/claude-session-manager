@@ -179,20 +179,37 @@ class RelayClient {
         }
 
         // If the session is currently open in a live terminal, type the reply
-        // straight into it — never spawn a competing headless process against
-        // the same transcript.
+        // straight into it — never spawn a second process against the same
+        // session_id, since Claude Code forks the transcript when two
+        // processes both --resume the same session.
         const live = detectActiveClaudeSessions().find((p) => p.sessionId === cmd.sessionId);
         const tty = live ? getTTY(live.pid) : null;
         if (tty) {
-          const injected = sendTextToTerminalTTY({ tty, text: cmd.message });
+          // "busy" means Claude is mid-turn (visible "esc to interrupt") —
+          // wait it out rather than fork a competing window over it.
+          let injected = sendTextToTerminalTTY({ tty, text: cmd.message });
+          for (let attempt = 0; injected.reason === "busy" && attempt < 5; attempt++) {
+            await new Promise((r) => setTimeout(r, 4000));
+            injected = sendTextToTerminalTTY({ tty, text: cmd.message });
+          }
           if (injected.ok) {
             logAction("service", "relay_resume_injected", `${injected.terminal ?? ""} tty:${tty}`, cmd.sessionId);
             return { ok: true, mode: "injected", terminal: injected.terminal, action: "resume" };
           }
           logAction("service", "relay_resume_inject_failed", injected.error ?? injected.reason ?? "unknown", cmd.sessionId);
+          // The process is still alive (detectActiveClaudeSessions found it) —
+          // never fall back to opening a second --resume process against it,
+          // that's exactly the fork we're avoiding. Report failure instead.
+          return { error: `Session is live but reply could not be delivered (${injected.reason ?? "unknown"})`, status: 409 };
+        }
+        if (live) {
+          // Process is alive but has no discoverable TTY (e.g. no controlling
+          // terminal) — still refuse to open a second --resume against it.
+          return { error: "Session is live but has no controllable terminal; reply not delivered", status: 409 };
         }
 
-        // Not live — open a fresh interactive terminal, resuming with the
+        // No active process for this session — open a fresh interactive terminal,
+        // resuming with the message as the initial prompt (not headless -p).
         // message as the initial prompt (not headless -p).
         const shellCmd = buildResumeShellCommand(session, cmd.message);
         const { terminal } = await openInTerminal(shellCmd, { cwd: session.project_path });
