@@ -18,6 +18,42 @@ import { detectActiveClaudeSessions } from "./process-detector";
 import { getTTY, sendTextToTerminalTTY } from "./macos-terminal-control";
 import { buildResumeShellCommand, buildStartShellCommand } from "./session-terminal";
 import { openInTerminal } from "./terminal-launcher";
+import { claudeProjectsDir } from "./utils";
+
+/**
+ * Find a session's project_path by scanning ~/.claude/projects for
+ * <sessionId>.jsonl when it isn't in the local DB yet — e.g. a session
+ * just started via the relay's own "start" action, before the background
+ * scanner has indexed it.
+ */
+function findSessionProjectPathOnDisk(sessionId: string): string | null {
+  const root = claudeProjectsDir();
+  let projectDirs: string[];
+  try {
+    projectDirs = fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return null;
+  }
+  for (const dir of projectDirs) {
+    const jsonlPath = path.join(root, dir, `${sessionId}.jsonl`);
+    if (!fs.existsSync(jsonlPath)) continue;
+    try {
+      const firstLines = fs.readFileSync(jsonlPath, "utf-8").split("\n", 20);
+      for (const line of firstLines) {
+        if (!line.trim()) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.cwd) return obj.cwd as string;
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -198,11 +234,18 @@ class RelayClient {
           return { error: "sessionId and message required", status: 400 };
         }
         const db = getDb();
-        const session = db
+        let session = db
           .prepare("SELECT * FROM sessions WHERE session_id = ?")
           .get(cmd.sessionId) as SessionRow | undefined;
         if (!session) {
-          return { error: "Session not found", status: 404 };
+          // Not indexed yet (e.g. just started via relay "start", scanner
+          // hasn't caught up) — fall back to reading it straight off disk.
+          const projectPath = findSessionProjectPathOnDisk(cmd.sessionId);
+          if (!projectPath) {
+            return { error: "Session not found", status: 404 };
+          }
+          session = { session_id: cmd.sessionId, project_path: projectPath } as SessionRow;
+          logAction("service", "relay_resume_session_from_disk", projectPath, cmd.sessionId);
         }
 
         // If the session is currently open in a live terminal, type the reply
