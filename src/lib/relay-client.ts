@@ -11,6 +11,10 @@ import { getOrchestrator } from "./orchestrator";
 import { getDb, logAction } from "./db";
 import * as dlog from "./debug-logger";
 import type { SessionRow } from "./types";
+import { detectActiveClaudeSessions } from "./process-detector";
+import { getTTY, sendTextToTerminalTTY } from "./macos-terminal-control";
+import { buildResumeShellCommand } from "./session-terminal";
+import { openInTerminal } from "./terminal-launcher";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -168,21 +172,32 @@ class RelayClient {
         }
         const db = getDb();
         const session = db
-          .prepare("SELECT project_path FROM sessions WHERE session_id = ?")
-          .get(cmd.sessionId) as { project_path: string } | undefined;
+          .prepare("SELECT * FROM sessions WHERE session_id = ?")
+          .get(cmd.sessionId) as SessionRow | undefined;
         if (!session) {
           return { error: "Session not found", status: 404 };
         }
-        // Use enqueue for fire-and-forget (orch.resume() returns an SSE stream
-        // that crashes the WebSocket if nobody reads it)
-        const taskId = orch.enqueue({
-          sessionId: cmd.sessionId,
-          type: "resume",
-          message: cmd.message,
-          priority: "normal",
-        });
-        logAction("service", "relay_resume", cmd.message.slice(0, 100), cmd.sessionId);
-        return { ok: true, taskId, sessionId: cmd.sessionId, action: "resume" };
+
+        // If the session is currently open in a live terminal, type the reply
+        // straight into it — never spawn a competing headless process against
+        // the same transcript.
+        const live = detectActiveClaudeSessions().find((p) => p.sessionId === cmd.sessionId);
+        const tty = live ? getTTY(live.pid) : null;
+        if (tty) {
+          const injected = sendTextToTerminalTTY({ tty, text: cmd.message });
+          if (injected.ok) {
+            logAction("service", "relay_resume_injected", `${injected.terminal ?? ""} tty:${tty}`, cmd.sessionId);
+            return { ok: true, mode: "injected", terminal: injected.terminal, action: "resume" };
+          }
+          logAction("service", "relay_resume_inject_failed", injected.error ?? injected.reason ?? "unknown", cmd.sessionId);
+        }
+
+        // Not live — open a fresh interactive terminal, resuming with the
+        // message as the initial prompt (not headless -p).
+        const shellCmd = buildResumeShellCommand(session, cmd.message);
+        const { terminal } = await openInTerminal(shellCmd, { cwd: session.project_path });
+        logAction("service", "relay_resume_opened", terminal, cmd.sessionId);
+        return { ok: true, mode: "opened", terminal, action: "resume" };
       }
 
       case "stop": {

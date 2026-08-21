@@ -4,7 +4,12 @@ import { getForgePath } from "@/lib/forge-bin";
 import { getCodexPath } from "@/lib/codex-bin";
 import { SessionRow } from "@/lib/types";
 
-export function buildResumeShellCommand(session: SessionRow): string {
+/** Shell-quote a string for embedding as a single argument in a POSIX shell command. */
+function shellQuote(text: string): string {
+  return `'${text.replace(/'/g, `'\\''`)}'`;
+}
+
+export function buildResumeShellCommand(session: SessionRow, message?: string): string {
   const cwd = session.project_path;
   const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
   const skipFlag = skipPermissions ? " --dangerously-skip-permissions" : "";
@@ -28,5 +33,9 @@ export function buildResumeShellCommand(session: SessionRow): string {
   const bin = getClaudePath();
   const model = getSetting("claude_model");
   const modelFlag = model ? ` --model "${model}"` : "";
-  return `cd "${cwd}" && "${bin}" --resume "${session.session_id}"${skipFlag}${modelFlag}`;
+  // Interactive resume — NOT headless (-p). The message, if given, is the initial
+  // prompt typed into the normal interactive TUI, so the session stays a single
+  // live process the user can keep driving from the terminal.
+  const messageArg = message ? ` ${shellQuote(message)}` : "";
+  return `cd "${cwd}" && "${bin}" --resume "${session.session_id}"${skipFlag}${modelFlag}${messageArg}`;
 }
