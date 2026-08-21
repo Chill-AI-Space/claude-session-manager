@@ -66,6 +66,7 @@ interface RelayCommand {
   type?: string;
   priority?: string;
   delayMs?: number;
+  createIfMissing?: boolean;
 }
 
 // ── Client ───────────────────────────────────────────────────────────────────
@@ -198,11 +199,19 @@ class RelayClient {
           return { error: "Path must be within home directory", status: 403 };
         }
         try {
-          if (!fs.statSync(resolvedPath).isDirectory()) {
-            return { error: "Path is not a directory", status: 400 };
+          const stat = fs.statSync(resolvedPath);
+          if (!stat.isDirectory()) {
+            return { error: "Path exists and is not a directory", status: 400 };
           }
         } catch {
-          return { error: "Path does not exist", status: 404 };
+          // Doesn't exist yet — create it. cmd.createIfMissing gates this so
+          // a plain typo in an existing-project path doesn't silently start
+          // a fresh empty folder instead of erroring.
+          if (!cmd.createIfMissing) {
+            return { error: "Path does not exist", status: 404 };
+          }
+          fs.mkdirSync(resolvedPath, { recursive: true });
+          logAction("service", "relay_start_created_folder", resolvedPath);
         }
         // Fresh interactive session (not headless) — same reasoning as resume:
         // a terminal window the user can keep driving, not a fire-and-forget stream.
