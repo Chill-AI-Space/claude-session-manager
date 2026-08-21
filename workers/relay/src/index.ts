@@ -38,7 +38,7 @@ export default {
     }
 
     // Route: /node/:nodeId/...
-    const nodeMatch = path.match(/^\/node\/([a-f0-9-]{36})\/(ws|start|resume|stop|status|enqueue)$/);
+    const nodeMatch = path.match(/^\/node\/([a-f0-9-]{36})\/(ws|start|resume|stop|status|enqueue|list_projects)$/);
     if (!nodeMatch) {
       return corsResponse(Response.json({ error: "Not found" }, { status: 404 }));
     }

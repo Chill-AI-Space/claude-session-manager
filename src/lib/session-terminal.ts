@@ -5,8 +5,18 @@ import { getCodexPath } from "@/lib/codex-bin";
 import { SessionRow } from "@/lib/types";
 
 /** Shell-quote a string for embedding as a single argument in a POSIX shell command. */
-function shellQuote(text: string): string {
+export function shellQuote(text: string): string {
   return `'${text.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Interactive `claude "<prompt>"` in a fresh terminal — a brand new session, not a resume. */
+export function buildStartShellCommand(projectPath: string, message: string): string {
+  const bin = getClaudePath();
+  const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
+  const skipFlag = skipPermissions ? " --dangerously-skip-permissions" : "";
+  const model = getSetting("claude_model");
+  const modelFlag = model ? ` --model "${model}"` : "";
+  return `cd "${projectPath}" && "${bin}"${skipFlag}${modelFlag} ${shellQuote(message)}`;
 }
 
 export function buildResumeShellCommand(session: SessionRow, message?: string): string {

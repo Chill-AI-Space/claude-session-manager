@@ -6,6 +6,9 @@
  * are forwarded here and executed via the orchestrator.
  */
 import WebSocket from "ws";
+import fs from "fs";
+import os from "os";
+import path from "path";
 import { getSetting } from "./db";
 import { getOrchestrator } from "./orchestrator";
 import { getDb, logAction } from "./db";
@@ -13,7 +16,7 @@ import * as dlog from "./debug-logger";
 import type { SessionRow } from "./types";
 import { detectActiveClaudeSessions } from "./process-detector";
 import { getTTY, sendTextToTerminalTTY } from "./macos-terminal-control";
-import { buildResumeShellCommand } from "./session-terminal";
+import { buildResumeShellCommand, buildStartShellCommand } from "./session-terminal";
 import { openInTerminal } from "./terminal-launcher";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -154,16 +157,40 @@ class RelayClient {
         if (!cmd.projectPath || !cmd.message) {
           return { error: "projectPath and message required", status: 400 };
         }
-        // Use enqueue for fire-and-forget (orch.start() returns an SSE stream
-        // that crashes the WebSocket if nobody reads it)
-        const taskId = orch.enqueue({
-          sessionId: `start-${Date.now()}`,
-          type: "start",
-          message: cmd.message,
-          priority: "normal",
-        });
-        logAction("service", "relay_start", cmd.projectPath);
-        return { ok: true, taskId, action: "start" };
+        const resolvedPath = path.resolve(cmd.projectPath);
+        if (!resolvedPath.startsWith(os.homedir())) {
+          return { error: "Path must be within home directory", status: 403 };
+        }
+        try {
+          if (!fs.statSync(resolvedPath).isDirectory()) {
+            return { error: "Path is not a directory", status: 400 };
+          }
+        } catch {
+          return { error: "Path does not exist", status: 404 };
+        }
+        // Fresh interactive session (not headless) — same reasoning as resume:
+        // a terminal window the user can keep driving, not a fire-and-forget stream.
+        const shellCmd = buildStartShellCommand(resolvedPath, cmd.message);
+        const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedPath });
+        logAction("service", "relay_start_opened", `${terminal} ${resolvedPath}`);
+        return { ok: true, terminal, projectPath: resolvedPath, action: "start" };
+      }
+
+      case "list_projects": {
+        const basePath = path.resolve(cmd.projectPath || path.join(os.homedir(), "Code"));
+        if (!basePath.startsWith(os.homedir())) {
+          return { error: "Path must be within home directory", status: 403 };
+        }
+        try {
+          const entries = fs
+            .readdirSync(basePath, { withFileTypes: true })
+            .filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules")
+            .map((e) => e.name)
+            .sort();
+          return { ok: true, basePath, projects: entries, action: "list_projects" };
+        } catch (err) {
+          return { error: err instanceof Error ? err.message : String(err), status: 404 };
+        }
       }
 
       case "resume": {
