@@ -492,6 +492,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   anthropic_api_key: "",
   google_ai_api_key: "",
   deepgram_api_key: "",
+  openrouter_api_key: "",
   // Worker integration
   worker_heartbeat_timeout_ms: "300000",
   worker_fallback_enabled: "true",

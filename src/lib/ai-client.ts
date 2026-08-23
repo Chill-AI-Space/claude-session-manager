@@ -6,9 +6,10 @@ import { getSetting } from "./db";
 
 // ── Provider detection ───────────────────────────────────────────────────────
 
-type Provider = "openai" | "anthropic" | "google";
+type Provider = "openai" | "anthropic" | "google" | "openrouter";
 
 function detectProvider(model: string): Provider {
+  if (model.includes("/")) return "openrouter"; // OpenRouter ids are always "vendor/model"
   if (model.startsWith("claude-")) return "anthropic";
   if (model.startsWith("gemini-")) return "google";
   return "openai"; // gpt-*, o1-*, o3-*, o4-*, etc.
@@ -18,19 +19,22 @@ const SETTING_KEY: Record<Provider, string> = {
   openai: "openai_api_key",
   anthropic: "anthropic_api_key",
   google: "google_ai_api_key",
+  openrouter: "openrouter_api_key",
 };
 
 const ENV_KEY: Record<Provider, string[]> = {
   openai: ["OPENAI_API_KEY"],
   anthropic: ["ANTHROPIC_API_KEY"],
   google: ["GOOGLE_AI_API_KEY", "GEMINI_API_KEY"],
+  openrouter: ["OPENROUTER_API_KEY"],
 };
 
 /** Fallback models when the requested provider's key is missing (ordered by preference) */
 const FALLBACK_MODEL: Record<Provider, [Provider, string][]> = {
-  openai: [["google", "gemini-2.5-flash"], ["anthropic", "claude-haiku-3-5-20241022"]],
-  google: [["openai", "gpt-4o-mini"], ["anthropic", "claude-haiku-3-5-20241022"]],
-  anthropic: [["google", "gemini-2.5-flash"], ["openai", "gpt-4o-mini"]],
+  openai: [["openrouter", "openai/gpt-4o-mini"], ["google", "gemini-2.5-flash"], ["anthropic", "claude-haiku-3-5-20241022"]],
+  google: [["openrouter", "openai/gpt-4o-mini"], ["openai", "gpt-4o-mini"], ["anthropic", "claude-haiku-3-5-20241022"]],
+  anthropic: [["openrouter", "openai/gpt-4o-mini"], ["google", "gemini-2.5-flash"], ["openai", "gpt-4o-mini"]],
+  openrouter: [["google", "gemini-2.5-flash"], ["openai", "gpt-4o-mini"], ["anthropic", "claude-haiku-3-5-20241022"]],
 };
 
 function getEnvKey(provider: Provider): string | undefined {
@@ -137,6 +141,8 @@ export async function completion(opts: CompletionOptions): Promise<CompletionRes
       return callAnthropic(apiKey, resolved.model, systemPrompt, userPrompt, maxTokens, temperature);
     case "google":
       return callGoogle(apiKey, resolved.model, systemPrompt, userPrompt, maxTokens, temperature);
+    case "openrouter":
+      return callOpenRouter(apiKey, resolved.model, systemPrompt, userPrompt, maxTokens, temperature);
   }
 }
 
@@ -248,6 +254,41 @@ async function callGoogle(
     inputTokens: data.usageMetadata?.promptTokenCount,
     outputTokens: data.usageMetadata?.candidatesTokenCount,
     model,
+  };
+}
+
+// ── OpenRouter (OpenAI-compatible, routes to whichever vendor is in the model id) ──
+
+async function callOpenRouter(
+  apiKey: string, model: string, system: string | undefined,
+  user: string, maxTokens: number, temperature: number
+): Promise<CompletionResult> {
+  const messages: Array<{ role: string; content: string }> = [];
+  if (system) messages.push({ role: "system", content: system });
+  messages.push({ role: "user", content: user });
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://github.com/kobzevvv/claude-session-manager",
+      "X-Title": "claude-session-manager",
+    },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`OpenRouter API error ${res.status}: ${body.slice(0, 500)}`);
+  }
+
+  const data = await res.json();
+  return {
+    text: data.choices?.[0]?.message?.content ?? "",
+    inputTokens: data.usage?.prompt_tokens,
+    outputTokens: data.usage?.completion_tokens,
+    model: data.model ?? model,
   };
 }
 
