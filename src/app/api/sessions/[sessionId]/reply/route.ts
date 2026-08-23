@@ -153,6 +153,47 @@ export async function POST(
     return new Response(stream, { headers: SSE_HEADERS });
   }
 
+  // If the session is currently open in a live terminal, type the reply
+  // straight into it — spawning a second --resume process against the same
+  // session_id forks its transcript (two processes, one file).
+  if (process.platform === "darwin") {
+    const liveProc = detectActiveClaudeSessions().find((p) => p.sessionId === sessionId);
+    const tty = liveProc ? getTTY(liveProc.pid) : null;
+
+    if (tty) {
+      let injected = sendTextToTerminalTTY({ tty, text: message });
+      for (let attempt = 0; injected.reason === "busy" && attempt < 5; attempt++) {
+        await new Promise((r) => setTimeout(r, 4000));
+        injected = sendTextToTerminalTTY({ tty, text: message });
+      }
+      if (injected.ok) {
+        logAction("service", "reply_injected", `${injected.terminal ?? ""} tty:${tty} msg_len:${message.length}`, sessionId);
+        const stream = new ReadableStream({
+          start(controller) {
+            const encoder = new TextEncoder();
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: "status", text: `Reply sent to live ${injected.terminal} terminal` })}\n\n`)
+            );
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done", result: "Reply injected", is_error: false })}\n\n`));
+            controller.close();
+          },
+        });
+        return new Response(stream, { headers: SSE_HEADERS });
+      }
+      logAction("service", "reply_inject_failed", injected.error ?? injected.reason ?? "unknown", sessionId);
+      return Response.json(
+        { error: `Session is live but reply could not be delivered (${injected.reason ?? "unknown"})` },
+        { status: 409 }
+      );
+    }
+    if (liveProc) {
+      return Response.json(
+        { error: "Session is live but has no controllable terminal; reply not delivered" },
+        { status: 409 }
+      );
+    }
+  }
+
   // Auto-kill terminal sessions if setting is enabled
   const autoKill = getSetting("auto_kill_terminal_on_reply") === "true";
   if (autoKill) {
@@ -160,6 +201,8 @@ export async function POST(
     await new Promise((r) => setTimeout(r, 500));
   }
 
+  // No active process for this session — headless resume is safe here,
+  // nothing else is attached to fork against.
   const stream = getOrchestrator().resume(sessionId, message, session.project_path, verbose);
   return sseResponse(stream);
 }
