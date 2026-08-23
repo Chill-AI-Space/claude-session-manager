@@ -31,11 +31,13 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
+  const [recordingSecs, setRecordingSecs] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const handleSendRef = useRef(() => {});
   useImperativeHandle(ref, () => ({
@@ -46,6 +48,13 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
     triggerSend: () => handleSendRef.current(),
   }));
   const dragCounterRef = useRef(0);
+
+  // Stop the recording timer if the component unmounts mid-recording
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    };
+  }, []);
 
   // Persist draft on every change
   useEffect(() => {
@@ -157,6 +166,10 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
       mediaRecorderRef.current = recorder;
       recorder.start();
       setIsRecording(true);
+      setRecordingSecs(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSecs((s) => s + 1);
+      }, 1000);
     } catch (err) {
       setRecordError(err instanceof Error ? err.message : "Microphone access denied");
     }
@@ -165,6 +178,10 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
   const stopRecording = () => {
     mediaRecorderRef.current?.stop();
     setIsRecording(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
   };
 
   const handleSend = () => {
@@ -245,6 +262,13 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
           rows={16}
           className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pr-9 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
         />
+
+        {isRecording && (
+          <span className="absolute bottom-2 right-9 flex items-center gap-1 text-[11px] tabular-nums text-red-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+            {String(Math.floor(recordingSecs / 60)).padStart(1, "0")}:{String(recordingSecs % 60).padStart(2, "0")}
+          </span>
+        )}
 
         <button
           type="button"
