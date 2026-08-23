@@ -12,7 +12,7 @@ export async function GET() {
 }
 
 const SENSITIVE_KEYS = new Set([
-  "openai_api_key", "anthropic_api_key", "google_ai_api_key",
+  "openai_api_key", "anthropic_api_key", "google_ai_api_key", "deepgram_api_key",
   "worker_notify_smtp_pass", "relay_node_id",
 ]);
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, forwardRef, useImperativeHandle, useEffect } from "react";
+import { Mic, Square, Loader2 } from "lucide-react";
 
 interface ReplyInputProps {
   sessionId: string;
@@ -27,8 +28,14 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
     return "";
   });
   const [isDragging, setIsDragging] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordError, setRecordError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const handleSendRef = useRef(() => {});
   useImperativeHandle(ref, () => ({
@@ -118,6 +125,48 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
     e.dataTransfer.dropEffect = "copy";
   };
 
+  const startRecording = async () => {
+    setRecordError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : undefined;
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        setIsTranscribing(true);
+        try {
+          const fd = new FormData();
+          fd.append("audio", blob, "voice.webm");
+          const res = await fetch("/api/transcribe", { method: "POST", body: fd });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Transcription failed");
+          if (data.transcript) insertAtCursor(data.transcript);
+        } catch (err) {
+          setRecordError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      setRecordError(err instanceof Error ? err.message : "Microphone access denied");
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+  };
+
   const handleSend = () => {
     if (!message.trim()) return;
     onSend(message.trim());
@@ -194,9 +243,31 @@ function ReplyInput({ sessionId, onSend, queueSize = 0, isStreaming = false, bgC
                 : "Reply to Claude… (⌘Enter to send)"
           }
           rows={16}
-          className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+          className="w-full resize-none bg-transparent rounded-lg px-3 py-2.5 pr-9 text-[13px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
         />
+
+        <button
+          type="button"
+          onClick={isRecording ? stopRecording : startRecording}
+          disabled={isTranscribing}
+          title={isRecording ? "Stop recording" : "Record voice message"}
+          className={`absolute bottom-2 right-2 flex h-6 w-6 items-center justify-center rounded-md transition-colors ${
+            isRecording
+              ? "bg-red-500/20 text-red-500 animate-pulse"
+              : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
+          }`}
+        >
+          {isTranscribing ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : isRecording ? (
+            <Square className="h-3 w-3 fill-current" />
+          ) : (
+            <Mic className="h-3.5 w-3.5" />
+          )}
+        </button>
       </div>
+
+      {recordError && <span className="text-[11px] text-red-500">{recordError}</span>}
     </div>
   );
 });

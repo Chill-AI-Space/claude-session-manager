@@ -292,13 +292,12 @@ export function logAction(
   payload?: string
 ): void {
   // Also emit to debug stream for real-time monitoring
-  try {
-    const { info, warn } = require("./debug-logger");
+  import("./debug-logger").then(({ info, warn }) => {
     const level = action.includes("fail") || action.includes("crash") || action.includes("error") ? warn : info;
     level("action", `${action}${details ? `: ${details}` : ""}`, {
       type, action, details, sessionId,
     });
-  } catch { /* debug-logger not available */ }
+  }).catch(() => { /* debug-logger not available */ });
 
   try {
     getDb()
@@ -321,9 +320,10 @@ export function indexSessionContent(sessionId: string, text: string): void {
   } catch { /* Non-critical */ }
 }
 
-export function searchSessionContent(query: string): string[] {
+export function searchSessionContent(query: string, limit = 1000): string[] {
   try {
     const db = getDb();
+    const safeLimit = Math.max(1, Math.min(limit, 5000));
     const terms = query.match(/[\p{L}\p{N}_-]+/gu)?.filter((t) => t.length >= 2) ?? [];
     const escaped = terms
       .slice(0, 8)
@@ -331,8 +331,8 @@ export function searchSessionContent(query: string): string[] {
       .join(" AND ");
     const ftsQuery = escaped || `"${query.replace(/"/g, '""')}"`;
     const rows = db
-      .prepare("SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH ? ORDER BY rank LIMIT 100")
-      .all(ftsQuery) as { session_id: string }[];
+      .prepare("SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH ? ORDER BY rank LIMIT ?")
+      .all(ftsQuery, safeLimit) as { session_id: string }[];
     return rows.map((r) => r.session_id);
   } catch {
     return [];
@@ -491,6 +491,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   openai_api_key: "",
   anthropic_api_key: "",
   google_ai_api_key: "",
+  deepgram_api_key: "",
   // Worker integration
   worker_heartbeat_timeout_ms: "300000",
   worker_fallback_enabled: "true",
@@ -506,7 +507,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   worker_notify_to: "",
   worker_notify_webhook_url: "",
   // Agent selection — which AI agent to use for new sessions
-  default_agent: "claude",
+  default_agent: "codex",
   // Session choreography — inject session context (session_id + callback URL) into system prompt
   inject_session_context: "true",
   // Base URL for callback URLs injected into sessions (e.g. http://localhost:3000 or relay URL)
