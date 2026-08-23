@@ -7,6 +7,7 @@ import { getCodexPath } from "@/lib/codex-bin";
 import { buildCodexResumeShellCommand } from "@/lib/codex-command";
 import { openInTerminal } from "@/lib/terminal-launcher";
 import { getTTY, sendTextToTerminalTTY } from "@/lib/macos-terminal-control";
+import { getLiveSessionFromPidMap } from "@/lib/session-pid-map";
 import { sseResponse, SSE_HEADERS } from "@/lib/claude-runner";
 import { resolveNode, proxySSE } from "@/lib/remote-compute";
 
@@ -157,8 +158,13 @@ export async function POST(
   // straight into it — spawning a second --resume process against the same
   // session_id forks its transcript (two processes, one file).
   if (process.platform === "darwin") {
-    const liveProc = detectActiveClaudeSessions().find((p) => p.sessionId === sessionId);
-    const tty = liveProc ? getTTY(liveProc.pid) : null;
+    // The PID map (written by the Stop hook from its own parent PID) is
+    // authoritative; detectActiveClaudeSessions() guesses by most-recently-
+    // modified transcript in a shared cwd, which misattributes when several
+    // sessions share a working directory.
+    const fromPidMap = getLiveSessionFromPidMap(sessionId);
+    const liveProc = fromPidMap ? { pid: fromPidMap.pid } : detectActiveClaudeSessions().find((p) => p.sessionId === sessionId);
+    const tty = fromPidMap ? fromPidMap.tty : liveProc ? getTTY(liveProc.pid) : null;
 
     if (tty) {
       let injected = sendTextToTerminalTTY({ tty, text: message });

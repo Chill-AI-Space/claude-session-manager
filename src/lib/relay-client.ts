@@ -19,6 +19,7 @@ import { getTTY, sendTextToTerminalTTY } from "./macos-terminal-control";
 import { buildResumeShellCommand, buildStartShellCommand } from "./session-terminal";
 import { openInTerminal } from "./terminal-launcher";
 import { claudeProjectsDir } from "./utils";
+import { getLiveSessionFromPidMap } from "./session-pid-map";
 
 /**
  * Find a session's project_path by scanning ~/.claude/projects for
@@ -261,8 +262,13 @@ class RelayClient {
         // straight into it — never spawn a second process against the same
         // session_id, since Claude Code forks the transcript when two
         // processes both --resume the same session.
-        const live = detectActiveClaudeSessions().find((p) => p.sessionId === cmd.sessionId);
-        const tty = live ? getTTY(live.pid) : null;
+        // The PID map (written by the Stop hook from its own parent PID) is
+        // authoritative and unambiguous; detectActiveClaudeSessions() guesses
+        // by most-recently-modified transcript in a shared cwd, which
+        // misattributes when several sessions share a working directory.
+        const fromPidMap = getLiveSessionFromPidMap(cmd.sessionId);
+        const live = fromPidMap ? { pid: fromPidMap.pid } : detectActiveClaudeSessions().find((p) => p.sessionId === cmd.sessionId);
+        const tty = fromPidMap ? fromPidMap.tty : live ? getTTY(live.pid) : null;
         if (tty) {
           // "busy" means Claude is mid-turn (visible "esc to interrupt") —
           // wait it out rather than fork a competing window over it.
@@ -289,7 +295,6 @@ class RelayClient {
 
         // No active process for this session — open a fresh interactive terminal,
         // resuming with the message as the initial prompt (not headless -p).
-        // message as the initial prompt (not headless -p).
         const shellCmd = buildResumeShellCommand(session, cmd.message);
         const { terminal } = await openInTerminal(shellCmd, { cwd: session.project_path });
         logAction("service", "relay_resume_opened", terminal, cmd.sessionId);
