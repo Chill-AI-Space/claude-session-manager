@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { SessionList } from "@/components/SessionList";
 import { SessionSearch, GeminiResult } from "@/components/SessionSearch";
@@ -33,6 +33,7 @@ export default function SessionsLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -207,8 +208,11 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     if (selectedProjects.length > 0) params.set("project", selectedProjects.join(","));
     if (searchQuery) params.set("search", searchQuery);
     params.set("sort", "modified");
-    // On auto-refresh, preserve the user's loaded count so scroll position isn't reset
-    const fetchLimit = Math.max(SIDEBAR_PAGE_SIZE, sessionsRef.current.length);
+    // Search/filter result sets should be complete enough to scan immediately.
+    // Normal sidebar browsing stays paginated to keep the initial load cheap.
+    const fetchLimit = isSearchRequest
+      ? MAX_SESSIONS_IN_MEMORY
+      : Math.max(SIDEBAR_PAGE_SIZE, sessionsRef.current.length);
     params.set("limit", String(fetchLimit));
     // Skip remote nodes for instant sidebar load; fetch them lazily below
     params.set("include_remote", "false");
@@ -224,7 +228,10 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
       setLoading(false);
 
       // Lazy-load remote sessions in background (non-blocking)
-      fetch(`/api/sessions?sort=modified&limit=${MAX_SESSIONS_IN_MEMORY}&include_remote=true`, {
+      const remoteParams = new URLSearchParams(params);
+      remoteParams.set("include_remote", "true");
+      remoteParams.set("limit", String(MAX_SESSIONS_IN_MEMORY));
+      fetch(`/api/sessions?${remoteParams}`, {
         signal: abort.signal,
       })
         .then(r => r.json())
@@ -387,10 +394,10 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     return () => clearInterval(id);
   }, [fetchSessions, geminiResults.length]); // sessions excluded via ref to avoid restarting interval on every poll
 
-  // Clear content results when search query changes
+  // Clear AI/content result mode when regular search or folder filters change.
   useEffect(() => {
-    if (!searchQuery) setGeminiResults([]);
-  }, [searchQuery]);
+    setGeminiResults([]);
+  }, [searchQuery, selectedProjects]);
 
   // Wrapper for Gemini results: set results AND fetch any missing sessions by ID
   const handleGeminiResults = useCallback(async (results: GeminiResult[]) => {
@@ -506,15 +513,14 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
                 <span className="text-sm font-semibold text-foreground tracking-tight">
                   Sessions
                 </span>
-                <Link href="/claude-sessions">
-                  <Button
-                    size="sm"
-                    className="h-5 px-1.5 text-[11px] border border-emerald-600 text-emerald-600 hover:bg-emerald-600/10 bg-transparent rounded"
-                  >
-                    <Plus className="h-3 w-3 mr-0.5" />
-                    New
-                  </Button>
-                </Link>
+                <Button
+                  size="sm"
+                  onClick={() => router.push(`/claude-sessions?new=${Date.now()}`)}
+                  className="h-5 px-1.5 text-[11px] border border-emerald-600 text-emerald-600 hover:bg-emerald-600/10 bg-transparent rounded"
+                >
+                  <Plus className="h-3 w-3 mr-0.5" />
+                  New
+                </Button>
                 {(updatesAvailable || updateStatus !== "idle") && (
                   <Button
                     size="sm"

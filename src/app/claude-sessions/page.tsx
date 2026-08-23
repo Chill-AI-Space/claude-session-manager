@@ -1,19 +1,36 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { FolderOpen, Send, Loader2, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud } from "lucide-react";
-import { AgentToggleButton, type AgentType, DEFAULT_MODEL } from "@/components/AgentToggleButton";
-import { ModelSelector } from "@/components/settings/ModelSelector";
+import { AgentToggleButton, type AgentType } from "@/components/AgentToggleButton";
+import { ModelSelector, getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
 import { useSettings } from "@/lib/settings";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { useSessionStart } from "@/hooks/useSessionStart";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useComputeNode } from "@/hooks/useComputeNode";
 
-export default function SessionsEmptyState() {
+// The "+ New" button in the sidebar links here with a fresh `?new=<ts>` query
+// each time so this remounts (and resets its draft state) even when you're
+// already on this page — a plain same-URL <Link> is a no-op in the App Router.
+export default function SessionsEmptyStatePage() {
+  return (
+    <Suspense fallback={null}>
+      <SessionsEmptyStateWithParams />
+    </Suspense>
+  );
+}
+
+function SessionsEmptyStateWithParams() {
+  const searchParams = useSearchParams();
+  return <SessionsEmptyState key={searchParams.toString()} />;
+}
+
+function SessionsEmptyState() {
   const [message, setMessage] = useState("");
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
@@ -23,26 +40,13 @@ export default function SessionsEmptyState() {
   const dragCounterRef = useRef(0);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
-  const [selectedAgent, setSelectedAgent] = useState<AgentType>("claude");
+  const [selectedAgent, setSelectedAgent] = useState<AgentType>("codex");
   const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
   const compute = useComputeNode();
   const autodetect = useAutodetect();
   const session = useSessionStart();
   const { settings } = useSettings();
-
-  useEffect(() => {
-    if (selectedAgent === "forge") {
-      setSelectedModel(
-        settings.claude_model === "claude-sonnet-4-6"
-          ? "models/gemini-2.5-flash"
-          : settings.claude_model,
-      );
-    } else if (selectedAgent === "codex") {
-      setSelectedModel("gpt-5.4");
-    } else {
-      setSelectedModel(undefined);
-    }
-  }, [settings.claude_model, selectedAgent]);
+  const effectiveSelectedModel = selectedModel || getDefaultModelForAgent(selectedAgent, settings.claude_model);
 
   const insertAtCursor = (text: string) => {
     const textarea = textareaRef.current;
@@ -114,7 +118,7 @@ export default function SessionsEmptyState() {
   };
 
   const doStart = (path: string) => {
-    session.start(path, message, { agent: selectedAgent, model: selectedModel });
+    session.start(path, message, { agent: selectedAgent, model: effectiveSelectedModel });
   };
 
   // Smart start: if folder known → start; else autodetect → start; else open picker
@@ -182,17 +186,15 @@ export default function SessionsEmptyState() {
             disabled={isBusy}
           />
           <div className="absolute bottom-1.5 left-1.5 right-1.5 flex flex-col gap-1">
-            {/* Model row — only when Forge is selected */}
-            {selectedAgent === "forge" && (
-              <div className="flex items-center gap-1.5 px-0.5">
-                <ModelSelector
-                  settingKey="claude_model"
-                  currentModel={selectedModel || ""}
-                  onUpdate={(_, model) => setSelectedModel(model)}
-                  label="Model"
-                />
-              </div>
-            )}
+            <div className="flex items-center gap-1.5 px-0.5">
+              <ModelSelector
+                settingKey="claude_model"
+                currentModel={effectiveSelectedModel}
+                onUpdate={(_, model) => setSelectedModel(model)}
+                label="Model"
+                presets={getModelPresetsForAgent(selectedAgent)}
+              />
+            </div>
             {/* Controls row */}
             <div className="flex items-center gap-1">
               <button
@@ -232,7 +234,7 @@ export default function SessionsEmptyState() {
                 agent={selectedAgent}
                 onCycle={(next) => {
                   setSelectedAgent(next);
-                  setSelectedModel(DEFAULT_MODEL[next] || undefined);
+                  setSelectedModel(undefined);
                 }}
               />
               {compute.nodes.length > 0 && (
