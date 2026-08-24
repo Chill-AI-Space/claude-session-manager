@@ -247,7 +247,7 @@ export function buildCliArgs(opts: {
 }
 
 /** Build the system prompt context block injected when inject_session_context is enabled. */
-function buildSessionContextPrompt(sessionId?: string): string | undefined {
+export function buildSessionContextPrompt(sessionId?: string): string | undefined {
   if (getSetting("inject_session_context") !== "true") return undefined;
   // Always use localhost for session callbacks — sessions run on the same machine.
   // csm_base_url is for external access (CI, GCP) only, and may be an ephemeral tunnel.
@@ -284,7 +284,7 @@ function buildDelegationPrompt(replyToSessionId: string, delegationTask: string 
     `If you need to spawn sub-sessions as part of your work, ALWAYS specify "agent" explicitly:`,
     `  "agent": "codex"  — writing / implementing code`,
     `  "agent": "claude" — review, analysis, planning, research`,
-    `Never omit "agent" — the default is "claude", which is WRONG for code implementation tasks.`,
+    `Never omit "agent" — the default agent may be wrong for the subtask you are spawning.`,
     `Always set "path" to the target repository root, not a scratch folder.`,
     ``,
     `CRITICAL: Always use -N (no-buffer) with curl and capture the session_id from the SSE response.`,

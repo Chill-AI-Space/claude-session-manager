@@ -10,13 +10,14 @@ export function shellQuote(text: string): string {
 }
 
 /** Interactive `claude "<prompt>"` in a fresh terminal — a brand new session, not a resume. */
-export function buildStartShellCommand(projectPath: string, message: string): string {
+export function buildStartShellCommand(projectPath: string, message: string, modelOverride?: string, appendSystemPrompt?: string): string {
   const bin = getClaudePath();
   const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
   const skipFlag = skipPermissions ? " --dangerously-skip-permissions" : "";
-  const model = getSetting("claude_model");
+  const model = modelOverride || getSetting("claude_model");
   const modelFlag = model ? ` --model "${model}"` : "";
-  return `cd "${projectPath}" && "${bin}"${skipFlag}${modelFlag} ${shellQuote(message)}`;
+  const systemPromptFlag = appendSystemPrompt ? ` --append-system-prompt ${shellQuote(appendSystemPrompt)}` : "";
+  return `cd "${projectPath}" && "${bin}"${skipFlag}${modelFlag}${systemPromptFlag} ${shellQuote(message)}`;
 }
 
 export function buildResumeShellCommand(session: SessionRow, message?: string): string {

@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server";
+import os from "os";
+import path from "path";
+import { stat } from "fs/promises";
 import { getOrchestrator } from "@/lib/orchestrator";
 import { sseResponse } from "@/lib/claude-runner";
-import { logAction } from "@/lib/db";
+import { getSetting, logAction } from "@/lib/db";
 import { getComputeNode, resolveNode, proxySSE } from "@/lib/remote-compute";
 import { SSE_HEADERS } from "@/lib/claude-runner";
 
@@ -26,10 +29,18 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "path and message required" }, { status: 400 });
   }
 
+  const defaultAgentSetting = getSetting("default_agent");
+  const defaultAgent =
+    defaultAgentSetting === "claude" || defaultAgentSetting === "codex" || defaultAgentSetting === "forge"
+      ? defaultAgentSetting
+      : "codex";
+
   const normalizedAgent =
-    agent === undefined || agent === "claude" || agent === "codex" || agent === "forge"
-      ? agent
-      : null;
+    agent === undefined
+      ? defaultAgent
+      : agent === "claude" || agent === "codex" || agent === "forge"
+        ? agent
+        : null;
 
   if (normalizedAgent === null) {
     return Response.json({ error: `invalid agent: ${String(agent)}` }, { status: 400 });
@@ -63,20 +74,34 @@ export async function POST(request: NextRequest) {
     logAction("service", "session_start_api_received", JSON.stringify({ correlationId, path: projectPath }));
   }
 
+  const resolvedProjectPath = path.resolve(projectPath);
+  if (!resolvedProjectPath.startsWith(os.homedir())) {
+    return Response.json({ error: "Path must be within home directory" }, { status: 403 });
+  }
+
+  try {
+    const s = await stat(resolvedProjectPath);
+    if (!s.isDirectory()) {
+      return Response.json({ error: "Path is not a directory" }, { status: 400 });
+    }
+  } catch {
+    return Response.json({ error: "Path does not exist" }, { status: 404 });
+  }
+
   if (normalizedAgent === "forge") {
-    const stream = getOrchestrator().startForge(projectPath, message.trim(), model);
+    const stream = getOrchestrator().startForge(resolvedProjectPath, message.trim(), model);
     return sseResponse(stream);
   }
 
   if (normalizedAgent === "codex") {
     // Codex is a TUI — open in terminal, then poll for the new thread and return its ID
     const { getCodexPath } = await import("@/lib/codex-bin");
+    const { buildCodexStartShellCommand } = await import("@/lib/codex-command");
     const { openInTerminal } = await import("@/lib/terminal-launcher");
     const { listCodexThreads } = await import("@/lib/codex-db");
-    const { getSetting, getDb } = await import("@/lib/db");
+    const { getDb } = await import("@/lib/db");
     const bin = getCodexPath();
-    const codexSkipFlag = getSetting("dangerously_skip_permissions") === "true" ? " --dangerously-bypass-approvals-and-sandbox" : "";
-    const modelFlag = model ? ` -c model="${model}"` : "";
+    const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
 
     // Codex has no --append-system-prompt, so inject delegation contract into the message itself
     let fullMessage = message.trim();
@@ -89,7 +114,7 @@ export async function POST(request: NextRequest) {
         "[Delegation Contract]",
         `You were spawned to handle a delegated task${delegation_task ? `: "${delegation_task}"` : ""}.`,
         `Before reporting back, persist your work: code → commit to branch; plans/findings → save to dated file (docs/YYYY-MM-DD-name.md) and commit. Nothing in session context only — if not in git, it will be lost.`,
-        `If you spawn sub-sessions, ALWAYS specify "agent" explicitly: "agent":"codex" for code, "agent":"claude" for review/analysis. Never omit "agent" — default is "claude" which is WRONG for code tasks.`,
+        `If you spawn sub-sessions, ALWAYS specify "agent" explicitly: "agent":"codex" for code, "agent":"claude" for review/analysis. Never omit "agent" — the default agent may be wrong for the task.`,
         `CRITICAL: use -N (no-buffer) with curl and capture session_id: CHILD_ID=$(curl -s -N -X POST ".../start" ... | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id":"\\([^"]*\\)".*/\\1/'). If CHILD_ID empty — spawn failed, retry.`,
         `When done, report back by running ONE of these:`,
         `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "DONE: <summary> | committed: <branch>"}'`,
@@ -99,28 +124,19 @@ export async function POST(request: NextRequest) {
       ].join("\n");
     }
 
-    // Use ANSI-C quoting $'...' so newlines, quotes, and other special chars are safe.
-    // Plain double-quote escaping breaks when the message contains literal newlines —
-    // the shell enters `dquote>` mode waiting for the closing quote.
-    const ansiQuote = (s: string) =>
-      "$'" +
-      s
-        .replace(/\\/g, "\\\\")
-        .replace(/'/g, "\\'")
-        .replace(/\r/g, "\\r")
-        .replace(/\n/g, "\\n")
-        .replace(/\t/g, "\\t")
-        .replace(/"/g, '\\"') +
-      "'";
-    const shellCmd = `cd "${projectPath}" && "${bin}"${codexSkipFlag}${modelFlag} ${ansiQuote(fullMessage)}`;
+    const shellCmd = buildCodexStartShellCommand({
+      projectPath: resolvedProjectPath,
+      bin,
+      message: fullMessage,
+      skipPermissions,
+      model,
+    });
     const stream = new ReadableStream({
       async start(controller) {
         try {
           // Snapshot existing thread IDs before launch
           const existingIds = new Set(listCodexThreads().map((t) => t.id));
-          const startedAt = Math.floor(Date.now() / 1000) - 5; // 5s tolerance
-
-          const { terminal } = await openInTerminal(shellCmd);
+          const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedProjectPath });
           controller.enqueue(`data: ${JSON.stringify({ type: "status", status: `Codex opened in ${terminal}` })}\n\n`);
 
           // Poll for the new Codex thread (up to 45 seconds)
@@ -140,9 +156,8 @@ export async function POST(request: NextRequest) {
               }
               sessionId = newThread.id;
               const fsLib = await import("fs");
-              const osLib = await import("os");
               const db = getDb();
-              const cwd = newThread.cwd ?? osLib.default.homedir();
+              const cwd = resolvedProjectPath;
               const projectDir = cwd.replace(/[\\/]/g, "-");
               const modelLabel = newThread.model ?? (newThread.model_provider === "openai" ? "gpt-4o" : newThread.model_provider);
               let fileMtime = newThread.updated_at * 1000;
@@ -203,7 +218,89 @@ export async function POST(request: NextRequest) {
     return new Response(stream, { headers: SSE_HEADERS });
   }
 
-  // Default to Claude unless another agent is explicitly requested.
-  const stream = getOrchestrator().start(projectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url, reply_to_session_id, delegation_task);
+  // At this point, only Claude remains: codex/forge were handled above.
+  //
+  // Open in a real interactive terminal instead of the headless orch.start()
+  // SSE stream, EXCEPT when this is a programmatic/automated spawn (a
+  // delegated sub-agent, a context-carryover "new session", or one that
+  // wants a completion webhook) — those are autonomous background workers
+  // with no user watching, and orch.start()'s DB bookkeeping (delegation
+  // linkage, previous_session_id, onCompleteUrl) only exists on that path.
+  // Headless sessions run with fully-piped stdio and no pty — fine for
+  // streaming output into the browser, but the Chrome extension only pairs
+  // with a real terminal-attached process, not a piped one, which is what
+  // a manually-started interactive session needs.
+  const isAutomatedSpawn = Boolean(previous_session_id || on_complete_url || reply_to_session_id);
+
+  if (!isAutomatedSpawn) {
+    const { buildStartShellCommand } = await import("@/lib/session-terminal");
+    const { openInTerminal } = await import("@/lib/terminal-launcher");
+    const { claudeProjectsDir } = await import("@/lib/utils");
+    const fsLib = await import("fs");
+    const { scanSessions } = await import("@/lib/scanner");
+    const { buildSessionContextPrompt } = await import("@/lib/orchestrator");
+
+    const projectDirName = resolvedProjectPath.replace(/[\\/]/g, "-");
+    const sessionsDir = path.join(claudeProjectsDir(), projectDirName);
+    let existingIds = new Set<string>();
+    try {
+      existingIds = new Set(
+        fsLib.readdirSync(sessionsDir)
+          .filter((f) => f.endsWith(".jsonl"))
+          .map((f) => f.replace(/\.jsonl$/, ""))
+      );
+    } catch {
+      // Directory doesn't exist yet — this is the first session in this project.
+    }
+
+    const shellCmd = buildStartShellCommand(resolvedProjectPath, message.trim(), model, buildSessionContextPrompt());
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        const send = (data: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        };
+
+        try {
+          const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedProjectPath });
+          send({ type: "status", text: `Opened in ${terminal}` });
+
+          let sessionId: string | null = null;
+          for (let i = 0; i < 90; i++) {
+            await new Promise((r) => setTimeout(r, 500));
+            try {
+              const files = fsLib.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
+              const newFile = files.find((f) => !existingIds.has(f.replace(/\.jsonl$/, "")));
+              if (newFile) {
+                sessionId = newFile.replace(/\.jsonl$/, "");
+                break;
+              }
+            } catch {
+              // Directory may not exist for the first ~1s after launch.
+            }
+          }
+
+          if (sessionId) {
+            try { await scanSessions("incremental"); } catch { /* non-critical — sidebar will pick it up regardless */ }
+            send({ type: "session_id", session_id: sessionId });
+          } else {
+            send({ type: "status", text: "Claude started — check sidebar for new session" });
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          send({ type: "error", error: msg });
+        }
+
+        send({ type: "done" });
+        controller.close();
+      },
+    });
+    return new Response(stream, { headers: SSE_HEADERS });
+  }
+
+  // Automated/programmatic spawn — headless, so the caller's curl/orchestrator
+  // gets an SSE stream to parse, with delegation linkage + completion webhook
+  // bookkeeping intact.
+  const stream = getOrchestrator().start(resolvedProjectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url, reply_to_session_id, delegation_task);
   return sseResponse(stream);
 }
