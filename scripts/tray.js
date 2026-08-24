@@ -6,7 +6,7 @@
 'use strict';
 
 const { execSync, spawn } = require('child_process');
-const { readFileSync, existsSync } = require('fs');
+const { readFileSync, existsSync, readdirSync, statSync } = require('fs');
 const { join } = require('path');
 const os = require('os');
 const http = require('http');
@@ -27,9 +27,56 @@ function logErr(msg) {
 
 // --- Pre-flight checks ---
 const buildIdPath = join(ROOT, '.next', 'BUILD_ID');
-if (!existsSync(buildIdPath)) {
-  logErr(`FATAL: No production build found (missing ${buildIdPath})`);
-  logErr('Run "npm run build" in claude-session-manager before starting.');
+const BUILD_INPUTS = [
+  'src',
+  'package.json',
+  'package-lock.json',
+  'tsconfig.json',
+  'next.config.js',
+  'next.config.mjs',
+  'next.config.ts',
+  'postcss.config.js',
+  'postcss.config.mjs',
+  'tailwind.config.js',
+  'tailwind.config.ts',
+];
+
+function latestMtime(targetPath) {
+  if (!existsSync(targetPath)) return 0;
+  const stat = statSync(targetPath);
+  if (!stat.isDirectory()) return stat.mtimeMs;
+
+  let latest = stat.mtimeMs;
+  for (const entry of readdirSync(targetPath, { withFileTypes: true })) {
+    if (entry.name === '.next' || entry.name === 'node_modules' || entry.name === '.git') continue;
+    latest = Math.max(latest, latestMtime(join(targetPath, entry.name)));
+  }
+  return latest;
+}
+
+function needsBuild() {
+  if (!existsSync(buildIdPath)) {
+    return { needed: true, reason: `missing ${buildIdPath}` };
+  }
+
+  const buildMtime = statSync(buildIdPath).mtimeMs;
+  const latestSourceMtime = BUILD_INPUTS
+    .map((relativePath) => latestMtime(join(ROOT, relativePath)))
+    .reduce((max, current) => Math.max(max, current), 0);
+
+  if (latestSourceMtime > buildMtime + 1000) {
+    return {
+      needed: true,
+      reason: `sources are newer than build (${new Date(latestSourceMtime).toISOString()} > ${new Date(buildMtime).toISOString()})`,
+    };
+  }
+
+  return { needed: false, reason: '' };
+}
+
+const buildStatus = needsBuild();
+if (buildStatus.needed) {
+  logErr(`Production build is stale: ${buildStatus.reason}`);
   logErr('Auto-building now...');
   try {
     execSync('npm run build', { cwd: ROOT, stdio: 'inherit', timeout: 120_000 });
@@ -99,6 +146,8 @@ const nextBin = isWin
   : join(ROOT, 'node_modules', '.bin', 'next');
 
 let server = null;
+let restartInFlight = false;
+let lastRestartAt = 0;
 
 function spawnServer() {
   const proc = spawn(
@@ -118,8 +167,11 @@ function spawnServer() {
 
   proc.on('exit', (code) => {
     logErr(`Server exited with code ${code}`);
-    // Don't exit the tray — we'll restart the server on next "Open"
+    // Keep the tray alive and recover the web server automatically.
     server = null;
+    setTimeout(() => {
+      ensureServerRunning().catch((e) => logErr(`Auto-restart failed: ${e.message}`));
+    }, 1000);
   });
 
   return proc;
@@ -130,7 +182,7 @@ server = spawnServer();
 // --- Server health check & restart ---
 function checkServerHealth() {
   return new Promise((resolve) => {
-    const req = http.get(`http://localhost:${PORT}/api/settings`, { timeout: 3000 }, (res) => {
+    const req = http.get(`http://localhost:${PORT}/api/settings`, { timeout: 6000 }, (res) => {
       resolve(res.statusCode === 200);
     });
     req.on('error', () => resolve(false));
@@ -139,35 +191,53 @@ function checkServerHealth() {
 }
 
 async function ensureServerRunning() {
-  const healthy = await checkServerHealth();
+  if (restartInFlight) return false;
+  let healthy = await checkServerHealth();
+  if (!healthy) {
+    // Debounce: a single slow response (event-loop blip under load from many
+    // concurrent Claude Code sessions hitting the API) shouldn't trigger a
+    // full SIGKILL + restart. Confirm with a second check before acting.
+    await new Promise((r) => setTimeout(r, 2000));
+    healthy = await checkServerHealth();
+  }
   if (healthy) return true;
 
+  const now = Date.now();
+  if (now - lastRestartAt < 5000) {
+    return false;
+  }
+  lastRestartAt = now;
+  restartInFlight = true;
   log('Server not responding, restarting...');
 
-  // Kill old process if still hanging
-  if (server) {
-    try { server.kill('SIGKILL'); } catch {}
-    server = null;
-  }
-
-  // Free port in case something else grabbed it
-  freePort();
-
-  // Spawn new server
-  server = spawnServer();
-
-  // Wait for it to become ready (up to 15s)
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 500));
-    const ok = await checkServerHealth();
-    if (ok) {
-      log('Server restarted successfully');
-      return true;
+  try {
+    // Kill old process if still hanging
+    if (server) {
+      try { server.kill('SIGKILL'); } catch {}
+      server = null;
     }
-  }
 
-  logErr('Server failed to start after 15s');
-  return false;
+    // Free port in case something else grabbed it
+    freePort();
+
+    // Spawn new server
+    server = spawnServer();
+
+    // Wait for it to become ready (up to 15s)
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const ok = await checkServerHealth();
+      if (ok) {
+        log('Server restarted successfully');
+        return true;
+      }
+    }
+
+    logErr('Server failed to start after 15s');
+    return false;
+  } finally {
+    restartInFlight = false;
+  }
 }
 
 // --- Cloudflared auto-relay ---
@@ -391,10 +461,17 @@ function startTrayWatchdog() {
   }, 30_000);
 }
 
+function startServerWatchdog() {
+  setInterval(() => {
+    ensureServerRunning().catch((e) => logErr(`Server watchdog failed: ${e.message}`));
+  }, 30_000);
+}
+
 // Delay first tray start slightly to let WindowServer initialize after login
 setTimeout(() => {
   startTray();
   startTrayWatchdog();
+  startServerWatchdog();
 }, isWin ? 0 : 3000);
 
 // --- Start cloudflared tunnel once server is ready ---
