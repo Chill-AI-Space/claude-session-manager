@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useRef, Suspense } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { FolderOpen, Send, Loader2, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud } from "lucide-react";
+import { FolderOpen, Send, Loader2, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud, Mic, Square } from "lucide-react";
 import { AgentToggleButton, type AgentType } from "@/components/AgentToggleButton";
 import { ModelSelector, getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
 import { useSettings } from "@/lib/settings";
@@ -35,9 +35,17 @@ function SessionsEmptyState() {
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordError, setRecordError] = useState<string | null>(null);
+  const [recordingSecs, setRecordingSecs] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
   const [selectedAgent, setSelectedAgent] = useState<AgentType>("codex");
@@ -63,6 +71,62 @@ function SessionsEmptyState() {
       textarea.setSelectionRange(pos, pos);
       textarea.focus();
     });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    };
+  }, []);
+
+  const startRecording = async () => {
+    setRecordError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : undefined;
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        setIsTranscribing(true);
+        try {
+          const fd = new FormData();
+          fd.append("audio", blob, "voice.webm");
+          const res = await fetch("/api/transcribe", { method: "POST", body: fd });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Transcription failed");
+          if (data.transcript) insertAtCursor(data.transcript);
+        } catch (err) {
+          setRecordError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+      setRecordingSecs(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSecs((s) => s + 1);
+      }, 1000);
+    } catch (err) {
+      setRecordError(err instanceof Error ? err.message : "Microphone access denied");
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
   };
 
   const uploadFiles = async (files: File[]) => {
@@ -206,6 +270,31 @@ function SessionsEmptyState() {
                 <Paperclip className="h-3 w-3" />
               </button>
               <button
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isTranscribing}
+                title={isRecording ? "Stop recording" : "Record voice message"}
+                type="button"
+                className={`flex items-center gap-1 p-1 text-[11px] tabular-nums rounded transition-colors ${
+                  isRecording
+                    ? "text-red-500 bg-red-500/10"
+                    : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
+                }`}
+              >
+                {isTranscribing ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : isRecording ? (
+                  <>
+                    <Square className="h-3 w-3 fill-current" />
+                    <span className="flex items-center gap-1 pr-0.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                      {String(Math.floor(recordingSecs / 60)).padStart(1, "0")}:{String(recordingSecs % 60).padStart(2, "0")}
+                    </span>
+                  </>
+                ) : (
+                  <Mic className="h-3 w-3" />
+                )}
+              </button>
+              <button
                 onClick={() => setFolderBrowserOpen(true)}
                 className={`flex items-center gap-1 text-[11px] transition-colors px-1.5 py-0.5 rounded min-w-0 ${
                   folderPath
@@ -318,6 +407,10 @@ function SessionsEmptyState() {
 
         {session.error && (
           <p className="text-xs text-destructive text-center">{session.error}</p>
+        )}
+
+        {recordError && (
+          <p className="text-xs text-destructive text-center">{recordError}</p>
         )}
 
         {session.starting && (
