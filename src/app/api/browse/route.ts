@@ -129,6 +129,19 @@ export async function POST(request: NextRequest) {
     await mkdir(newPath, { recursive: false });
     return Response.json({ ok: true, path: newPath, name: safeName });
   } catch (err) {
+    // Already exists as a directory (e.g. an existing project) — that's
+    // what the user wants to navigate into, not an error.
+    if (err instanceof Error && "code" in err && err.code === "EEXIST") {
+      try {
+        const { stat } = await import("fs/promises");
+        const existing = await stat(newPath);
+        if (existing.isDirectory()) {
+          return Response.json({ ok: true, path: newPath, name: safeName, existed: true });
+        }
+      } catch {
+        // fall through to generic error below
+      }
+    }
     const msg = err instanceof Error ? err.message : "Unknown error";
     return Response.json({ error: msg }, { status: 500 });
   }
