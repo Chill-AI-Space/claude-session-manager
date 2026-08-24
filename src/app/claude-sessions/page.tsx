@@ -48,7 +48,8 @@ function SessionsEmptyState() {
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
-  const [selectedAgent, setSelectedAgent] = useState<AgentType>("codex");
+  const [selectedAgent, setSelectedAgent] = useState<AgentType>("claude");
+  const agentSyncedFromSettings = useRef(false);
   const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
   const compute = useComputeNode();
   const autodetect = useAutodetect();
@@ -78,6 +79,18 @@ function SessionsEmptyState() {
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     };
   }, []);
+
+  // Sync the agent picker to the configured default once settings load —
+  // this composer used to hardcode "codex" regardless of the default_agent
+  // setting. Only applies once, so it never overrides a manual pick.
+  useEffect(() => {
+    if (agentSyncedFromSettings.current) return;
+    const def = settings.default_agent;
+    if (def === "claude" || def === "codex" || def === "forge") {
+      agentSyncedFromSettings.current = true;
+      setSelectedAgent(def);
+    }
+  }, [settings.default_agent]);
 
   const startRecording = async () => {
     setRecordError(null);
