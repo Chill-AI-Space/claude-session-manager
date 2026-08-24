@@ -239,6 +239,9 @@ export async function POST(request: NextRequest) {
     const fsLib = await import("fs");
     const { scanSessions } = await import("@/lib/scanner");
     const { buildSessionContextPrompt } = await import("@/lib/orchestrator");
+    const { ensureProjectTrusted } = await import("@/lib/trust-project");
+
+    ensureProjectTrusted(resolvedProjectPath);
 
     const projectDirName = resolvedProjectPath.replace(/[\\/]/g, "-");
     const sessionsDir = path.join(claudeProjectsDir(), projectDirName);
