@@ -35,7 +35,12 @@ export async function POST(
     return Response.json({ error: "check_after_ms must be a number >= 1000" }, { status: 400 });
   }
 
-  setSessionAlarm(sessionId, message, checkAfterMs, mode);
+  // Jitter the fire time (3-30s, scaled to ~15% of the delay). Many sessions
+  // independently request round-number delays ("5 minutes") from similar
+  // starting moments, so without this their alarms cluster and all resume
+  // at once — a thundering herd that overloads the orchestrator.
+  const jitterMs = Math.floor(Math.random() * Math.min(30_000, Math.max(3_000, checkAfterMs * 0.15)));
+  setSessionAlarm(sessionId, message, checkAfterMs + jitterMs, mode);
   const alarm = getSessionAlarm(sessionId);
   return Response.json({ ok: true, alarm });
 }
