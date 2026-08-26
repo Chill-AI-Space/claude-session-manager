@@ -104,9 +104,8 @@ end tell
 if iTerm2Running then
   set payloadText to do shell script "/bin/cat " & quoted form of payloadPath
   -- Phase 1 (read-only): find the unique ID of the session matching our TTY.
-  -- We deliberately avoid select/activate here so the object binding on `s`
-  -- is not disturbed — the mis-binding bug was observed to occur when the
-  -- same `s` variable was reused for both matching and writing.
+  -- Deliberately avoid select/activate here — the mis-binding bug was observed
+  -- when the same session variable was reused for both matching and writing.
   set foundUID to ""
   tell application "iTerm"
     repeat with w in windows
