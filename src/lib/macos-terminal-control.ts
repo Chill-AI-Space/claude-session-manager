@@ -140,7 +140,7 @@ if iTerm2Running then
             delay 0.15
             tell s to write text ""
             delay 0.3
-            -- Verify delivery: iTerm's session-targeting via `tty of s` has
+            -- Verify delivery: iTerm's session-targeting via tty-of-s has
             -- been observed to occasionally deliver to the wrong session
             -- while still returning success. Re-read the session we just
             -- wrote to and confirm the payload is actually visible there
