@@ -46,7 +46,7 @@ function asAppleScriptString(value: string | null | undefined): string {
 export function sendTextToTerminalTTY(args: {
   tty: string;
   text: string;
-}): { ok: boolean; error?: string; terminal?: "iTerm2" | "Terminal"; reason?: "not_found" | "applescript" | "busy" } {
+}): { ok: boolean; error?: string; terminal?: "iTerm2" | "Terminal"; reason?: "not_found" | "applescript" | "busy" | "mismatch" } {
   const payloadPath = writeTempTextFile(args.text);
   const script = `
 set targetTTY to ${asAppleScriptString(args.tty)}
@@ -75,6 +75,28 @@ on pastePayloadForProcess(payloadPath, processName, shouldSubmit)
   end if
 end pastePayloadForProcess
 
+on ttyTail(ttyValue)
+  if ttyValue is missing value then return ""
+  set ttyText to ttyValue as text
+  if ttyText starts with "/dev/" then
+    try
+      return text 6 thru -1 of ttyText
+    on error
+      return ttyText
+    end try
+  end if
+  return ttyText
+end ttyTail
+
+on ttyMatches(candidateTTY, targetTTY)
+  if targetTTY is "" then return false
+  set candidateText to candidateTTY as text
+  set targetText to targetTTY as text
+  if candidateText is targetText then return true
+  if my ttyTail(candidateText) is my ttyTail(targetText) then return true
+  return false
+end ttyMatches
+
 tell application "System Events"
   set iTerm2Running to (count of (every process whose bundle identifier is "com.googlecode.iterm2")) > 0
 end tell
@@ -85,7 +107,7 @@ if iTerm2Running then
     repeat with w in windows
       repeat with t in tabs of w
         repeat with s in sessions of t
-          if (tty of s as text) is equal to targetTTY then
+          if my ttyMatches((tty of s as text), targetTTY) then
             try
               set sessionText to contents of s
             on error
@@ -106,11 +128,34 @@ if iTerm2Running then
               return "busy:iterm2"
             end if
             activate
+            try
+              set index of w to 1
+            end try
+            try
+              select t
+            end try
             select s
             delay 0.15
             tell s to write text payloadText newline NO
             delay 0.15
             tell s to write text ""
+            delay 0.3
+            -- Verify delivery: iTerm's session-targeting via `tty of s` has
+            -- been observed to occasionally deliver to the wrong session
+            -- while still returning success. Re-read the session we just
+            -- wrote to and confirm the payload is actually visible there
+            -- before reporting ok — a false "ok" here means a message can
+            -- silently land in an unrelated live agent session.
+            set checkLen to 30
+            if (length of payloadText) < checkLen then set checkLen to (length of payloadText)
+            set checkFragment to text 1 thru checkLen of payloadText
+            set verifyText to ""
+            try
+              set verifyText to (contents of s)
+            end try
+            if checkFragment is not "" and verifyText does not contain checkFragment then
+              return "mismatch:iterm2"
+            end if
             return "ok:iterm2"
           end if
         end repeat
@@ -122,8 +167,11 @@ end if
 tell application "Terminal"
   repeat with w in windows
     repeat with t in tabs of w
-      if (tty of t) is targetTTY then
+      if my ttyMatches((tty of t as text), targetTTY) then
         activate
+        try
+          set index of w to 1
+        end try
         set selected tab of w to t
         set frontmost of w to true
         delay 0.15
@@ -146,7 +194,15 @@ return "not_found"
         ok: false,
         reason: "busy",
         terminal: "iTerm2",
-        error: `Live iTerm2 session ${args.tty} is busy; falling back to reopen`,
+        error: `Live iTerm2 session ${args.tty} is busy`,
+      };
+    }
+    if (result === "mismatch:iterm2") {
+      return {
+        ok: false,
+        reason: "mismatch",
+        terminal: "iTerm2",
+        error: `Wrote to iTerm2 session ${args.tty} but the payload isn't visible there afterward — iTerm may have targeted the wrong session. Not delivered.`,
       };
     }
     return {
@@ -175,12 +231,18 @@ export function controlTerminalSession(args: {
   const terminalTabAction = args.action === "focus"
     ? `
         activate
+        try
+          set index of w to 1
+        end try
         set selected tab of w to t
         set frontmost of w to true
         return "ok:%MATCH%:terminal"
       `
     : `
         activate
+        try
+          set index of w to 1
+        end try
         set selected tab of w to t
         set frontmost of w to true
         tell application "System Events" to keystroke "w" using command down
@@ -190,11 +252,23 @@ export function controlTerminalSession(args: {
   const iTermAction = args.action === "focus"
     ? `
             activate
+            try
+              set index of w to 1
+            end try
+            try
+              select t
+            end try
             select s
             return "ok:%MATCH%:iterm2"
       `
     : `
             activate
+            try
+              set index of w to 1
+            end try
+            try
+              select t
+            end try
             select s
             tell application "System Events" to keystroke "w" using command down
             return "ok:%MATCH%:iterm2"
@@ -221,28 +295,77 @@ on sessionMatches(sessionName, sessionText, targetSessionId, targetProjectPath, 
   return false
 end sessionMatches
 
+on ttyTail(ttyValue)
+  if ttyValue is missing value then return ""
+  set ttyText to ttyValue as text
+  if ttyText starts with "/dev/" then
+    try
+      return text 6 thru -1 of ttyText
+    on error
+      return ttyText
+    end try
+  end if
+  return ttyText
+end ttyTail
+
+on ttyMatches(candidateTTY, targetTTY)
+  if targetTTY is "" then return false
+  set candidateText to candidateTTY as text
+  set targetText to targetTTY as text
+  if candidateText is targetText then return true
+  if my ttyTail(candidateText) is my ttyTail(targetText) then return true
+  return false
+end ttyMatches
+
 tell application "System Events"
   set iTerm2Running to (count of (every process whose bundle identifier is "com.googlecode.iterm2")) > 0
 end tell
+
+-- Fast path: match by TTY first without reading terminal scrollback/history.
 if iTerm2Running then
   tell application "iTerm"
     repeat with w in windows
       repeat with t in tabs of w
         repeat with s in sessions of t
-          if targetTTY is not "" and (tty of s) is targetTTY then
+          if my ttyMatches((tty of s as text), targetTTY) then
 ${iTermAction.replace("%MATCH%", "tty")}
           end if
+        end repeat
+      end repeat
+    end repeat
+  end tell
+end if
+
+tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if my ttyMatches((tty of t as text), targetTTY) then
+${terminalTabAction.replace("%MATCH%", "tty")}
+      end if
+    end repeat
+  end repeat
+end tell
+
+-- Fallback: if process/TTY detection failed, try matching visible titles/history.
+if iTerm2Running then
+  tell application "iTerm"
+    repeat with w in windows
+      repeat with t in tabs of w
+        repeat with s in sessions of t
           try
             set sessionName to name of s
           on error
             set sessionName to ""
           end try
+          if my sessionMatches(sessionName, "", targetSessionId, targetProjectPath, targetProjectName) then
+${iTermAction.replace("%MATCH%", "heuristic")}
+          end if
           try
             set sessionText to contents of s
           on error
             set sessionText to ""
           end try
-          if my sessionMatches(sessionName, sessionText, targetSessionId, targetProjectPath, targetProjectName) then
+          if my sessionMatches("", sessionText, targetSessionId, targetProjectPath, targetProjectName) then
 ${iTermAction.replace("%MATCH%", "heuristic")}
           end if
         end repeat
@@ -254,9 +377,6 @@ end if
 tell application "Terminal"
   repeat with w in windows
     repeat with t in tabs of w
-      if targetTTY is not "" and (tty of t) is targetTTY then
-${terminalTabAction.replace("%MATCH%", "tty")}
-      end if
       try
         set tabTitle to custom title of t
       on error
