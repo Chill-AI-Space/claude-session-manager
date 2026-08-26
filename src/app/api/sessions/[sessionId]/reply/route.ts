@@ -6,7 +6,7 @@ import { getOrchestrator } from "@/lib/orchestrator";
 import { getCodexPath } from "@/lib/codex-bin";
 import { buildCodexResumeShellCommand } from "@/lib/codex-command";
 import { openInTerminal } from "@/lib/terminal-launcher";
-import { getTTY, sendTextToTerminalTTY } from "@/lib/macos-terminal-control";
+import { getTTY, sendTextToTerminalTTYVerified } from "@/lib/macos-terminal-control";
 import { getLiveSessionFromPidMap } from "@/lib/session-pid-map";
 import { sseResponse, SSE_HEADERS } from "@/lib/claude-runner";
 import { resolveNode, proxySSE } from "@/lib/remote-compute";
@@ -117,7 +117,7 @@ export async function POST(
             const tty = liveProc ? getTTY(liveProc.pid) : null;
 
             if (tty) {
-              const injected = sendTextToTerminalTTY({ tty, text: message });
+              const injected = await sendTextToTerminalTTYVerified({ tty, text: message, transcriptPath: session.jsonl_path });
               if (injected.ok) {
                 logAction("service", "codex_reply_injected", `${injected.terminal} tty:${tty} msg_len:${message.length}`, sessionId);
                 send({ type: "status", text: `Codex reply sent to live ${injected.terminal} terminal` });
@@ -167,10 +167,10 @@ export async function POST(
     const tty = fromPidMap ? fromPidMap.tty : liveProc ? getTTY(liveProc.pid) : null;
 
     if (tty) {
-      let injected = sendTextToTerminalTTY({ tty, text: message });
+      let injected = await sendTextToTerminalTTYVerified({ tty, text: message, transcriptPath: session.jsonl_path });
       for (let attempt = 0; injected.reason === "busy" && attempt < 5; attempt++) {
         await new Promise((r) => setTimeout(r, 4000));
-        injected = sendTextToTerminalTTY({ tty, text: message });
+        injected = await sendTextToTerminalTTYVerified({ tty, text: message, transcriptPath: session.jsonl_path });
       }
       if (injected.ok) {
         logAction("service", "reply_injected", `${injected.terminal ?? ""} tty:${tty} msg_len:${message.length}`, sessionId);

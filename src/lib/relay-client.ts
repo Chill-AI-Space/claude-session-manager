@@ -15,7 +15,7 @@ import { getDb, logAction } from "./db";
 import * as dlog from "./debug-logger";
 import type { SessionRow } from "./types";
 import { detectActiveClaudeSessions } from "./process-detector";
-import { getTTY, sendTextToTerminalTTY } from "./macos-terminal-control";
+import { getTTY, sendTextToTerminalTTYVerified } from "./macos-terminal-control";
 import { buildResumeShellCommand, buildStartShellCommand } from "./session-terminal";
 import { openInTerminal } from "./terminal-launcher";
 import { claudeProjectsDir } from "./utils";
@@ -270,12 +270,13 @@ class RelayClient {
         const live = fromPidMap ? { pid: fromPidMap.pid } : detectActiveClaudeSessions().find((p) => p.sessionId === cmd.sessionId);
         const tty = fromPidMap ? fromPidMap.tty : live ? getTTY(live.pid) : null;
         if (tty) {
+          const transcriptPath = path.join(claudeProjectsDir(), session.project_path.replace(/[\\/]/g, "-"), `${cmd.sessionId}.jsonl`);
           // "busy" means Claude is mid-turn (visible "esc to interrupt") —
           // wait it out rather than fork a competing window over it.
-          let injected = sendTextToTerminalTTY({ tty, text: cmd.message });
+          let injected = await sendTextToTerminalTTYVerified({ tty, text: cmd.message, transcriptPath });
           for (let attempt = 0; injected.reason === "busy" && attempt < 5; attempt++) {
             await new Promise((r) => setTimeout(r, 4000));
-            injected = sendTextToTerminalTTY({ tty, text: cmd.message });
+            injected = await sendTextToTerminalTTYVerified({ tty, text: cmd.message, transcriptPath });
           }
           if (injected.ok) {
             logAction("service", "relay_resume_injected", `${injected.terminal ?? ""} tty:${tty}`, cmd.sessionId);

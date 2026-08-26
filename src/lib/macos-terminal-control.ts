@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { writeFileSync, unlinkSync } from "fs";
+import { writeFileSync, unlinkSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -219,6 +219,56 @@ return "not_found"
   } finally {
     try { unlinkSync(payloadPath); } catch { /* ignore */ }
   }
+}
+
+/**
+ * sendTextToTerminalTTY, but verified against ground truth: iTerm's own
+ * `tty of s` matching has been observed, confirmed live, to sometimes bind
+ * to the WRONG session while every AppleScript-internal check (including a
+ * same-session re-read) still reports success — the write and the read are
+ * both happening against the same mis-bound object, so they agree with each
+ * other and with reality. The only independent signal is the target
+ * session's actual transcript file on disk: if the payload doesn't show up
+ * there as a new line within a few seconds, the send did not really reach
+ * that session, whatever iTerm claimed.
+ *
+ * @param transcriptPath the target session's own .jsonl file
+ */
+export async function sendTextToTerminalTTYVerified(args: {
+  tty: string;
+  text: string;
+  transcriptPath: string;
+}): Promise<{ ok: boolean; error?: string; terminal?: "iTerm2" | "Terminal"; reason?: "not_found" | "applescript" | "busy" | "mismatch" }> {
+  const result = sendTextToTerminalTTY({ tty: args.tty, text: args.text });
+  if (!result.ok) return result;
+
+  const sizeBefore = (() => {
+    try {
+      return readFileSync(args.transcriptPath, "utf-8").length;
+    } catch {
+      return 0;
+    }
+  })();
+
+  const marker = args.text.slice(0, 40);
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    try {
+      const content = readFileSync(args.transcriptPath, "utf-8");
+      if (content.length > sizeBefore && content.includes(marker)) {
+        return result; // confirmed: the new content is really there
+      }
+    } catch {
+      // transcript may not exist yet on a brand-new session — keep polling
+    }
+  }
+
+  return {
+    ok: false,
+    reason: "mismatch",
+    terminal: result.terminal,
+    error: `iTerm reported success writing to tty ${args.tty}, but the target transcript never shows the new message — it was very likely delivered to a different, wrong session instead. Not trusting this delivery.`,
+  };
 }
 
 export function controlTerminalSession(args: {
