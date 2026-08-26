@@ -103,65 +103,77 @@ end tell
 
 if iTerm2Running then
   set payloadText to do shell script "/bin/cat " & quoted form of payloadPath
+  -- Phase 1 (read-only): find the unique ID of the session matching our TTY.
+  -- We deliberately avoid select/activate here so the object binding on `s`
+  -- is not disturbed — the mis-binding bug was observed to occur when the
+  -- same `s` variable was reused for both matching and writing.
+  set foundUID to ""
   tell application "iTerm"
     repeat with w in windows
       repeat with t in tabs of w
         repeat with s in sessions of t
-          if my ttyMatches((tty of s as text), targetTTY) then
-            try
-              set sessionText to contents of s
-            on error
-              set sessionText to ""
-            end try
-            set tailText to sessionText
-            try
-              set tailParagraphs to paragraphs of sessionText
-              set paraCount to count of tailParagraphs
-              if paraCount > 20 then
-                set tailText to ""
-                repeat with idx from (paraCount - 19) to paraCount
-                  set tailText to tailText & (item idx of tailParagraphs as text) & linefeed
-                end repeat
-              end if
-            end try
-            if tailText contains "esc to interrupt" or tailText contains "Starting MCP servers" then
-              return "busy:iterm2"
+          try
+            if my ttyMatches((tty of s as text), targetTTY) then
+              set foundUID to (unique ID of s) as text
+              exit repeat
             end if
-            activate
-            try
-              set index of w to 1
-            end try
-            try
-              select t
-            end try
-            select s
-            delay 0.15
-            tell s to write text payloadText newline NO
-            delay 0.15
-            tell s to write text ""
-            delay 0.3
-            -- Verify delivery: iTerm's session-targeting via tty-of-s has
-            -- been observed to occasionally deliver to the wrong session
-            -- while still returning success. Re-read the session we just
-            -- wrote to and confirm the payload is actually visible there
-            -- before reporting ok — a false "ok" here means a message can
-            -- silently land in an unrelated live agent session.
-            set checkLen to 30
-            if (length of payloadText) < checkLen then set checkLen to (length of payloadText)
-            set checkFragment to text 1 thru checkLen of payloadText
-            set verifyText to ""
-            try
-              set verifyText to (contents of s)
-            end try
-            if checkFragment is not "" and verifyText does not contain checkFragment then
-              return "mismatch:iterm2"
-            end if
-            return "ok:iterm2"
-          end if
+          end try
         end repeat
+        if foundUID is not "" then exit repeat
       end repeat
+      if foundUID is not "" then exit repeat
     end repeat
   end tell
+  -- Phase 2: write to the session resolved by unique ID (fresh object reference,
+  -- independent of the tty-based scan above).
+  if foundUID is not "" then
+    tell application "iTerm"
+      repeat with w in windows
+        repeat with t in tabs of w
+          repeat with s in sessions of t
+            try
+              if (unique ID of s as text) is foundUID then
+                try
+                  set sessionText to contents of s
+                on error
+                  set sessionText to ""
+                end try
+                set tailText to sessionText
+                try
+                  set tailParagraphs to paragraphs of sessionText
+                  set paraCount to count of tailParagraphs
+                  if paraCount > 20 then
+                    set tailText to ""
+                    repeat with idx from (paraCount - 19) to paraCount
+                      set tailText to tailText & (item idx of tailParagraphs as text) & linefeed
+                    end repeat
+                  end if
+                end try
+                if tailText contains "esc to interrupt" or tailText contains "Starting MCP servers" then
+                  return "busy:iterm2"
+                end if
+                activate
+                try
+                  set index of w to 1
+                end try
+                try
+                  select t
+                end try
+                select s
+                delay 0.15
+                tell s to write text payloadText newline NO
+                delay 0.15
+                tell s to write text ""
+                return "ok:iterm2"
+              end if
+            end try
+          end repeat
+        end repeat
+      end repeat
+    end tell
+    -- unique ID was found in phase 1 but the session disappeared between phases
+    return "uid_lost:iterm2"
+  end if
 end if
 
 tell application "Terminal"
@@ -197,12 +209,12 @@ return "not_found"
         error: `Live iTerm2 session ${args.tty} is busy`,
       };
     }
-    if (result === "mismatch:iterm2") {
+    if (result === "uid_lost:iterm2") {
       return {
         ok: false,
-        reason: "mismatch",
+        reason: "not_found",
         terminal: "iTerm2",
-        error: `Wrote to iTerm2 session ${args.tty} but the payload isn't visible there afterward — iTerm may have targeted the wrong session. Not delivered.`,
+        error: `iTerm2 session for TTY ${args.tty} disappeared between unique-ID lookup and write`,
       };
     }
     return {
