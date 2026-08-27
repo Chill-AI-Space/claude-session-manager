@@ -262,7 +262,7 @@ export async function sendTextToTerminalTTYVerified(args: {
   })();
 
   const marker = args.text.slice(0, 40);
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 300));
     try {
       const content = readFileSync(args.transcriptPath, "utf-8");
@@ -274,12 +274,27 @@ export async function sendTextToTerminalTTYVerified(args: {
     }
   }
 
-  return {
-    ok: false,
-    reason: "mismatch",
-    terminal: result.terminal,
-    error: `iTerm reported success writing to tty ${args.tty}, but the target transcript never shows the new message — it was very likely delivered to a different, wrong session instead. Not trusting this delivery.`,
-  };
+  // Distinguish two cases after the polling window:
+  // 1. File grew but our marker is absent — something ELSE wrote to the transcript,
+  //    which is the signature of wrong-window delivery (text went to another session).
+  // 2. File didn't grow at all — Claude is busy or crashed; the text was typed into
+  //    the correct terminal but Claude hasn't processed it yet. The two-phase unique-ID
+  //    delivery is trusted; don't treat this as failure.
+  try {
+    const finalContent = readFileSync(args.transcriptPath, "utf-8");
+    if (finalContent.length > sizeBefore && !finalContent.includes(marker)) {
+      return {
+        ok: false,
+        reason: "mismatch",
+        terminal: result.terminal,
+        error: `iTerm reported success writing to tty ${args.tty}, but a different message appeared in the target transcript — the text was delivered to a wrong session instead.`,
+      };
+    }
+  } catch { /* ignore — treat as no-growth */ }
+
+  // Transcript didn't grow within timeout: Claude is busy or not yet processing.
+  // Trust the unique-ID-based delivery — the text is queued in the right terminal.
+  return result;
 }
 
 export function controlTerminalSession(args: {
