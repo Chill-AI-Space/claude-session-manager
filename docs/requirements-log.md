@@ -24,9 +24,19 @@ Running log of features/decisions for this project, with status. Update in place
   - `ai-client.ts` gained an `openrouter` provider (model ids with a `/`) — title/summary/learnings generation was hard-failing on Google AI's free-tier quota; switched those to `openai/gpt-4o-mini` via OpenRouter.
   - Health-check watchdog (`scripts/tray.js`) debounced — was SIGKILL-restarting on a single slow `/api/settings` response under load; now requires two consecutive failures 6s apart.
 
-## Known issue — not yet root-caused
+## Implemented (iTerm2 delivery fixes)
 
-**iTerm2 AppleScript session mistargeting.** Confirmed live, repeatedly: `sendTextToTerminalTTY` matches the target session by `tty of s`, but iTerm sometimes binds `s` to a *different* live session anyway — and because the write and a same-object readback both go through that same mis-bound `s`, every AppleScript-internal check agrees with the wrong delivery. Fixed the *safety* side: `sendTextToTerminalTTYVerified` now polls the target session's own `.jsonl` transcript file on disk (ground truth, untouched by iTerm's object binding) and only reports success once the payload actually appears there — a wrong-session delivery is now a reported failure (`reason: "mismatch"`) instead of a silent misdelivery. The *root cause* is still open — candidate next step: match sessions by something other than `tty` (e.g. iTerm's own `unique id`), since `tty`-based matching is apparently not reliable in this iTerm2 version/config.
+**Two-phase unique-ID session targeting** (`src/lib/macos-terminal-control.ts`, commits `12a0951`, `c1a61ad`):
+- Phase 1 (read-only): scan all iTerm2 sessions for one matching the target TTY, capture its `unique ID` (UUID-like, stable per session lifetime). No `select`/`activate` calls — the mis-binding bug was observed specifically when those were made while the session variable was still live.
+- Phase 2: fresh scan by `unique ID`, then `select s` + `tell s to write text`. The write goes to the precisely identified session, not whatever iTerm's object binding resolves to after focus operations.
+- Eliminated the in-AppleScript post-write `contents of s` verification (was a readback through the same potentially mis-bound object, so it always agreed with the wrong delivery).
+
+**Smarter mismatch detection in `sendTextToTerminalTTYVerified`** (commit `bb299ed`):
+- Poll window extended from 3 s (10×300 ms) to 6 s (20×300 ms).
+- Old: any timeout → `mismatch` error. Caused false-negatives when Claude was busy/crashed mid-turn; text had already been typed into the right terminal, but JSONL hadn't flushed within 3 s → spurious 409 responses.
+- New: after polling, read the final transcript state. **Mismatch only if the file grew but doesn't include our marker** (signature of wrong-window delivery: something else wrote to the transcript). If the file didn't grow at all, trust the two-phase delivery — Claude is busy or queued — return `ok: true`.
+
+**Relay WebSocket stability note:** frequent reconnections (~every 5–10 min) observed. Not yet root-caused; messages arriving during a brief disconnect window return 503 from Cloudflare and are silently dropped by the bot.
 
 ## Rejected / not pursued
 
