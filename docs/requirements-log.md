@@ -38,6 +38,18 @@ Running log of features/decisions for this project, with status. Update in place
 
 **Relay WebSocket stability note:** frequent reconnections (~every 5–10 min) observed. Not yet root-caused; messages arriving during a brief disconnect window return 503 from Cloudflare and are silently dropped by the bot.
 
+## Implemented (MD view improvements)
+
+- **"Load N earlier messages" button** (commit `d2d8cea`): `loadAllMdMessages` callback existed but was never wired to any UI. Added clickable button at top of MD view showing count from `mdRenderStart`, spinner while loading.
+
+## Known issues / планируется
+
+- **Сообщение теряется когда сессия занята** — `reply/route.ts` ретраит 5×4 с=20 с, после чего возвращает 409 и сообщение пропадает. Нет очереди. Нужно: добавить pending message queue в orchestrator — если сессия занята, держать сообщение и доставлять когда завершится тёрн.
+
+- **LLM-фильтрация вместо минус-слов** — идея: дешёвая модель (Gemini 2.0 Flash или LLaMA 3.1 8B) на Cloudflare Worker классифицирует входящие сообщения. 0-40% → пропускаем, 40-75% → понижаем приоритет, 75%+ → отклоняем. Заменяет ручные списки ключевых слов. Нужно согласование с пользователем бота.
+
+- **Relay WebSocket нестабильность** — разрывы ~каждые 5-10 мин, сообщения в окне разрыва теряются (503 от Cloudflare). Не root-caused.
+
 ## Rejected / not pursued
 
 - **Fully automatic session rotation via CLAUDE.md instruction alone** — tested against a real 4-hour, 21-turn session; the model never wrote a requirements-log or self-cleared despite the rule being present from the start. Prose instructions in CLAUDE.md are not reliable enough on their own for this; the token-budget-warning hook above is the mechanical backstop instead.
