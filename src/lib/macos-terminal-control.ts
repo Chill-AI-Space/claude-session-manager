@@ -151,18 +151,27 @@ if iTerm2Running then
                 if tailText contains "esc to interrupt" or tailText contains "Starting MCP servers" then
                   return "busy:iterm2"
                 end if
-                activate
+                -- Write BEFORE any activate/select so that focus operations
+                -- cannot rebind the session reference. iTerm2's AppleScript
+                -- bridge was observed routing write text to the currently
+                -- focused session after activate+select, not to the referenced
+                -- session object s — moving the write first avoids that.
+                tell s to write text payloadText newline NO
+                delay 0.15
+                tell s to write text ""
+                -- Focus after writing (for user experience only)
+                try
+                  activate
+                end try
                 try
                   set index of w to 1
                 end try
                 try
                   select t
                 end try
-                select s
-                delay 0.15
-                tell s to write text payloadText newline NO
-                delay 0.15
-                tell s to write text ""
+                try
+                  select s
+                end try
                 return "ok:iterm2"
               end if
             end try
