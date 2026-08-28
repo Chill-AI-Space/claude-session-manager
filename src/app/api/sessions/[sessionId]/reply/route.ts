@@ -186,6 +186,23 @@ export async function POST(
         });
         return new Response(stream, { headers: SSE_HEADERS });
       }
+      // Session is still busy after retries — queue the message instead of dropping it.
+      // It will be delivered automatically when Claude finishes the current turn.
+      if (injected.reason === "busy") {
+        getOrchestrator().addPendingReply(sessionId, message);
+        logAction("service", "reply_queued_busy", `tty:${tty} msg_len:${message.length}`, sessionId);
+        const stream = new ReadableStream({
+          start(controller) {
+            const encoder = new TextEncoder();
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: "status", text: "Claude is busy — message queued, will be delivered when the current turn finishes" })}\n\n`)
+            );
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done", result: "Reply queued", is_error: false })}\n\n`));
+            controller.close();
+          },
+        });
+        return new Response(stream, { headers: SSE_HEADERS });
+      }
       logAction("service", "reply_inject_failed", injected.error ?? injected.reason ?? "unknown", sessionId);
       return Response.json(
         { error: `Session is live but reply could not be delivered (${injected.reason ?? "unknown"})` },

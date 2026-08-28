@@ -813,6 +813,8 @@ class SessionOrchestrator extends EventEmitter {
   private queue: TaskQueue;
   private cleanupTimer: NodeJS.Timeout | null = null;
   private permissionCheckTimer: NodeJS.Timeout | null = null;
+  // Messages queued while session was busy — delivered on next session:completed
+  private pendingReplies = new Map<string, string[]>();
 
   constructor() {
     super();
@@ -828,6 +830,62 @@ class SessionOrchestrator extends EventEmitter {
     const permCheckMs = parseInt(getSetting("permission_check_interval_ms") || "180000", 10);
     if (permCheckMs > 0) {
       this.permissionCheckTimer = setInterval(() => this.periodicPermissionCheck(), permCheckMs);
+    }
+
+    // Deliver any queued replies when a session finishes its turn
+    this.on("session:completed", ({ sessionId }: { sessionId: string }) => {
+      this.deliverPendingReply(sessionId).catch(() => {});
+    });
+  }
+
+  // ── Pending reply queue ───────────────────────────────────────────────────
+
+  /** Queue a message to be delivered to a session once it finishes its current turn. */
+  addPendingReply(sessionId: string, message: string): void {
+    const q = this.pendingReplies.get(sessionId) ?? [];
+    q.push(message);
+    this.pendingReplies.set(sessionId, q);
+    logAction("service", "pending_reply_queued", `queue_len:${q.length}`, sessionId);
+  }
+
+  hasPendingReply(sessionId: string): boolean {
+    return (this.pendingReplies.get(sessionId)?.length ?? 0) > 0;
+  }
+
+  private async deliverPendingReply(sessionId: string): Promise<void> {
+    const q = this.pendingReplies.get(sessionId);
+    if (!q?.length) return;
+    const message = q.shift()!;
+    if (q.length === 0) this.pendingReplies.delete(sessionId);
+
+    const { getLiveSessionFromPidMap } = await import("./session-pid-map");
+    const { sendTextToTerminalTTYVerified } = await import("./macos-terminal-control");
+    const db = getDb();
+    const session = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId) as { jsonl_path: string } | undefined;
+    if (!session) {
+      logAction("service", "pending_reply_no_session", "session not found", sessionId);
+      return;
+    }
+
+    const live = getLiveSessionFromPidMap(sessionId);
+    if (!live) {
+      logAction("service", "pending_reply_no_tty", "session not live", sessionId);
+      // Put it back at the front so it's not lost
+      const remaining = this.pendingReplies.get(sessionId) ?? [];
+      this.pendingReplies.set(sessionId, [message, ...remaining]);
+      return;
+    }
+
+    logAction("service", "pending_reply_delivering", `tty:${live.tty} msg_len:${message.length}`, sessionId);
+    const result = await sendTextToTerminalTTYVerified({ tty: live.tty, text: message, transcriptPath: session.jsonl_path });
+    if (result.ok) {
+      logAction("service", "pending_reply_delivered", `${result.terminal} tty:${live.tty}`, sessionId);
+      // Deliver the next queued message after this turn completes
+    } else {
+      logAction("service", "pending_reply_failed", result.error ?? result.reason ?? "unknown", sessionId);
+      // Put it back so it's retried on the next turn
+      const remaining = this.pendingReplies.get(sessionId) ?? [];
+      this.pendingReplies.set(sessionId, [message, ...remaining]);
     }
   }
 
