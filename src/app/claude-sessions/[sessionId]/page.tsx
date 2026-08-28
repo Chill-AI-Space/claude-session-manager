@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageView } from "@/components/MessageView";
 import { ReplyInput, ReplyInputHandle } from "@/components/ReplyInput";
 import { ParsedMessage, SessionRow } from "@/lib/types";
-import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud, Webhook, Send } from "lucide-react";
+import { Loader2, GitBranch, Hash, Terminal, X, Settings, Crosshair, ShieldAlert, Share2, Copy, Check, ChevronsDownUp, ChevronsUpDown, Download, Sparkles, BarChart2, ClipboardList, Archive, CircleHelp, Package, Lightbulb, Sun, Moon, ShieldCheck, ShieldOff, Plus, FolderOpen, FolderPlus, AlertTriangle, PanelRightClose, PanelRight, Paperclip, Bug, Flame, Repeat, Zap, Rocket, FileText, ScrollText, MessageSquare, Monitor, Cloud, Webhook, Send, ChevronUp } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { formatTokens } from "@/lib/utils";
 import { getActivityStatus } from "@/lib/activity-status";
@@ -241,7 +241,7 @@ export default function SessionDetailPage({
 
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
-  const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("claude");
+  const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("codex");
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [startingNewSession, setStartingNewSession] = useState(false);
@@ -1686,6 +1686,22 @@ export default function SessionDetailPage({
                 </div>
               ) : mdContent ? (
                 <div className="max-w-4xl mx-auto px-6 py-6">
+                  {mdHasEarlier && (
+                    <button
+                      onClick={loadAllMdMessages}
+                      disabled={mdLoadingEarlier}
+                      className="w-full mb-4 flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-border/50 bg-muted/30 hover:bg-muted/60 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {mdLoadingEarlier ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      )}
+                      {mdLoadingEarlier
+                        ? "Loading…"
+                        : `Load ${mdRenderStart} earlier messages`}
+                    </button>
+                  )}
                   <MarkdownContent content={mdContent} projectPath={data.project_path} compact folded={folded} highlightQuery={highlightQuery ?? undefined} />
 
                   {/* ── Live activity indicator ── */}
