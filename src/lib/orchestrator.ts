@@ -61,7 +61,8 @@ export type TaskType =
   | "stall_continue"
   | "incomplete_exit"
   | "permission_escalation"
-  | "permission_wait";
+  | "permission_wait"
+  | "ci_failure_check";
 
 export type TaskPriority = "high" | "normal" | "low";
 
@@ -1347,6 +1348,88 @@ class SessionOrchestrator extends EventEmitter {
       delayMs: 5_000, // short delay — we already waited 2+ min for detection
       scheduledAt: Date.now(),
       execute: () => this.executePermissionWait(sessionId),
+    });
+  }
+
+  // ── CI/CD failure check ────────────────────────────────────────────────────
+
+  enqueueCIFailureCheck(params: {
+    repoName: string;       // e.g. "claude-session-manager"
+    repoFullName: string;   // e.g. "Chill-AI-Space/claude-session-manager"
+    workflowName: string;
+    branch: string;
+    runUrl: string;
+  }): boolean {
+    const { repoName, repoFullName, workflowName, branch, runUrl } = params;
+    const taskId = `ci_failure_check:${repoFullName}:${branch}`;
+    const delayMs = parseInt(getSetting("github_ci_check_delay_ms") || "180000", 10);
+
+    return this.queue.add({
+      id: taskId,
+      sessionId: taskId,
+      type: "ci_failure_check",
+      priority: "normal",
+      delayMs,
+      scheduledAt: Date.now(),
+      execute: async () => {
+        const db = getDb();
+
+        // Find local project path by repo name
+        const customMap: Record<string, string> = (() => {
+          try { return JSON.parse(getSetting("github_repo_path_map") || "{}"); } catch { return {}; }
+        })();
+
+        let projectPath: string | null = customMap[repoFullName] || customMap[repoName] || null;
+
+        if (!projectPath) {
+          const row = db.prepare(`
+            SELECT project_path FROM sessions
+            WHERE archived = 0
+              AND (LOWER(project_path) LIKE '%/' || LOWER(?)
+                OR LOWER(project_path) LIKE '%/' || LOWER(?))
+            ORDER BY file_mtime DESC LIMIT 1
+          `).get(repoName, repoFullName.split("/")[1] || repoName) as { project_path: string } | undefined;
+          projectPath = row?.project_path ?? null;
+        }
+
+        if (!projectPath) {
+          dlog.warn("ci", `No local path found for repo ${repoFullName} — skipping CI check`);
+          return;
+        }
+
+        // Check if any active session is already on this project (modified in last 15 min)
+        const fifteenMinAgo = (Date.now() - 15 * 60 * 1000);
+        const activeSessions = db.prepare(`
+          SELECT session_id FROM sessions
+          WHERE project_path = ? AND archived = 0 AND file_mtime > ?
+        `).all(projectPath, fifteenMinAgo) as { session_id: string }[];
+
+        const hasActiveSession = activeSessions.some(s => isSessionActive(s.session_id));
+
+        if (hasActiveSession) {
+          dlog.info("ci", `Active session found for ${repoFullName} — CI check skipped`);
+          return;
+        }
+
+        // No one is on it — start a new session
+        const prompt = `CI/CD failed: workflow "${workflowName}" on branch "${branch}".
+Run URL: ${runUrl}
+
+Check what failed. If it's a standard fixable issue (failing test, lint error, type error, build error) — fix it and push. If it requires architectural decisions or major changes — summarize what's wrong and stop.`;
+
+        dlog.info("ci", `Starting CI fix session for ${repoFullName} in ${projectPath}`);
+
+        const proc = spawn(getClaudePath(), ["--print", "--output-format", "stream-json", "-p", prompt], {
+          cwd: projectPath,
+          env: getCleanEnv(),
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: process.platform !== "win32",
+          windowsHide: true,
+        });
+        proc.stdout?.resume();
+        proc.stderr?.resume();
+        proc.unref();
+      },
     });
   }
 

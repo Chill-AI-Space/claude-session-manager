@@ -68,6 +68,12 @@ interface RelayCommand {
   priority?: string;
   delayMs?: number;
   createIfMissing?: boolean;
+  // github_webhook fields
+  repoName?: string;
+  repoFullName?: string;
+  workflowName?: string;
+  branch?: string;
+  runUrl?: string;
 }
 
 // ── Client ───────────────────────────────────────────────────────────────────
@@ -331,6 +337,18 @@ class RelayClient {
           delayMs: cmd.delayMs || 0,
         });
         return { ok: true, taskId, action: "enqueue" };
+      }
+
+      case "github_webhook": {
+        const orch = getOrchestrator();
+        orch.enqueueCIFailureCheck({
+          repoName: cmd.repoName as string ?? "",
+          repoFullName: cmd.repoFullName as string ?? "",
+          workflowName: cmd.workflowName as string ?? "",
+          branch: cmd.branch as string ?? "",
+          runUrl: cmd.runUrl as string ?? "",
+        });
+        return { ok: true, queued: true, action: "github_webhook" };
       }
 
       default:
