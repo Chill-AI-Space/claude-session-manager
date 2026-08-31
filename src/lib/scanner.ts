@@ -5,6 +5,7 @@ import path from "path";
 import { claudeProjectsDir, UUID_RE } from "./utils";
 import { iterateLinesSync } from "./utils-server";
 import { getOrchestrator, STALL_THRESHOLD_MS, PERMISSION_WAIT_THRESHOLD_MS, detectPermissionWait, detectTestWordInLastAssistant } from "./orchestrator";
+import { syncProjectsFromSessions } from "./projects";
 
 const CLAUDE_DIR = claudeProjectsDir();
 
@@ -232,14 +233,13 @@ export async function scanSessions(
 
   let sessionsScanned = 0;
   let sessionsSkipped = 0;
-  const projectDirs = new Set<string>();
 
   // Get existing mtimes for incremental scan
   const existingMtimes = new Map<string, number>();
   const existingFtsIds = new Set<string>();
   if (mode === "incremental") {
     const rows = db
-      .prepare("SELECT session_id, file_mtime FROM sessions")
+      .prepare("SELECT session_id, file_mtime FROM sessions WHERE archived = 0")
       .all() as { session_id: string; file_mtime: number }[];
     for (const row of rows) {
       existingMtimes.set(row.session_id, row.file_mtime);
@@ -286,16 +286,6 @@ export async function scanSessions(
       last_scanned_at = @last_scanned_at
   `);
 
-  const upsertProject = db.prepare(`
-    INSERT INTO projects (project_dir, project_path, display_name, session_count, last_activity)
-    VALUES (@project_dir, @project_path, @display_name, @session_count, @last_activity)
-    ON CONFLICT(project_dir) DO UPDATE SET
-      project_path = COALESCE(@project_path, projects.project_path),
-      display_name = COALESCE(projects.custom_name, @display_name),
-      session_count = @session_count,
-      last_activity = @last_activity
-  `);
-
   // Collect FTS updates to apply after each batch (FTS operations outside transaction)
   const ftsQueue: { sessionId: string; text: string }[] = [];
 
@@ -335,7 +325,6 @@ export async function scanSessions(
         const hasFtsIndex = existingFtsIds.has(sessionId);
         if (shouldSkipSessionIncremental(existingMtime, fileMtime, hasFtsIndex)) {
           sessionsSkipped++;
-          projectDirs.add(path.basename(path.dirname(filePath)));
           continue;
         }
       }
@@ -369,8 +358,6 @@ export async function scanSessions(
         db.prepare("DELETE FROM sessions_fts WHERE session_id = ?").run(sessionId);
         continue;
       }
-
-      projectDirs.add(dirName);
 
       // Detect newly-crashed sessions → delegate to orchestrator
       // Uses file_mtime change (not just role transition) to catch repeated crashes
@@ -487,42 +474,6 @@ export async function scanSessions(
     await yieldToEventLoop();
   }
 
-  // Update projects — bulk query instead of per-project SELECT
-  const projectDirList = [...projectDirs];
-  if (projectDirList.length > 0) {
-    const placeholders = projectDirList.map(() => "?").join(",");
-    const allStats = db
-      .prepare(
-        `SELECT project_dir, COUNT(*) as count, MAX(modified_at) as last_activity,
-         MAX(project_path) as project_path
-         FROM sessions WHERE project_dir IN (${placeholders})
-         GROUP BY project_dir`
-      )
-      .all(...projectDirList) as Array<{
-      project_dir: string;
-      count: number;
-      last_activity: string;
-      project_path: string;
-    }>;
-
-    const statsMap = new Map(allStats.map((s) => [s.project_dir, s]));
-
-    const updateProjects = db.transaction(() => {
-      for (const projectDir of projectDirList) {
-        const stats = statsMap.get(projectDir);
-        const projectPath = stats?.project_path || dirToPath(projectDir);
-        upsertProject.run({
-          project_dir: projectDir,
-          project_path: projectPath,
-          display_name: projectPath.split(/[\\/]/).pop() || projectDir,
-          session_count: stats?.count ?? 0,
-          last_activity: stats?.last_activity ?? null,
-        });
-      }
-    });
-    updateProjects();
-  }
-
   // Post-scan: index Forge sessions from ~/forge/.forge.db
   try {
     const { scanForgeSessions } = await import("./forge-scanner");
@@ -543,6 +494,8 @@ export async function scanSessions(
     dlog.warn("scanner", `codex scan failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  const projectsSynced = syncProjectsFromSessions(db);
+
   // Post-scan: detect incomplete exits from DB (catches files skipped by incremental scan)
   detectIncompleteExits(db);
 
@@ -555,7 +508,7 @@ export async function scanSessions(
   const result = {
     sessionsScanned,
     sessionsSkipped,
-    projectsFound: projectDirs.size,
+    projectsFound: projectsSynced,
     duration: Date.now() - start,
   };
   dlog.info("scanner", `scan complete: ${sessionsScanned} scanned, ${sessionsSkipped} skipped, ${result.duration}ms`, result);
@@ -586,6 +539,7 @@ function detectIncompleteExits(db: ReturnType<typeof getDb>): void {
     FROM sessions
     WHERE last_message_role = 'assistant'
       AND has_result = 0
+      AND archived = 0
       AND file_mtime < ?
       AND file_mtime > ?
       AND (agent_type IS NULL OR agent_type = 'claude')
@@ -634,6 +588,7 @@ function detectStalledDelegations(db: ReturnType<typeof getDb>): void {
            has_result, file_mtime, project_path
     FROM sessions
     WHERE delegation_status = 'pending'
+      AND archived = 0
       AND reply_to_session_id IS NOT NULL
   `).all() as Array<{
     session_id: string;
