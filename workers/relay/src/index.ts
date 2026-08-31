@@ -37,8 +37,19 @@ export default {
       return corsResponse(Response.json({ status: "ok", service: "csm-relay" }));
     }
 
+    // Route: /github/:nodeId — GitHub CI/CD webhook receiver
+    const ghMatch = path.match(/^\/github\/([a-f0-9-]{36})$/);
+    if (ghMatch) {
+      const [, nodeId] = ghMatch;
+      const id = env.RELAY_NODE.idFromName(nodeId);
+      const stub = env.RELAY_NODE.get(id);
+      const doUrl = new URL(request.url);
+      doUrl.pathname = "/github_webhook";
+      return corsResponse(await stub.fetch(new Request(doUrl.toString(), request)));
+    }
+
     // Route: /node/:nodeId/...
-    const nodeMatch = path.match(/^\/node\/([a-f0-9-]{36})\/(ws|start|resume|stop|status|enqueue|list_projects|github_webhook)$/);
+    const nodeMatch = path.match(/^\/node\/([a-f0-9-]{36})\/(ws|start|resume|stop|status|enqueue|list_projects)$/);
     if (!nodeMatch) {
       return corsResponse(Response.json({ error: "Not found" }, { status: 404 }));
     }
@@ -89,6 +100,18 @@ export class RelayNode {
     // WebSocket upgrade — local Session Manager connects here
     if (action === "ws") {
       return this.handleWebSocket(request);
+    }
+
+    // GitHub CI/CD webhook — parse GitHub format, forward clean command
+    if (action === "github_webhook") {
+      if (request.method !== "POST") {
+        return Response.json({ error: "POST required" }, { status: 405 });
+      }
+      const nodeSocket = this.getNodeSocket();
+      if (!nodeSocket) {
+        return Response.json({ error: "Node not connected" }, { status: 503 });
+      }
+      return this.handleGithubWebhook(request, nodeSocket);
     }
 
     // HTTP command — remote caller sends commands here
@@ -147,6 +170,75 @@ export class RelayNode {
 
   async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
     // Will be followed by webSocketClose
+  }
+
+  // ── GitHub CI/CD webhook → forward clean command to local node ──────────
+
+  private async handleGithubWebhook(request: Request, nodeSocket: WebSocket): Promise<Response> {
+    const event = request.headers.get("x-github-event");
+    let payload: Record<string, unknown>;
+    try {
+      payload = await request.json() as Record<string, unknown>;
+    } catch {
+      return Response.json({ error: "Invalid JSON" }, { status: 400 });
+    }
+
+    const ghAction = payload.action as string;
+    const repo = payload.repository as Record<string, string> | undefined;
+    const repoName = repo?.name ?? "";
+    const repoFullName = repo?.full_name ?? repoName;
+
+    let workflowName = "";
+    let branch = "";
+    let runUrl = "";
+    let conclusion = "";
+
+    if (event === "workflow_run") {
+      const run = payload.workflow_run as Record<string, unknown> | undefined;
+      if (!run || ghAction !== "completed") {
+        return Response.json({ ok: true, skipped: "not completed workflow_run" });
+      }
+      conclusion = run.conclusion as string ?? "";
+      workflowName = run.name as string ?? "";
+      branch = run.head_branch as string ?? "";
+      runUrl = run.html_url as string ?? "";
+    } else if (event === "check_run") {
+      const run = payload.check_run as Record<string, unknown> | undefined;
+      if (!run || ghAction !== "completed") {
+        return Response.json({ ok: true, skipped: "not completed check_run" });
+      }
+      conclusion = run.conclusion as string ?? "";
+      workflowName = run.name as string ?? "";
+      const suite = run.check_suite as Record<string, unknown> | undefined;
+      branch = suite?.head_branch as string ?? "";
+      runUrl = run.html_url as string ?? "";
+    } else {
+      return Response.json({ ok: true, skipped: `unhandled event: ${event}` });
+    }
+
+    if (conclusion !== "failure") {
+      return Response.json({ ok: true, skipped: `conclusion: ${conclusion}` });
+    }
+
+    const reqId = `r${++this.requestCounter}_${Date.now()}`;
+    const command = JSON.stringify({
+      reqId,
+      action: "github_webhook",
+      repoName,
+      repoFullName,
+      workflowName,
+      branch,
+      runUrl,
+    });
+    nodeSocket.send(command);
+
+    return new Promise<Response>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(reqId);
+        resolve(Response.json({ error: "Timeout" }, { status: 504 }));
+      }, 10_000);
+      this.pendingRequests.set(reqId, { resolve, timer });
+    });
   }
 
   // ── Forward HTTP command to local node via WebSocket ────────────────────
