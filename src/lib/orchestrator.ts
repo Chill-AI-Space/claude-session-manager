@@ -1412,13 +1412,28 @@ class SessionOrchestrator extends EventEmitter {
         }
 
         // No one is on it — start a new session
+        const tgToken = getSetting("telegram_bot_token");
+        const tgChatId = getSetting("telegram_chat_id");
+        const sendTelegram = async (text: string) => {
+          if (!tgToken || !tgChatId) return;
+          try {
+            await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chat_id: tgChatId, text, parse_mode: "HTML" }),
+            });
+          } catch { /* ignore — notification is best-effort */ }
+        };
+
         const prompt = `CI/CD failed: workflow "${workflowName}" on branch "${branch}".
 Run URL: ${runUrl}
 
-Check what failed. If it's a standard fixable issue (failing test, lint error, type error, build error) — fix it and push. If it requires architectural decisions or major changes — summarize what's wrong and stop.`;
+Check what failed. If it's a standard fixable issue (failing test, lint error, type error, build error) — fix it and push.
+If it requires architectural decisions or major changes — write a short summary of what's wrong to a file named CI_FAILURE_SUMMARY.md in the project root, then stop. Do NOT attempt the fix.`;
 
         dlog.info("ci", `Starting CI fix session for ${repoFullName} in ${projectPath}`);
 
+        const outputChunks: string[] = [];
         const proc = spawn(getClaudePath(), ["--print", "--output-format", "stream-json", "-p", prompt], {
           cwd: projectPath,
           env: getCleanEnv(),
@@ -1426,8 +1441,38 @@ Check what failed. If it's a standard fixable issue (failing test, lint error, t
           detached: process.platform !== "win32",
           windowsHide: true,
         });
-        proc.stdout?.resume();
+        proc.stdout?.on("data", (chunk: Buffer) => outputChunks.push(chunk.toString()));
         proc.stderr?.resume();
+        proc.on("close", async (code: number | null) => {
+          // Check if Claude wrote a CI_FAILURE_SUMMARY.md — means it couldn't fix
+          const summaryPath = path.join(projectPath, "CI_FAILURE_SUMMARY.md");
+          let summary = "";
+          try { summary = fs.readFileSync(summaryPath, "utf8").slice(0, 800); } catch { /* no file = fixed */ }
+
+          if (summary) {
+            // Couldn't fix — notify via Telegram
+            await sendTelegram(
+              `⚠️ <b>CI не смог починить</b>\n\n` +
+              `<b>Репо:</b> ${repoFullName}\n` +
+              `<b>Workflow:</b> ${workflowName} (${branch})\n` +
+              `<b>Run:</b> ${runUrl}\n\n` +
+              `<b>Что не так:</b>\n${summary}`
+            );
+            // Clean up summary file
+            try { fs.unlinkSync(summaryPath); } catch { /* ignore */ }
+          } else if (code === 0) {
+            await sendTelegram(
+              `✅ <b>CI починил</b>\n\n` +
+              `<b>Репо:</b> ${repoFullName}\n` +
+              `<b>Workflow:</b> ${workflowName} (${branch})`
+            );
+          } else {
+            await sendTelegram(
+              `❌ <b>CI сессия упала (exit ${code})</b>\n\n` +
+              `<b>Репо:</b> ${repoFullName}\n<b>Run:</b> ${runUrl}`
+            );
+          }
+        });
         proc.unref();
       },
     });

@@ -511,6 +511,9 @@ const SETTING_DEFAULTS: Record<string, string> = {
   github_webhook_secret: "",
   github_ci_check_delay_ms: "180000",  // 3 min wait before starting a fix session
   github_repo_path_map: "{}",          // JSON: {"owner/repo": "/local/path"}
+  // Telegram notifications
+  telegram_bot_token: "",
+  telegram_chat_id: "",
   // Agent selection — which AI agent to use for new sessions
   default_agent: "codex",
   // Session choreography — inject session context (session_id + callback URL) into system prompt
