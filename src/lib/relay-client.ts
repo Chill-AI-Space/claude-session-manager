@@ -100,6 +100,7 @@ class RelayClient {
   private ws: WebSocket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private watchdogTimer: NodeJS.Timeout | null = null;
   private reconnectDelay = 1000;
   private maxReconnectDelay = 60_000;
   private destroyed = false;
@@ -137,6 +138,8 @@ class RelayClient {
       return;
     }
 
+    this.startWatchdog();
+
     this.ws.on("open", () => {
       dlog.info("relay", "connected");
       logAction("service", "relay_connected", this.serverUrl);
@@ -170,6 +173,7 @@ class RelayClient {
 
   disconnect(): void {
     this.destroyed = false; // allow future reconnect
+    this.stopWatchdog();
     this.cleanup();
     if (this.ws) {
       try { this.ws.close(1000, "manual disconnect"); } catch { /* ignore */ }
@@ -184,6 +188,7 @@ class RelayClient {
 
   destroy(): void {
     this.destroyed = true;
+    this.stopWatchdog();
     this.disconnect();
   }
 
@@ -425,6 +430,24 @@ class RelayClient {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+  }
+
+  private startWatchdog(): void {
+    if (this.watchdogTimer) return;
+    this.watchdogTimer = setInterval(() => {
+      if (!this.destroyed && getSetting("relay_enabled") === "true" && !this.connected && !this.reconnectTimer) {
+        dlog.info("relay", "watchdog: not connected, triggering reconnect");
+        this.reconnectDelay = 1000; // reset backoff so it reconnects promptly
+        this.connect();
+      }
+    }, 30_000);
+  }
+
+  private stopWatchdog(): void {
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
     }
   }
 
