@@ -241,7 +241,7 @@ export default function SessionDetailPage({
 
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
-  const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("codex");
+  const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("claude");
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [startingNewSession, setStartingNewSession] = useState(false);
