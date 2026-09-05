@@ -68,12 +68,30 @@ interface RelayCommand {
   priority?: string;
   delayMs?: number;
   createIfMissing?: boolean;
+  since?: number;
+  image_base64?: string;
+  image_filename?: string;
   // github_webhook fields
   repoName?: string;
   repoFullName?: string;
   workflowName?: string;
   branch?: string;
   runUrl?: string;
+}
+
+function saveRelayImage(base64: string, filename: string): string {
+  const tmpPath = path.join(os.tmpdir(), `telegram-${Date.now()}-${filename}`);
+  fs.writeFileSync(tmpPath, Buffer.from(base64, "base64"));
+  return tmpPath;
+}
+
+function injectImageIntoMessage(cmd: RelayCommand): string {
+  let msg = cmd.message || "";
+  if (cmd.image_base64 && cmd.image_filename) {
+    const imgPath = saveRelayImage(cmd.image_base64, cmd.image_filename);
+    msg = msg ? `${msg}\n\n[attached screenshot: ${imgPath}]` : `[attached screenshot: ${imgPath}]`;
+  }
+  return msg;
 }
 
 // ── Client ───────────────────────────────────────────────────────────────────
@@ -198,8 +216,8 @@ class RelayClient {
 
     switch (cmd.action) {
       case "start": {
-        if (!cmd.projectPath || !cmd.message) {
-          return { error: "projectPath and message required", status: 400 };
+        if (!cmd.projectPath || (!cmd.message && !cmd.image_base64)) {
+          return { error: "projectPath and message (or image) required", status: 400 };
         }
         const resolvedPath = path.resolve(cmd.projectPath);
         if (!resolvedPath.startsWith(os.homedir())) {
@@ -222,10 +240,11 @@ class RelayClient {
         }
         // Fresh interactive session (not headless) — same reasoning as resume:
         // a terminal window the user can keep driving, not a fire-and-forget stream.
-        const shellCmd = buildStartShellCommand(resolvedPath, cmd.message);
+        const shellCmd = buildStartShellCommand(resolvedPath, injectImageIntoMessage(cmd));
+        const openedAt = Date.now();
         const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedPath });
         logAction("service", "relay_start_opened", `${terminal} ${resolvedPath}`);
-        return { ok: true, terminal, projectPath: resolvedPath, action: "start" };
+        return { ok: true, terminal, projectPath: resolvedPath, openedAt, action: "start" };
       }
 
       case "list_projects": {
@@ -245,10 +264,48 @@ class RelayClient {
         }
       }
 
-      case "resume": {
-        if (!cmd.sessionId || !cmd.message) {
-          return { error: "sessionId and message required", status: 400 };
+      case "wait_for_session": {
+        // Poll until a new session JSONL appears for this project path, or timeout.
+        // Telegram bot calls this after "start" to confirm the session actually launched.
+        if (!cmd.projectPath) return { error: "projectPath required", status: 400 };
+        const resolvedPath = path.resolve(cmd.projectPath);
+        const since = cmd.delayMs ? Date.now() - cmd.delayMs : (Date.now() - 5_000); // default: look back 5s
+        // openedAt from the "start" response tells us exactly when to look from
+        const sinceTs = cmd.since ? Number(cmd.since) : since;
+        const maxWait = 50_000; // cap at 50s so we reply before the 60s worker timeout
+        const deadline = Date.now() + maxWait;
+        const projectDirName = resolvedPath.replace(/[\\/]/g, "-");
+        const projectDir = path.join(claudeProjectsDir(), projectDirName);
+
+        while (Date.now() < deadline) {
+          // Check filesystem directly — faster than waiting for DB scanner
+          try {
+            const files = fs.readdirSync(projectDir);
+            for (const f of files) {
+              if (!f.endsWith(".jsonl")) continue;
+              try {
+                const stat = fs.statSync(path.join(projectDir, f));
+                if (stat.mtimeMs >= sinceTs) {
+                  const sessionId = f.replace(".jsonl", "");
+                  logAction("service", "relay_wait_for_session_found", sessionId, sessionId);
+                  return { ok: true, found: true, sessionId, action: "wait_for_session" };
+                }
+              } catch { /* skip */ }
+            }
+          } catch { /* project dir doesn't exist yet — keep polling */ }
+
+          await new Promise((r) => setTimeout(r, 3_000));
         }
+
+        logAction("service", "relay_wait_for_session_timeout", resolvedPath);
+        return { ok: true, found: false, action: "wait_for_session" };
+      }
+
+      case "resume": {
+        if (!cmd.sessionId || (!cmd.message && !cmd.image_base64)) {
+          return { error: "sessionId and message (or image) required", status: 400 };
+        }
+        const resumeMessage = injectImageIntoMessage(cmd);
         const db = getDb();
         let session = db
           .prepare("SELECT * FROM sessions WHERE session_id = ?")
@@ -279,10 +336,10 @@ class RelayClient {
           const transcriptPath = path.join(claudeProjectsDir(), session.project_path.replace(/[\\/]/g, "-"), `${cmd.sessionId}.jsonl`);
           // "busy" means Claude is mid-turn (visible "esc to interrupt") —
           // wait it out rather than fork a competing window over it.
-          let injected = await sendTextToTerminalTTYVerified({ tty, text: cmd.message, transcriptPath });
+          let injected = await sendTextToTerminalTTYVerified({ tty, text: resumeMessage, transcriptPath });
           for (let attempt = 0; injected.reason === "busy" && attempt < 5; attempt++) {
             await new Promise((r) => setTimeout(r, 4000));
-            injected = await sendTextToTerminalTTYVerified({ tty, text: cmd.message, transcriptPath });
+            injected = await sendTextToTerminalTTYVerified({ tty, text: resumeMessage, transcriptPath });
           }
           if (injected.ok) {
             logAction("service", "relay_resume_injected", `${injected.terminal ?? ""} tty:${tty}`, cmd.sessionId);
@@ -302,7 +359,7 @@ class RelayClient {
 
         // No active process for this session — open a fresh interactive terminal,
         // resuming with the message as the initial prompt (not headless -p).
-        const shellCmd = buildResumeShellCommand(session, cmd.message);
+        const shellCmd = buildResumeShellCommand(session, resumeMessage);
         const { terminal } = await openInTerminal(shellCmd, { cwd: session.project_path });
         logAction("service", "relay_resume_opened", terminal, cmd.sessionId);
         return { ok: true, mode: "opened", terminal, action: "resume" };
