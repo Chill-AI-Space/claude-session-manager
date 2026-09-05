@@ -243,7 +243,7 @@ export default function SessionDetailPage({
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
   const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("claude");
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
-  const [includeSummary, setIncludeSummary] = useState(true);
+  const [includeSummary, setIncludeSummary] = useState(false);
   const [startingNewSession, setStartingNewSession] = useState(false);
   const [newSessionModel, setNewSessionModel] = useState("");
   const [showNewSessionOpts, setShowNewSessionOpts] = useState(false);
