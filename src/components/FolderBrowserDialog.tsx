@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +12,8 @@ import { Loader2, CheckCircle2, AlertCircle, Search, FolderOpen, Send, ChevronUp
 import { QuasarIcon } from "@/components/QuasarIcon";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { ModelSelector, MODEL_PRESETS } from "@/components/settings/ModelSelector";
+import { AgentToggleButton, type AgentType } from "@/components/AgentToggleButton";
+import { ModelSelector, getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
 import { useSettings } from "@/lib/settings";
 
 interface FolderEntry {
@@ -33,7 +33,6 @@ export function FolderBrowserDialog({
   onOpenChange,
   onSelect,
 }: FolderBrowserDialogProps) {
-  const router = useRouter();
   const [entries, setEntries] = useState<FolderEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [launchingPath, setLaunchingPath] = useState<string | null>(null);
@@ -59,7 +58,8 @@ export function FolderBrowserDialog({
   const [webMessage, setWebMessage] = useState("");
   const [webStarting, setWebStarting] = useState(false);
   const webInputRef = useRef<HTMLTextAreaElement>(null);
-  const { settings, updateSetting } = useSettings();
+  const { settings } = useSettings();
+  const [webAgent, setWebAgent] = useState<AgentType>("codex");
   const [webModel, setWebModel] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -73,12 +73,8 @@ export function FolderBrowserDialog({
       setWebMessage("");
       setCreatingFolder(false);
       setNewFolderName("");
-      // For web start, default to Forge's default model (Gemini 2.5 Flash)
-      setWebModel(
-        settings.claude_model === "claude-sonnet-4-6"
-          ? "models/gemini-2.5-flash"
-          : settings.claude_model,
-      );
+      setWebAgent("codex");
+      setWebModel(getDefaultModelForAgent("codex", settings.claude_model));
       fetch("/api/browse")
         .then((res) => res.json())
         .then((data) => {
@@ -97,7 +93,7 @@ export function FolderBrowserDialog({
           setTimeout(() => inputRef.current?.focus(), 50);
         });
     }
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -191,6 +187,7 @@ export function FolderBrowserDialog({
   const handleWebStart = (path: string) => {
     setWebStartPath(path);
     setWebMessage("");
+    setWebModel(getDefaultModelForAgent(webAgent, settings.claude_model));
     setTimeout(() => webInputRef.current?.focus(), 50);
   };
 
@@ -211,7 +208,7 @@ export function FolderBrowserDialog({
         body: JSON.stringify({
           path: webStartPath,
           message: webMessage.trim(),
-          agent: "forge",
+          agent: webAgent,
           model: webModel,
         }),
       });
@@ -440,11 +437,21 @@ export function FolderBrowserDialog({
                   >✕</button>
                 </div>
                 <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <AgentToggleButton
+                      agent={webAgent}
+                      onCycle={(next) => {
+                        setWebAgent(next);
+                        setWebModel(getDefaultModelForAgent(next, settings.claude_model));
+                      }}
+                    />
+                  </div>
                   <ModelSelector
-                    settingKey="claude_model" // Re-using claude_model for Forge selection
+                    settingKey="claude_model"
                     currentModel={webModel || ""}
                     onUpdate={(_, model) => setWebModel(model)}
-                    label="Forge Model"
+                    label="Model"
+                    presets={getModelPresetsForAgent(webAgent)}
                   />
                   <div className="flex gap-2 items-end">
                     <textarea
@@ -457,7 +464,7 @@ export function FolderBrowserDialog({
                           submitWebStart();
                         }
                       }}
-                      placeholder="First message to Forge..."
+                      placeholder={`First message to ${webAgent === "forge" ? "Forge" : webAgent === "codex" ? "Codex" : "Claude"}...`}
                       rows={2}
                       className="flex-1 resize-none bg-muted/30 border border-input rounded px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
                       disabled={webStarting}
