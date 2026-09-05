@@ -336,7 +336,11 @@ export default function SessionDetailPage({
   const fetchSession = useCallback(async ({ clearExtras = false } = {}) => {
     const gen = ++fetchGenRef.current;
     try {
-      const res = await fetch(apiUrl(`/api/sessions/${sessionId}`));
+      // Fire session + alarm in parallel to avoid serial round-trips
+      const [res, alarmData] = await Promise.all([
+        fetch(apiUrl(`/api/sessions/${sessionId}`)),
+        fetchAlarm(),
+      ]);
       if (gen !== fetchGenRef.current) return; // stale
       if (!res.ok) {
         setError("Session not found");
@@ -345,7 +349,7 @@ export default function SessionDetailPage({
       const json = await res.json();
       if (gen !== fetchGenRef.current) return; // stale
       if (!("alarm" in json)) {
-        json.alarm = await fetchAlarm();
+        json.alarm = alarmData;
       }
       if (gen !== fetchGenRef.current) return; // stale
       const prevTotal = prevTotalRef.current;
@@ -2629,13 +2633,21 @@ export default function SessionDetailPage({
                     }`}
                   >
                     {startingNewSession ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>{contextTransferState === "loading" ? "Getting context..." : "Starting..."}</span>
+                      </>
                     ) : newSessionAgent === "codex" ? (
-                      <Terminal className="h-3.5 w-3.5" />
+                      <>
+                        <Terminal className="h-3.5 w-3.5" />
+                        <span>Start in terminal</span>
+                      </>
                     ) : (
-                      <Send className="h-3.5 w-3.5" />
+                      <>
+                        <Send className="h-3.5 w-3.5" />
+                        <span>Start new session</span>
+                      </>
                     )}
-                    <span>{newSessionAgent === "codex" ? "Start in terminal" : "Start new session"}</span>
                   </button>
                 </div>
               </div>
