@@ -93,10 +93,12 @@ export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | 
         "  activate",
         `  if ${iTermWasRunning ? "true" : "false"} then`,
         "    set newWindow to (create window with default profile)",
+        "    delay 0.5",
         "  else",
         "    delay 0.2",
         "    if (count of windows) = 0 then",
         "      set newWindow to (create window with default profile)",
+        "      delay 0.5",
         "    else",
         "      set newWindow to current window",
         "    end if",
@@ -113,7 +115,10 @@ export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | 
         "end tell",
       ].join("\n");
 
-  await execFileAsync("osascript", ["-e", script]);
+  // Fire-and-forget with a timeout — osascript can hang indefinitely if iTerm2
+  // is busy (e.g. user is actively typing). We don't need to wait for the shell
+  // command to finish; we just need the text delivered to the terminal.
+  await execFileAsync("osascript", ["-e", script], { timeout: 10_000 });
   return { terminal: useIterm ? "iTerm2" : "Terminal" };
 }
 
