@@ -210,10 +210,18 @@ export async function POST(
       );
     }
     if (liveProc) {
-      return Response.json(
-        { error: "Session is live but has no controllable terminal; reply not delivered" },
-        { status: 409 }
-      );
+      // Headless process running (no TTY) — queue the reply for delivery when it finishes
+      getOrchestrator().addPendingReply(sessionId, message);
+      logAction("service", "reply_queued_no_tty", `pid:${liveProc.pid} msg_len:${message.length}`, sessionId);
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "status", text: "Session is computing — message queued, will be delivered when the current turn finishes" })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done", result: "Reply queued", is_error: false })}\n\n`));
+          controller.close();
+        },
+      });
+      return new Response(stream, { headers: SSE_HEADERS });
     }
   }
 

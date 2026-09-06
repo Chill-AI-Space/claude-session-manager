@@ -655,6 +655,7 @@ export default function SessionDetailPage({
         processingRef.current = false;
         setQueuedMessages([...queueRef.current]);
         fetchSession({ clearExtras: true }).catch(() => {});
+        setTimeout(() => processQueueRef.current(), 0);
       }, delay);
       return () => clearTimeout(timer);
     }
@@ -671,6 +672,7 @@ export default function SessionDetailPage({
         processingRef.current = false;
         setQueuedMessages([...queueRef.current]);
         fetchSession({ clearExtras: true }).catch(() => {});
+        setTimeout(() => processQueueRef.current(), 0);
       }
     }, 5_000);
     return () => clearInterval(check);

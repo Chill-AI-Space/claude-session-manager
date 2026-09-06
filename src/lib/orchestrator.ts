@@ -870,10 +870,9 @@ class SessionOrchestrator extends EventEmitter {
 
     const live = getLiveSessionFromPidMap(sessionId);
     if (!live) {
-      logAction("service", "pending_reply_no_tty", "session not live", sessionId);
-      // Put it back at the front so it's not lost
-      const remaining = this.pendingReplies.get(sessionId) ?? [];
-      this.pendingReplies.set(sessionId, [message, ...remaining]);
+      // Session process is gone — resume headlessly so the message is delivered
+      logAction("service", "pending_reply_headless_resume", `msg_len:${message.length}`, sessionId);
+      this.enqueue({ sessionId, type: "resume", message, priority: "high" });
       return;
     }
 
