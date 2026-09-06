@@ -118,7 +118,6 @@ function getPortPid() {
 function freePort() {
   const pid = getPortPid();
   if (!pid) return;
-  // Don't kill our own children
   try {
     const cmdLine = execSync(`ps -p ${pid} -o command=`, { encoding: 'utf8' }).trim();
     if (cmdLine.includes('next') && cmdLine.includes('claude-session-manager')) {
@@ -127,18 +126,35 @@ function freePort() {
       log(`Port ${PORT} held by foreign process (PID ${pid}): ${cmdLine.slice(0, 80)}`);
     }
     process.kill(pid, 'SIGTERM');
-    // Give it a moment to die
     execSync('sleep 1');
-    // Check if still alive
+    // Force-kill if still alive
     try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); } catch {}
+    // Kill any remaining PIDs holding the port (Next.js can have multiple workers)
+    for (let i = 0; i < 3; i++) {
+      const extra = getPortPid();
+      if (!extra) break;
+      try { process.kill(extra, 'SIGKILL'); } catch {}
+      execSync('sleep 1');
+    }
     log(`Freed port ${PORT}`);
   } catch (e) {
     logErr(`Could not free port ${PORT}: ${e.message}`);
   }
 }
 
+// Wait (synchronously) until lsof shows the port is truly free, up to maxMs.
+function waitForPortFree(maxMs = 5000) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (!getPortPid()) return;
+    execSync('sleep 0.3');
+  }
+  log(`Port ${PORT} still in use after ${maxMs}ms — proceeding anyway`);
+}
+
 // Free port before starting
 freePort();
+waitForPortFree(5000);
 
 // --- Start Next.js server ---
 const nextBin = isWin
@@ -225,6 +241,8 @@ async function ensureServerRunning() {
 
     // Free port in case something else grabbed it
     freePort();
+    // Wait until port is truly free before spawning — prevents EADDRINUSE
+    waitForPortFree(5000);
 
     // Spawn new server
     server = spawnServer();
