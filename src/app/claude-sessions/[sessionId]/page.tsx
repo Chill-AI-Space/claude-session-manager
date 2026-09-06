@@ -147,6 +147,8 @@ export default function SessionDetailPage({
     return `${path}${qs ? `?${qs}` : ""}`;
   }, [remoteNodeId]);
   const [data, setData] = useState<SessionDetailData | null>(null);
+  // Tracks last-seen key fields to skip setData when nothing meaningful changed
+  const prevDataSigRef = useRef<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -352,8 +354,17 @@ export default function SessionDetailPage({
       const prevTotal = prevTotalRef.current;
       prevTotalRef.current = json.messages_total;
       setCachedSession(sessionId, json);
-      setData(json);
-      setEarliestLoaded(json.messages_start);
+
+      // Skip setData (and full React re-render) when nothing meaningful changed.
+      // Meaningful = new messages, activity state, alarm, or process vitals.
+      const newSig = `${json.messages_total}|${json.is_active}|${JSON.stringify(json.alarm)}|${json.process_vitals?.cpu_percent ?? ""}`;
+      const meaningfulChange = clearExtras || newSig !== prevDataSigRef.current;
+      prevDataSigRef.current = newSig;
+      if (meaningfulChange) {
+        setData(json);
+        setEarliestLoaded(json.messages_start);
+      }
+
       // Clear optimistic extras whenever server data has grown (prevents duplicates)
       if (clearExtras || json.messages_total > prevTotal) {
         setExtraMessages([]);
@@ -405,6 +416,7 @@ export default function SessionDetailPage({
     setStreamError(null);
     setStreamStatus(null);
     lastStreamEventRef.current = 0;
+    prevDataSigRef.current = "";
     setTerminalKilled(false);
     setHasReplied(false);
     setMdView(true);

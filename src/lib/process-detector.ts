@@ -1,4 +1,4 @@
-import { execSync, execFileSync } from "child_process";
+import { execSync, execFileSync, exec } from "child_process";
 import fs from "fs";
 import path from "path";
 import { claudeProjectsDir } from "./utils";
@@ -29,9 +29,38 @@ export interface ProcessVitals {
   elapsed_secs: number;
 }
 
-// Short-lived cache for vitals (2 seconds) — fresh enough for UI polling at 4s
+// Vitals cache (ps call): 10s TTL — ps is cheap but no need to run on every 2s poll
 const vitalsCache = new Map<number, { vitals: ProcessVitals; ts: number }>();
-const VITALS_TTL_MS = 2000;
+const VITALS_TTL_MS = 10_000;
+
+// TCP state cache: updated asynchronously so lsof never blocks the event loop.
+// lsof on a long-running Claude process with hundreds of TCP connections can take 150-500ms.
+const tcpCache = new Map<number, { hasEstablished: boolean; connections: string[]; ts: number }>();
+const TCP_TTL_MS = 15_000; // refresh TCP state at most once per 15s per PID
+const tcpRefreshing = new Set<number>(); // prevent concurrent lsof runs for same PID
+
+function refreshTcpAsync(pid: number): void {
+  if (isWin || tcpRefreshing.has(pid)) return;
+  const cached = tcpCache.get(pid);
+  if (cached && Date.now() - cached.ts < TCP_TTL_MS) return;
+  tcpRefreshing.add(pid);
+  exec(`${LSOF} -n -p ${pid} -i TCP 2>/dev/null`, { timeout: 8000 }, (err, stdout) => {
+    tcpRefreshing.delete(pid);
+    const connections: string[] = [];
+    let hasEstablished = false;
+    if (!err && stdout) {
+      for (const line of stdout.split("\n")) {
+        if (!line.includes("ESTABLISHED")) continue;
+        hasEstablished = true;
+        const fields = line.trim().split(/\s+/);
+        const addrField = fields[fields.length - 2] || "";
+        const remote = addrField.includes("->") ? addrField.split("->")[1] : addrField;
+        if (remote) connections.push(remote);
+      }
+    }
+    tcpCache.set(pid, { hasEstablished, connections, ts: Date.now() });
+  });
+}
 
 // Cache active sessions for 5 seconds
 let cachedResult: { processes: ActiveProcess[]; timestamp: number } | null = null;
@@ -450,24 +479,12 @@ export function getProcessVitals(pid: number): ProcessVitals | null {
     const mem_mb = Math.round((parseInt(parts[2]) || 0) / 1024);
     const elapsed_secs = parseElapsedTime(parts[3]);
 
-    // TCP connections via lsof — look for ESTABLISHED
-    let has_established_tcp = false;
-    const tcp_connections: string[] = [];
-    try {
-      const lsofOut = execSync(
-        `${LSOF} -n -p ${pid} -i TCP 2>/dev/null || true`,
-        { encoding: "utf-8", timeout: 2000 }
-      );
-      for (const line of lsofOut.split("\n")) {
-        if (!line.includes("ESTABLISHED")) continue;
-        has_established_tcp = true;
-        // Last field is "local->remote (STATE)" — extract remote part
-        const fields = line.trim().split(/\s+/);
-        const addrField = fields[fields.length - 2] || ""; // e.g. "host:port->remote:port"
-        const remote = addrField.includes("->") ? addrField.split("->")[1] : addrField;
-        if (remote) tcp_connections.push(remote);
-      }
-    } catch { /* lsof may fail */ }
+    // TCP connections: read from async background cache, trigger refresh if stale.
+    // Never blocks the event loop — lsof runs asynchronously.
+    refreshTcpAsync(pid);
+    const tcpState = tcpCache.get(pid);
+    const has_established_tcp = tcpState?.hasEstablished ?? false;
+    const tcp_connections = tcpState?.connections ?? [];
 
     const vitals: ProcessVitals = { pid, cpu_percent, mem_mb, has_established_tcp, tcp_connections, elapsed_secs };
     vitalsCache.set(pid, { vitals, ts: Date.now() });
