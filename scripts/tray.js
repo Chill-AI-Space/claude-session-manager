@@ -180,9 +180,9 @@ function spawnServer() {
 server = spawnServer();
 
 // --- Server health check & restart ---
-function checkServerHealth() {
+function checkServerHealth(timeoutMs = 6000) {
   return new Promise((resolve) => {
-    const req = http.get(`http://localhost:${PORT}/api/settings`, { timeout: 6000 }, (res) => {
+    const req = http.get(`http://localhost:${PORT}/api/settings`, { timeout: timeoutMs }, (res) => {
       resolve(res.statusCode === 200);
     });
     req.on('error', () => resolve(false));
@@ -190,14 +190,20 @@ function checkServerHealth() {
   });
 }
 
+// Retry delays (ms) between confirmation checks once the first check fails.
+// A busy-but-alive server (e.g. parsing a large JSONL session, or streaming
+// a headless Claude reply) can legitimately block Node's event loop for well
+// over the old ~14s total grace window. SIGKILL-ing it mid-reply doesn't just
+// "restart a hung server" — it destroys the very in-flight session the user
+// is watching in the browser. Give it real time to come back on its own
+// before treating it as dead.
+const HEALTH_RETRY_DELAYS_MS = [2000, 5000, 10000, 15000];
+
 async function ensureServerRunning() {
   if (restartInFlight) return false;
   let healthy = await checkServerHealth();
-  if (!healthy) {
-    // Debounce: a single slow response (event-loop blip under load from many
-    // concurrent Claude Code sessions hitting the API) shouldn't trigger a
-    // full SIGKILL + restart. Confirm with a second check before acting.
-    await new Promise((r) => setTimeout(r, 2000));
+  for (let i = 0; !healthy && i < HEALTH_RETRY_DELAYS_MS.length; i++) {
+    await new Promise((r) => setTimeout(r, HEALTH_RETRY_DELAYS_MS[i]));
     healthy = await checkServerHealth();
   }
   if (healthy) return true;
