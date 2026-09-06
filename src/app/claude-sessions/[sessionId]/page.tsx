@@ -284,6 +284,11 @@ export default function SessionDetailPage({
     setTheme(saved === "light" ? "light" : "dark");
   }, []);
 
+  // Fetch settings once on mount — not on every session switch
+  useEffect(() => {
+    fetch("/api/settings").then(r => r.json()).then(setSettings).catch(() => {});
+  }, []);
+
   // Poll for pending permission requests (every 2s) — only when session is active
   useEffect(() => {
     if (!data?.is_active && !isStreaming) return;
@@ -336,21 +341,13 @@ export default function SessionDetailPage({
   const fetchSession = useCallback(async ({ clearExtras = false } = {}) => {
     const gen = ++fetchGenRef.current;
     try {
-      // Fire session + alarm in parallel to avoid serial round-trips
-      const [res, alarmData] = await Promise.all([
-        fetch(apiUrl(`/api/sessions/${sessionId}`)),
-        fetchAlarm(),
-      ]);
+      const res = await fetch(apiUrl(`/api/sessions/${sessionId}`));
       if (gen !== fetchGenRef.current) return; // stale
       if (!res.ok) {
         setError("Session not found");
         return;
       }
       const json = await res.json();
-      if (gen !== fetchGenRef.current) return; // stale
-      if (!("alarm" in json)) {
-        json.alarm = alarmData;
-      }
       if (gen !== fetchGenRef.current) return; // stale
       const prevTotal = prevTotalRef.current;
       prevTotalRef.current = json.messages_total;
@@ -370,7 +367,7 @@ export default function SessionDetailPage({
     } finally {
       setLoading(false);
     }
-  }, [sessionId, apiUrl, fetchAlarm]);
+  }, [sessionId, apiUrl]);
 
   // Backoff polling trigger — incremented to start a new backoff cycle
   const [backoffTrigger, setBackoffTrigger] = useState(0);
@@ -435,8 +432,6 @@ export default function SessionDetailPage({
       setEarliestLoaded(null);
     }
     fetchSession().catch(() => {});
-    // Fetch settings for status bar
-    fetch("/api/settings").then(r => r.json()).then(setSettings).catch(() => {});
     // Log UI load event
     fetch("/api/actions-log", {
       method: "POST",

@@ -63,9 +63,10 @@ export function readSessionMessages(
 }
 
 /**
- * Optimized reader: counts total messages without building full objects,
- * then only parses the requested page. Avoids O(N) object allocations
- * for sessions with thousands of messages.
+ * Sliding-window reader: keeps only the last RING_SIZE messages in memory while
+ * counting total for pagination. Avoids O(N) allocations for large sessions.
+ * Falls back to full scan only when the requested page is outside the window
+ * (explicit "load earlier" on very long sessions).
  */
 export function readSessionMessagesPaginated(
   jsonlPath: string,
@@ -76,9 +77,11 @@ export function readSessionMessagesPaginated(
   }
 
   const pageSize = opts.pageSize;
-  const allMessages: ParsedMessage[] = [];
+  const RING_SIZE = pageSize * 4 + 50;
 
-  // Stream lines and parse into messages
+  let window: ParsedMessage[] = [];
+  let totalCount = 0;
+
   for (const line of iterateLinesSync(jsonlPath)) {
     try {
       const obj = JSON.parse(line);
@@ -98,7 +101,7 @@ export function readSessionMessagesPaginated(
         const toolResults = extractToolResultBlocks(content);
         if (toolResults) {
           appendToolResults(
-            allMessages,
+            window,
             toolResults,
             obj.timestamp || "",
             obj.uuid || obj.messageId || ""
@@ -133,7 +136,104 @@ export function readSessionMessagesPaginated(
       }
 
       if (msg) {
-        // Merge logic
+        const last = window[window.length - 1];
+        if (msg.type === "assistant" && last?.type === "assistant" && msg.uuid === last.uuid) {
+          // Streaming chunk merge — same UUID, update in place
+          if (Array.isArray(last.content) && Array.isArray(msg.content)) {
+            last.content = [...last.content, ...msg.content];
+          }
+          if (msg.usage) last.usage = msg.usage;
+          if (msg.model) last.model = msg.model;
+        } else {
+          window.push(msg);
+          totalCount++;
+          // Trim window from the front when it grows too large
+          if (window.length > RING_SIZE * 2) {
+            window = window.slice(-RING_SIZE);
+          }
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  const total = totalCount;
+  const before = opts.before ?? total;
+  const start = Math.max(0, before - pageSize);
+
+  // Map global message indices to window-local indices
+  const windowBaseIndex = total - window.length;
+
+  // If the requested page is entirely before the window, fall back to full scan.
+  // This is rare — only triggered by explicit "load earlier" on very large sessions.
+  if (start < windowBaseIndex && before <= windowBaseIndex) {
+    return readSessionMessagesPaginatedFull(jsonlPath, opts);
+  }
+
+  const sliceStart = Math.max(0, start - windowBaseIndex);
+  const sliceEnd = Math.max(0, before - windowBaseIndex);
+
+  return {
+    messages: window.slice(sliceStart, sliceEnd),
+    total,
+    start,
+  };
+}
+
+/** Full-scan fallback for "load earlier" pages outside the ring buffer window. */
+function readSessionMessagesPaginatedFull(
+  jsonlPath: string,
+  opts: { pageSize: number; before?: number }
+): { messages: ParsedMessage[]; total: number; start: number } {
+  const allMessages: ParsedMessage[] = [];
+
+  for (const line of iterateLinesSync(jsonlPath)) {
+    try {
+      const obj = JSON.parse(line);
+      let msg: ParsedMessage | null = null;
+
+      if (obj.type === "system" && obj.subtype === "compact_boundary") {
+        msg = {
+          uuid: obj.uuid || "",
+          type: "compact_boundary",
+          timestamp: obj.timestamp || "",
+          content: obj.content || "Conversation compacted",
+          compactMetadata: obj.compactMetadata,
+        };
+      } else if (obj.type === "user" && obj.message?.role === "user") {
+        if (obj.isMeta) continue;
+        const content = obj.message.content;
+        const toolResults = extractToolResultBlocks(content);
+        if (toolResults) {
+          appendToolResults(allMessages, toolResults, obj.timestamp || "", obj.uuid || obj.messageId || "");
+          continue;
+        }
+        msg = {
+          uuid: obj.uuid || obj.messageId || "",
+          type: "user",
+          timestamp: obj.timestamp || "",
+          content: obj.message.content,
+          git_branch: obj.gitBranch,
+          cwd: obj.cwd,
+        };
+      } else if (obj.type === "assistant" && obj.message?.role === "assistant") {
+        msg = {
+          uuid: obj.uuid || "",
+          type: "assistant",
+          timestamp: obj.timestamp || "",
+          content: obj.message.content || [],
+          model: obj.message.model,
+          usage: obj.message.usage ? {
+            input_tokens: obj.message.usage.input_tokens || 0,
+            output_tokens: obj.message.usage.output_tokens || 0,
+            cache_read_input_tokens: obj.message.usage.cache_read_input_tokens || 0,
+            cache_creation_input_tokens: obj.message.usage.cache_creation_input_tokens || 0,
+          } : undefined,
+          git_branch: obj.gitBranch,
+          cwd: obj.cwd,
+        };
+      }
+
+      if (msg) {
         const last = allMessages[allMessages.length - 1];
         if (msg.type === "assistant" && last?.type === "assistant" && msg.uuid === last.uuid) {
           if (Array.isArray(last.content) && Array.isArray(msg.content)) {
@@ -150,12 +250,8 @@ export function readSessionMessagesPaginated(
 
   const total = allMessages.length;
   const before = opts.before ?? total;
-  const start = Math.max(0, before - pageSize);
-  return {
-    messages: allMessages.slice(start, before),
-    total,
-    start,
-  };
+  const start = Math.max(0, before - opts.pageSize);
+  return { messages: allMessages.slice(start, before), total, start };
 }
 
 function parseLines(lines: Iterable<string>): ParsedMessage[] {

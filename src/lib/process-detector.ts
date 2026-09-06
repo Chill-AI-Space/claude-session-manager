@@ -35,7 +35,7 @@ const VITALS_TTL_MS = 2000;
 
 // Cache active sessions for 5 seconds
 let cachedResult: { processes: ActiveProcess[]; timestamp: number } | null = null;
-const CACHE_TTL_MS = 5000;
+const CACHE_TTL_MS = 8000;
 
 const CLAUDE_DIR = claudeProjectsDir();
 
