@@ -2,6 +2,36 @@ import fs from "fs";
 import { ParsedMessage, ContentBlock } from "./types";
 import { iterateLinesSync } from "./utils-server";
 
+// LRU cache: parsed messages keyed by (filePath, mtime).
+// Avoids re-reading large JSONL files on repeated clicks to the same session.
+interface MessageCacheEntry {
+  mtime: number;
+  messages: ParsedMessage[];
+  accessedAt: number;
+}
+const MESSAGE_CACHE_MAX = 15;
+const messageCache = new Map<string, MessageCacheEntry>();
+
+function getCached(filePath: string, mtime: number): ParsedMessage[] | null {
+  const entry = messageCache.get(filePath);
+  if (!entry || entry.mtime !== mtime) return null;
+  entry.accessedAt = Date.now();
+  return entry.messages;
+}
+
+function putCached(filePath: string, mtime: number, messages: ParsedMessage[]): void {
+  if (messageCache.size >= MESSAGE_CACHE_MAX) {
+    // Evict least-recently-used entry
+    let lruKey = "";
+    let lruTime = Infinity;
+    for (const [k, v] of messageCache) {
+      if (v.accessedAt < lruTime) { lruTime = v.accessedAt; lruKey = k; }
+    }
+    if (lruKey) messageCache.delete(lruKey);
+  }
+  messageCache.set(filePath, { mtime, messages, accessedAt: Date.now() });
+}
+
 function extractToolResultBlocks(content: unknown): ContentBlock[] | null {
   if (!Array.isArray(content) || content.length === 0) return null;
 
@@ -47,19 +77,27 @@ export function readSessionMessages(
     return [];
   }
 
-  const messages = parseLines(iterateLinesSync(jsonlPath));
+  let messages: ParsedMessage[];
 
-  // Merge consecutive assistant messages (streaming chunks)
-  const merged = mergeConsecutiveAssistant(messages);
+  // Use cache if file hasn't changed — avoids re-parsing 50MB+ JSONL on every click
+  const mtime = fs.statSync(jsonlPath).mtimeMs;
+  const cached = getCached(jsonlPath, mtime);
+  if (cached) {
+    messages = cached;
+  } else {
+    const parsed = parseLines(iterateLinesSync(jsonlPath));
+    messages = mergeConsecutiveAssistant(parsed);
+    putCached(jsonlPath, mtime, messages);
+  }
 
   // Apply offset and limit
   if (options?.offset || options?.limit) {
     const start = options.offset || 0;
     const end = options.limit ? start + options.limit : undefined;
-    return merged.slice(start, end);
+    return messages.slice(start, end);
   }
 
-  return merged;
+  return messages;
 }
 
 /**
@@ -74,6 +112,17 @@ export function readSessionMessagesPaginated(
 ): { messages: ParsedMessage[]; total: number; start: number } {
   if (!fs.existsSync(jsonlPath)) {
     return { messages: [], total: 0, start: 0 };
+  }
+
+  // If the full message list is already cached (from a prior readSessionMessages call
+  // or a previous paginated read), use it directly — avoids re-reading the JSONL file.
+  const mtime = fs.statSync(jsonlPath).mtimeMs;
+  const cached = getCached(jsonlPath, mtime);
+  if (cached) {
+    const total = cached.length;
+    const before = opts.before ?? total;
+    const start = Math.max(0, before - opts.pageSize);
+    return { messages: cached.slice(start, before), total, start };
   }
 
   const pageSize = opts.pageSize;
