@@ -424,6 +424,15 @@ export async function scanSessions(
         }
       }
 
+      // Deliver any pending web-queued reply when a terminal session finishes its turn.
+      // session:completed fires only for web-started sessions; terminal sessions are handled here.
+      if (metadata.lastMessageRole === "assistant" && metadata.hasResult) {
+        const capturedSessionId = sessionId;
+        postTxActions.push(() => {
+          getOrchestrator().checkAndDeliverPendingReply(capturedSessionId);
+        });
+      }
+
       upsertSession.run({
         session_id: sessionId,
         jsonl_path: filePath,

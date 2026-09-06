@@ -853,6 +853,13 @@ class SessionOrchestrator extends EventEmitter {
     return (this.pendingReplies.get(sessionId)?.length ?? 0) > 0;
   }
 
+  /** Called by the scanner when a terminal session finishes its turn (has_result=true). */
+  checkAndDeliverPendingReply(sessionId: string): void {
+    if (this.hasPendingReply(sessionId)) {
+      this.deliverPendingReply(sessionId).catch(() => {});
+    }
+  }
+
   private async deliverPendingReply(sessionId: string): Promise<void> {
     const q = this.pendingReplies.get(sessionId);
     if (!q?.length) return;
