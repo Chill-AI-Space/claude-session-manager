@@ -43,7 +43,7 @@ export function runClaudeOneShot(opts: {
       reject(new Error(`Claude process timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
-    proc.on("close", (code) => {
+    proc.on("close", (code: number | null) => {
       clearTimeout(timeout);
       if (code === 0) {
         dlog.debug("claude-runner", `oneshot completed ok (${stdout.length} chars)`);
@@ -54,7 +54,7 @@ export function runClaudeOneShot(opts: {
       }
     });
 
-    proc.on("error", (err) => {
+    proc.on("error", (err: Error) => {
       clearTimeout(timeout);
       dlog.error("claude-runner", `oneshot spawn error: ${err.message}`);
       reject(err);
@@ -182,7 +182,7 @@ export function createSSEStream(opts: SSEStreamOptions): ReadableStream {
         }
       });
 
-      proc.on("close", (code) => {
+      proc.on("close", (code: number | null) => {
         if (keepaliveTimer) clearInterval(keepaliveTimer);
 
         // Flush remaining buffer
@@ -204,7 +204,7 @@ export function createSSEStream(opts: SSEStreamOptions): ReadableStream {
         close();
       });
 
-      proc.on("error", (err) => {
+      proc.on("error", (err: Error) => {
         if (keepaliveTimer) clearInterval(keepaliveTimer);
         dlog.error("claude-runner", `SSE spawn error: ${err.message}`);
         send({ type: "error", text: err.message });

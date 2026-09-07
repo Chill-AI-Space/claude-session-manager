@@ -234,22 +234,88 @@ class RelayClient {
             return { error: "Path exists and is not a directory", status: 400 };
           }
         } catch {
-          // Doesn't exist yet — create it. cmd.createIfMissing gates this so
-          // a plain typo in an existing-project path doesn't silently start
-          // a fresh empty folder instead of erroring.
           if (!cmd.createIfMissing) {
             return { error: "Path does not exist", status: 404 };
           }
           fs.mkdirSync(resolvedPath, { recursive: true });
           logAction("service", "relay_start_created_folder", resolvedPath);
         }
-        // Fresh interactive session (not headless) — same reasoning as resume:
-        // a terminal window the user can keep driving, not a fire-and-forget stream.
+        // Headless mode — works even when screen is locked or Mac is sleeping.
+        // The orchestrator spawns Claude directly (no terminal/display needed)
+        // and returns session_id in a single round-trip.
+        // Use start_terminal if you need an interactive terminal window.
+        const message = injectImageIntoMessage(cmd);
+        const stream = orch.start(resolvedPath, message);
+        const reader = stream.getReader();
+        const startedAt = Date.now();
+        const TIMEOUT_MS = 25_000;
+        let sessionId: string | null = null;
+        try {
+          while (Date.now() - startedAt < TIMEOUT_MS) {
+            const remaining = TIMEOUT_MS - (Date.now() - startedAt);
+            const chunk = await Promise.race([
+              reader.read(),
+              new Promise<{ done: true; value: undefined }>((r) =>
+                setTimeout(() => r({ done: true, value: undefined }), remaining)
+              ),
+            ]);
+            if (chunk.done) break;
+            const text = new TextDecoder().decode(chunk.value);
+            for (const line of text.split("\n")) {
+              const m = line.match(/^data: (.+)$/);
+              if (!m) continue;
+              try {
+                const event = JSON.parse(m[1]) as Record<string, unknown>;
+                if (event.type === "session_id") {
+                  sessionId = event.session_id as string;
+                  break;
+                }
+                if (event.type === "error") throw new Error((event.error ?? event.text) as string);
+              } catch (e) {
+                if (e instanceof SyntaxError) continue;
+                throw e;
+              }
+            }
+            if (sessionId) break;
+          }
+        } finally {
+          try { reader.cancel(); } catch { /* ignore */ }
+        }
+        const elapsedMs = Date.now() - startedAt;
+        logAction("service", "relay_start_headless", `${sessionId ? "ok" : "timeout"} ${resolvedPath} ${elapsedMs}ms`, sessionId ?? undefined);
+        if (!sessionId) {
+          return { error: "Session did not start within 25s timeout", status: 504 };
+        }
+        return { ok: true, sessionId, projectPath: resolvedPath, action: "start" };
+      }
+
+      case "start_terminal": {
+        // Opens an interactive terminal window — requires a display (screen unlocked).
+        // Use when the user is at the computer and wants to see/drive Claude live.
+        if (!cmd.projectPath || (!cmd.message && !cmd.image_base64)) {
+          return { error: "projectPath and message (or image) required", status: 400 };
+        }
+        const resolvedPath = path.resolve(cmd.projectPath);
+        if (!resolvedPath.startsWith(os.homedir())) {
+          return { error: "Path must be within home directory", status: 403 };
+        }
+        try {
+          const stat = fs.statSync(resolvedPath);
+          if (!stat.isDirectory()) {
+            return { error: "Path exists and is not a directory", status: 400 };
+          }
+        } catch {
+          if (!cmd.createIfMissing) {
+            return { error: "Path does not exist", status: 404 };
+          }
+          fs.mkdirSync(resolvedPath, { recursive: true });
+          logAction("service", "relay_start_terminal_created_folder", resolvedPath);
+        }
         const shellCmd = buildStartShellCommand(resolvedPath, injectImageIntoMessage(cmd));
         const openedAt = Date.now();
         const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedPath });
-        logAction("service", "relay_start_opened", `${terminal} ${resolvedPath}`);
-        return { ok: true, terminal, projectPath: resolvedPath, openedAt, action: "start" };
+        logAction("service", "relay_start_terminal_opened", `${terminal} ${resolvedPath}`);
+        return { ok: true, terminal, projectPath: resolvedPath, openedAt, action: "start_terminal" };
       }
 
       case "list_projects": {

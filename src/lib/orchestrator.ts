@@ -1526,7 +1526,7 @@ If it requires architectural decisions or major changes — write a short summar
             proc.stdout?.resume();
             proc.stderr?.resume();
             proc.unref();
-            proc.on("close", (code) => {
+            proc.on("close", (code: number | null) => {
               logAction("service", code === 0 ? "enqueued_task_done" : "enqueued_task_failed", `exit:${code}`, sessionId);
               this.transition(sessionId, "completed");
             });
@@ -1660,7 +1660,7 @@ If it requires architectural decisions or major changes — write a short summar
     }
 
     return new Promise<void>((resolve) => {
-      proc.on("close", (code) => {
+      proc.on("close", (code: number | null) => {
         logAction("service", code === 0 ? "auto_retry_done" : "auto_retry_failed", `exit:${code}`, sessionId);
         this.transition(sessionId, code === 0 ? "running" : "crashed");
         resolve();
@@ -1751,7 +1751,7 @@ If it requires architectural decisions or major changes — write a short summar
     proc.stderr?.resume();
 
     return new Promise<void>((resolve) => {
-      proc.on("close", (code) => {
+      proc.on("close", (code: number | null) => {
         logAction("service", code === 0 ? "stall_continue_done" : "stall_continue_failed", `exit:${code}`, sessionId);
         this.transition(sessionId, code === 0 ? "running" : "idle");
         resolve();
@@ -1861,7 +1861,7 @@ If it requires architectural decisions or major changes — write a short summar
     }
 
     return new Promise<void>((resolve) => {
-      proc.on("close", (code) => {
+      proc.on("close", (code: number | null) => {
         logAction("service", code === 0 ? "incomplete_exit_done" : "incomplete_exit_failed", `exit:${code}`, sessionId);
         this.transition(sessionId, code === 0 ? "completed" : "crashed");
         resolve();

@@ -164,7 +164,7 @@ export function createForgeSSEStream(opts: ForgeSSEStreamOptions): ReadableStrea
         }
       });
 
-      proc.on("close", (code) => {
+      proc.on("close", (code: number | null) => {
         clearInterval(keepaliveTimer);
 
         // Flush remaining buffer
@@ -194,7 +194,7 @@ export function createForgeSSEStream(opts: ForgeSSEStreamOptions): ReadableStrea
         onClose?.();
       });
 
-      proc.on("error", (err) => {
+      proc.on("error", (err: Error) => {
         clearInterval(keepaliveTimer);
         dlog.error("forge-runner", `spawn error: ${err.message}`);
         send({ type: "error", text: err.message });

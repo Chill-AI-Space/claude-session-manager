@@ -20,8 +20,8 @@ function runStep(cmd: string, args: string[], cwd: string): Promise<{ code: numb
     let output = "";
     proc.stdout?.on("data", (d) => { output += d.toString(); });
     proc.stderr?.on("data", (d) => { output += d.toString(); });
-    proc.on("close", (code) => resolve({ code: code ?? 1, output }));
-    proc.on("error", (err) => resolve({ code: 1, output: err.message }));
+    proc.on("close", (code: number | null) => resolve({ code: code ?? 1, output }));
+    proc.on("error", (err: Error) => resolve({ code: 1, output: err.message }));
   });
 }
 

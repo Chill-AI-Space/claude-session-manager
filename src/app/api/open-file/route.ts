@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       proc = spawn("xdg-open", [action === "reveal" ? path.dirname(resolved) : resolved]);
     }
 
-    proc.on("close", (code) => {
+    proc.on("close", (code: number | null) => {
       // explorer.exe on Windows returns non-zero exit codes even on success
       if (code === 0 || process.platform === "win32") {
         resolve(Response.json({ ok: true, resolved }));
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
         resolve(Response.json({ error: `Process exited ${code}` }, { status: 500 }));
       }
     });
-    proc.on("error", (err) => {
+    proc.on("error", (err: Error) => {
       resolve(Response.json({ error: err.message }, { status: 500 }));
     });
   });
