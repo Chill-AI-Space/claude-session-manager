@@ -514,6 +514,14 @@ export function getSessionVitalsByCwd(projectPath: string): ProcessVitals | null
   return getProcessVitals(proc.pid);
 }
 
+// Proactively warm the active-sessions cache so API responses never block on ps/lsof.
+// Cache TTL is 8s; refresh every 6s keeps cache always hot without overlapping runs.
+if (!isWin) {
+  setInterval(() => {
+    try { detectActiveClaudeSessions(); } catch { /* ignore */ }
+  }, 6000).unref();
+}
+
 export function killSessionProcesses(sessionId: string): number[] {
   cachedResult = null;
   const matching = detectActiveClaudeSessions().filter((p) => p.sessionId === sessionId);
