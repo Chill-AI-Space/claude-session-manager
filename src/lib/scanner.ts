@@ -239,7 +239,7 @@ export async function scanSessions(
   const existingFtsIds = new Set<string>();
   if (mode === "incremental") {
     const rows = db
-      .prepare("SELECT session_id, file_mtime FROM sessions WHERE archived = 0")
+      .prepare("SELECT session_id, file_mtime FROM sessions")
       .all() as { session_id: string; file_mtime: number }[];
     for (const row of rows) {
       existingMtimes.set(row.session_id, row.file_mtime);
