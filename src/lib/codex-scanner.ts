@@ -16,6 +16,14 @@ function toProjectDir(p: string): string {
   return p.replace(/[\\/]/g, "-");
 }
 
+function resolveProjectPath(codexCwd: string, existingProjectPath: string | undefined): string {
+  const home = os.homedir();
+  if (codexCwd === home && existingProjectPath && existingProjectPath !== home) {
+    return existingProjectPath;
+  }
+  return codexCwd;
+}
+
 export async function scanCodexSessions(
   db: Database.Database,
   existingMtimes: Map<string, number>,
@@ -37,6 +45,16 @@ export async function scanCodexSessions(
       existingFtsIds.add(row.session_id);
     }
   }
+
+  // Only needed if there are threads to process (avoid full-table scan on empty incremental runs)
+  const existingProjectPaths: Map<string, string> = threads.length > 0
+    ? new Map(
+        (db
+          .prepare("SELECT session_id, project_path FROM sessions WHERE agent_type = 'codex'")
+          .all() as { session_id: string; project_path: string }[])
+          .map((row) => [row.session_id, row.project_path])
+      )
+    : new Map();
 
   const ftsQueue: Array<{ sessionId: string; text: string }> = [];
 
@@ -68,7 +86,7 @@ export async function scanCodexSessions(
         }
       }
 
-      const cwd = thread.cwd ?? os.homedir();
+      const cwd = resolveProjectPath(thread.cwd ?? os.homedir(), existingProjectPaths.get(threadId));
       const projectDir = toProjectDir(cwd);
       const now = new Date().toISOString();
 

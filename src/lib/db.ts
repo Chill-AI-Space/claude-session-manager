@@ -69,6 +69,7 @@ function initTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_sessions_modified ON sessions(modified_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sessions_pinned ON sessions(pinned DESC, modified_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(archived, pinned DESC, modified_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_file_mtime ON sessions(archived, pinned DESC, file_mtime DESC);
 
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,

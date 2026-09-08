@@ -27,7 +27,9 @@ function buildFlags(bin: string, skipPermissions: boolean, model?: string): stri
 }
 
 function buildPromptLoader(promptPath: string): string {
-  return `PROMPT_FILE=${shellQuote(promptPath)}; PROMPT="$(cat "$PROMPT_FILE")"; rm -f "$PROMPT_FILE"`;
+  // cat exit code gates the && chain. rm is in a { rm; true; } group so its
+  // exit code never prevents exec — cleanup always succeeds from &&'s perspective.
+  return `PROMPT_FILE=${shellQuote(promptPath)} && PROMPT="$(cat "$PROMPT_FILE")" && { rm -f "$PROMPT_FILE"; true; }`;
 }
 
 export function buildCodexStartShellCommand(opts: {

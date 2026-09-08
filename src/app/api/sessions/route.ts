@@ -44,11 +44,22 @@ export async function GET(request: NextRequest) {
   if (search) {
     // Broad non-LLM search: title + prompt + last message for better recall.
     // Full content FTS still runs in parallel for deeper matches.
+    // Include project path/dir so searching by folder name finds all sessions in that project.
     conditions.push(
       "(" +
       "generated_title LIKE @search OR " +
       "custom_name LIKE @search OR " +
       "session_id LIKE @search OR " +
+      "project_path LIKE @search OR " +
+      "project_dir LIKE @search OR " +
+      "EXISTS (" +
+        "SELECT 1 FROM projects p " +
+        "WHERE p.project_dir = sessions.project_dir AND (" +
+          "p.project_path LIKE @search OR " +
+          "p.display_name LIKE @search OR " +
+          "p.custom_name LIKE @search" +
+        ")" +
+      ") OR " +
       "first_prompt LIKE @search OR " +
       "last_message LIKE @search" +
       ")"
@@ -56,7 +67,7 @@ export async function GET(request: NextRequest) {
     filterParams.search = `%${search}%`;
   }
   if (search && !ids) {
-    const contentIds = searchSessionContent(search);
+    const contentIds = searchSessionContent(search, Math.min(Math.max(limit + offset, 1000), 5000));
     if (contentIds.length > 0) {
       const placeholders = contentIds.map((_, i) => `@searchId${i}`).join(",");
       const contentCondition = `session_id IN (${placeholders})`;
@@ -86,6 +97,15 @@ export async function GET(request: NextRequest) {
     ? `WHERE ${conditions.join(" AND ")}`
     : "";
 
+  const lastActivityEpoch =
+    "MAX(COALESCE(CAST(strftime('%s', modified_at) AS INTEGER), 0), " +
+    "COALESCE(CAST(file_mtime / 1000 AS INTEGER), 0))";
+  const lastActivityIso =
+    "CASE WHEN COALESCE(CAST(file_mtime AS INTEGER), 0) > " +
+    "COALESCE(CAST(strftime('%s', modified_at) AS INTEGER) * 1000, 0) " +
+    "THEN strftime('%Y-%m-%dT%H:%M:%fZ', file_mtime / 1000.0, 'unixepoch') " +
+    "ELSE modified_at END";
+
   let sortClause: string;
   switch (sort) {
     case "created":
@@ -95,7 +115,9 @@ export async function GET(request: NextRequest) {
       sortClause = "ORDER BY pinned DESC, (total_input_tokens + total_output_tokens) DESC";
       break;
     default:
-      sortClause = "ORDER BY pinned DESC, modified_at DESC";
+      // file_mtime (ms epoch) is set by the scanner from the actual JSONL mtime —
+      // always the most accurate "last activity" time and covered by idx_sessions_file_mtime.
+      sortClause = "ORDER BY pinned DESC, file_mtime DESC";
       break;
   }
 
@@ -108,7 +130,7 @@ export async function GET(request: NextRequest) {
               SUBSTR(last_message, 1, 500) as last_message,
               generated_title, custom_name, tags, pinned, archived,
               message_count, total_input_tokens, total_output_tokens,
-              created_at, modified_at, file_mtime, file_size, last_scanned_at,
+              created_at, ${lastActivityIso} as modified_at, file_mtime, file_size, last_scanned_at,
               last_message_role, has_result, agent_type
        FROM sessions ${whereClause} ${sortClause} LIMIT @limit OFFSET @offset`
     )
