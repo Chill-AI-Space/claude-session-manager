@@ -201,16 +201,15 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
     abortControllerRef.current?.abort("cancelled");
     const abort = new AbortController();
     abortControllerRef.current = abort;
-    const isSearchRequest = !!searchQuery || selectedProjects.length > 0;
-    if (isSearchRequest) setSessionsSearching(true);
+    // Only full-text search needs a large result set; project filter stays paginated.
+    const isTextSearch = !!searchQuery;
+    if (isTextSearch) setSessionsSearching(true);
 
     const params = new URLSearchParams();
     if (selectedProjects.length > 0) params.set("project", selectedProjects.join(","));
     if (searchQuery) params.set("search", searchQuery);
     params.set("sort", "modified");
-    // Search/filter result sets should be complete enough to scan immediately.
-    // Normal sidebar browsing stays paginated to keep the initial load cheap.
-    const fetchLimit = isSearchRequest
+    const fetchLimit = isTextSearch
       ? MAX_SESSIONS_IN_MEMORY
       : Math.max(SIDEBAR_PAGE_SIZE, sessionsRef.current.length);
     params.set("limit", String(fetchLimit));
@@ -264,7 +263,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
       // Main fetch failed — ignore, will retry on next poll
       setLoading(false);
     } finally {
-      if (isSearchRequest) setSessionsSearching(false);
+      if (isTextSearch) setSessionsSearching(false);
     }
   }, [selectedProjects, searchQuery]);
 
