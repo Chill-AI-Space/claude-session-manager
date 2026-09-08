@@ -295,52 +295,101 @@ export function assignCodexSessionIdsByCwd(
   }
 }
 
-export function detectActiveClaudeSessions(): ActiveProcess[] {
-  if (cachedResult && Date.now() - cachedResult.timestamp < CACHE_TTL_MS) {
-    return cachedResult.processes;
+/** Assign session IDs, deduplicate — pure logic, no I/O */
+function finalizeProcesses(processes: ActiveProcess[]): ActiveProcess[] {
+  const claimed = new Set<string>(
+    processes.filter((p) => p.sessionId).map((p) => p.sessionId!)
+  );
+  assignCodexSessionIdsByCwd(processes, listCodexThreads(), claimed);
+  for (const proc of processes) {
+    if (proc.sessionId || !proc.cwd) continue;
+    const projectDir = pathToProjectDir(proc.cwd);
+    proc.sessionId = findMostRecentSession(projectDir, claimed);
+    if (proc.sessionId) claimed.add(proc.sessionId);
   }
-
-  try {
-    const processes = isWin ? detectWindows() : detectUnix();
-
-    // For processes without a session ID, find via most-recently-modified JSONL.
-    // Build exclusion set from sessions already claimed by --resume processes so that
-    // -p sessions in the same directory don't collide with an active --resume session.
-    const claimed = new Set<string>(
-      processes.filter((p) => p.sessionId).map((p) => p.sessionId!)
-    );
-    assignCodexSessionIdsByCwd(processes, listCodexThreads(), claimed);
-    for (const proc of processes) {
-      if (proc.sessionId || !proc.cwd) continue;
-      const projectDir = pathToProjectDir(proc.cwd);
-      proc.sessionId = findMostRecentSession(projectDir, claimed);
-      if (proc.sessionId) claimed.add(proc.sessionId);
+  const bySessionId = new Map<string, ActiveProcess>();
+  for (const proc of processes) {
+    if (!proc.sessionId) continue;
+    const prev = bySessionId.get(proc.sessionId);
+    if (!prev) { bySessionId.set(proc.sessionId, proc); continue; }
+    const prevElapsed = prev.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
+    const nextElapsed = proc.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
+    if (nextElapsed < prevElapsed || (nextElapsed === prevElapsed && proc.pid > prev.pid)) {
+      bySessionId.set(proc.sessionId, proc);
     }
+  }
+  return Array.from(bySessionId.values());
+}
 
-    // Deduplicate: if multiple PIDs resolved to same session, keep the most
-    // recently started process (usually the active resumed terminal).
-    const bySessionId = new Map<string, ActiveProcess>();
-    for (const proc of processes) {
-      if (!proc.sessionId) continue;
-      const prev = bySessionId.get(proc.sessionId);
-      if (!prev) {
-        bySessionId.set(proc.sessionId, proc);
-        continue;
+/** Async version of detectUnix: runs ps + lsof via exec() so it never blocks the event loop */
+function detectUnixAsync(callback: (processes: ActiveProcess[]) => void): void {
+  exec(
+    'ps axo pid=,etime=,tty=,command= | grep -E "(/| |^)(claude|codex)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
+    { encoding: "utf-8", timeout: 3000 },
+    (psErr, psOutput) => {
+      if (psErr || !psOutput?.trim()) { callback([]); return; }
+      const processes: ActiveProcess[] = [];
+      for (const line of psOutput.trim().split("\n")) {
+        const match = line.trim().match(/^(\d+)\s+(\S+)\s+(\S+)\s+(.+)$/);
+        if (!match) continue;
+        const pid = parseInt(match[1]);
+        const elapsedSecs = parseElapsedTime(match[2]);
+        const tty = match[3] === "??" ? null : match[3];
+        const command = match[4];
+        let sessionId: string | null = null;
+        const resumeMatch = command.match(RESUME_RE);
+        if (resumeMatch) sessionId = resumeMatch[1];
+        processes.push({ pid, sessionId, cwd: null, command, elapsedSecs, tty });
       }
-      const prevElapsed = prev.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
-      const nextElapsed = proc.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
-      if (nextElapsed < prevElapsed || (nextElapsed === prevElapsed && proc.pid > prev.pid)) {
-        bySessionId.set(proc.sessionId, proc);
-      }
+      const pids = processes.map((p) => p.pid);
+      if (pids.length === 0) { callback(processes); return; }
+      exec(
+        `${LSOF} -p ${pids.join(",")} -a -d cwd -Fpn 2>/dev/null || true`,
+        { encoding: "utf-8", timeout: 3000 },
+        (lsofErr, cwdOutput) => {
+          if (!lsofErr && cwdOutput) {
+            let currentPid = 0;
+            for (const cwdLine of cwdOutput.split("\n")) {
+              if (cwdLine.startsWith("p")) currentPid = parseInt(cwdLine.slice(1));
+              else if (cwdLine.startsWith("n")) {
+                const cwd = cwdLine.slice(1);
+                const proc = processes.find((p) => p.pid === currentPid);
+                if (proc) proc.cwd = cwd;
+              }
+            }
+          }
+          callback(processes);
+        }
+      );
     }
-    const unique = Array.from(bySessionId.values());
+  );
+}
 
-    cachedResult = { processes: unique, timestamp: Date.now() };
-    return unique;
-  } catch {
-    cachedResult = { processes: [], timestamp: Date.now() };
+let asyncRefreshRunning = false;
+
+function scheduleAsyncRefresh(): void {
+  if (asyncRefreshRunning || isWin) return;
+  asyncRefreshRunning = true;
+  detectUnixAsync((rawProcesses) => {
+    try {
+      cachedResult = { processes: finalizeProcesses(rawProcesses), timestamp: Date.now() };
+    } catch {
+      cachedResult = { processes: [], timestamp: Date.now() };
+    }
+    asyncRefreshRunning = false;
+  });
+}
+
+export function detectActiveClaudeSessions(): ActiveProcess[] {
+  if (!cachedResult) {
+    // No cache yet — trigger async build, return empty immediately
+    scheduleAsyncRefresh();
     return [];
   }
+  if (Date.now() - cachedResult.timestamp >= CACHE_TTL_MS) {
+    scheduleAsyncRefresh(); // refresh in background, return stale now
+  }
+  return cachedResult.processes;
 }
 
 /** Windows: use wmic to find claude.exe processes and their command lines */
@@ -512,14 +561,6 @@ export function getSessionVitalsByCwd(projectPath: string): ProcessVitals | null
   );
   if (!proc) return null;
   return getProcessVitals(proc.pid);
-}
-
-// Proactively warm the active-sessions cache so API responses never block on ps/lsof.
-// Cache TTL is 8s; refresh every 6s keeps cache always hot without overlapping runs.
-if (!isWin) {
-  setInterval(() => {
-    try { detectActiveClaudeSessions(); } catch { /* ignore */ }
-  }, 6000).unref();
 }
 
 export function killSessionProcesses(sessionId: string): number[] {
