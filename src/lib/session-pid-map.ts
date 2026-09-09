@@ -8,6 +8,7 @@
  * misattributes when several sessions share a working directory.
  */
 import { readFileSync } from "fs";
+import { execFileSync } from "child_process";
 import { getTTY } from "./macos-terminal-control";
 
 const PID_MAP_PATH = `${process.env.HOME}/.claude/session-pid-map.json`;
@@ -21,11 +22,29 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Verify the PID is actually running the expected session by checking its
+ * command-line args for the sessionId. Prevents stale pid-map entries from
+ * pointing to recycled PIDs that belong to different Claude sessions.
+ */
+function isPidCorrectSession(pid: number, sessionId: string): boolean {
+  try {
+    const args = execFileSync("ps", ["-p", String(pid), "-o", "args="], {
+      encoding: "utf-8",
+      timeout: 2000,
+    }).trim();
+    return args.includes(sessionId);
+  } catch {
+    return false;
+  }
+}
+
 export function getLiveSessionFromPidMap(sessionId: string): { pid: number; tty: string } | null {
   try {
     const map = JSON.parse(readFileSync(PID_MAP_PATH, "utf-8")) as Record<string, { pid: number }>;
     const entry = map[sessionId];
     if (!entry || !isPidAlive(entry.pid)) return null;
+    if (!isPidCorrectSession(entry.pid, sessionId)) return null;
     const tty = getTTY(entry.pid);
     if (!tty) return null;
     return { pid: entry.pid, tty };
