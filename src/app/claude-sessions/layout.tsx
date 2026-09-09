@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { SessionList } from "@/components/SessionList";
@@ -615,7 +615,9 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
               <PanelLeft className="h-4 w-4" />
             </Button>
           )}
-          {children}
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}>
+            {children}
+          </Suspense>
         </div>
 
         {/* Right nav strip — always visible */}
