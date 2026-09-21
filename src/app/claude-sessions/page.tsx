@@ -8,6 +8,7 @@ import Link from "next/link";
 import { FolderOpen, Send, Loader2, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud, Mic, Square } from "lucide-react";
 import { AgentToggleButton, type AgentType } from "@/components/AgentToggleButton";
 import { ModelSelector, getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
+import { OpencodeProfileSelector } from "@/components/settings/OpencodeProfileSelector";
 import { useSettings } from "@/lib/settings";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { useSessionStart } from "@/hooks/useSessionStart";
@@ -264,13 +265,20 @@ function SessionsEmptyState() {
           />
           <div className="absolute bottom-1.5 left-1.5 right-1.5 flex flex-col gap-1">
             <div className="flex items-center gap-1.5 px-0.5">
-              <ModelSelector
-                settingKey="claude_model"
-                currentModel={effectiveSelectedModel}
-                onUpdate={(_, model) => setSelectedModel(model)}
-                label="Model"
-                presets={getModelPresetsForAgent(selectedAgent)}
-              />
+              {selectedAgent === "opencode" ? (
+                <OpencodeProfileSelector
+                  currentProfile={effectiveSelectedModel}
+                  onUpdate={(profileId) => setSelectedModel(profileId)}
+                />
+              ) : (
+                <ModelSelector
+                  settingKey="claude_model"
+                  currentModel={effectiveSelectedModel}
+                  onUpdate={(_, model) => setSelectedModel(model)}
+                  label="Model"
+                  presets={getModelPresetsForAgent(selectedAgent)}
+                />
+              )}
             </div>
             {/* Controls row */}
             <div className="flex items-center gap-1">

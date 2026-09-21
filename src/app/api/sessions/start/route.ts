@@ -96,7 +96,11 @@ export async function POST(request: NextRequest) {
   if (normalizedAgent === "opencode") {
     const { buildOpencodeStartShellCommand } = await import("@/lib/session-terminal");
     const { openInTerminal } = await import("@/lib/terminal-launcher");
-    const shellCmd = buildOpencodeStartShellCommand(resolvedProjectPath, message.trim(), model);
+    // `model` here is actually an OpenCode profile id (e.g. "quality", "value")
+    // — see OpencodeProfileSelector / src/lib/opencode-profiles.ts. Building
+    // the shell command applies that profile to ~/.config/opencode/opencode.json,
+    // which throws on an unknown profile id, so it needs its own try/catch
+    // rather than crashing the whole request.
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
@@ -104,6 +108,7 @@ export async function POST(request: NextRequest) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
         };
         try {
+          const shellCmd = buildOpencodeStartShellCommand(resolvedProjectPath, message.trim(), model);
           const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedProjectPath });
           send({ type: "status", text: `Opencode opened in ${terminal}` });
         } catch (err) {
