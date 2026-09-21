@@ -5,7 +5,7 @@ import { SessionListItemComponent } from "./SessionListItem";
 import { GeminiResult } from "./SessionSearch";
 import { Loader2 } from "lucide-react";
 import { useParams } from "next/navigation";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Virtuoso } from "react-virtuoso";
 
 interface SessionListProps {
@@ -71,30 +71,15 @@ export function SessionList({ sessions, loading, geminiResults, onArchive, hasMo
     return groups;
   }, [displaySessions]);
 
-  // Compute total item count: each group has (sessions + 1 header)
-  const totalCount = useMemo(() => {
-    return groupData.reduce((sum, group) => sum + group.sessions.length + 1, 0);
-  }, [groupData]);
-
-  // Map flat index to (group, session) or null for header
-  const itemAtIndex = useCallback((index: number): { type: "header" | "session"; displayName?: string; session?: SessionListItem } | null => {
-    let currentIndex = 0;
+  // Flat list of headers + sessions, built once per data change so Virtuoso's itemContent
+  // is an O(1) lookup (was an O(n) walk per rendered row) and its `data` prop is stable.
+  const flatItems = useMemo(() => {
+    const items: Array<{ type: "header"; displayName: string } | { type: "session"; session: SessionListItem }> = [];
     for (const group of groupData) {
-      // Header
-      if (currentIndex === index) {
-        return { type: "header", displayName: group.displayName };
-      }
-      currentIndex++;
-
-      // Sessions in this group
-      for (const session of group.sessions) {
-        if (currentIndex === index) {
-          return { type: "session", session };
-        }
-        currentIndex++;
-      }
+      items.push({ type: "header", displayName: group.displayName });
+      for (const session of group.sessions) items.push({ type: "session", session });
     }
-    return null;
+    return items;
   }, [groupData]);
 
   if (loading) {
@@ -116,11 +101,8 @@ export function SessionList({ sessions, loading, geminiResults, onArchive, hasMo
   return (
     <Virtuoso
       style={{ flex: 1, overflow: "auto" }}
-      data={Array.from({ length: totalCount })}
-      itemContent={(index) => {
-        const item = itemAtIndex(index);
-        if (!item) return null;
-
+      data={flatItems}
+      itemContent={(index, item) => {
         if (item.type === "header") {
           return (
             <div key={`header-${index}`} className="px-3 pt-2 pb-1 text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider sticky top-0 bg-sidebar/95 backdrop-blur-sm z-10">
@@ -130,7 +112,6 @@ export function SessionList({ sessions, loading, geminiResults, onArchive, hasMo
         }
 
         const session = item.session;
-        if (!session) return null;
         return (
           <SessionListItemComponent
             key={session.session_id}

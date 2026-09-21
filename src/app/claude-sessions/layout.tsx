@@ -27,6 +27,27 @@ if (typeof window !== "undefined") {
   });
 }
 
+/**
+ * Polling returns fresh objects for every row. Reuse the previous object when a row is
+ * unchanged (and the previous array when nothing changed at all) so React.memo'd sidebar
+ * items and the list itself don't re-render every poll.
+ */
+function reuseUnchangedSessions(prev: SessionListItem[], next: SessionListItem[]): SessionListItem[] {
+  if (prev.length === 0) return next;
+  const prevById = new Map(prev.map((s) => [s.session_id, s]));
+  let allSame = prev.length === next.length;
+  const merged = next.map((s, i) => {
+    const old = prevById.get(s.session_id);
+    if (old && JSON.stringify(old) === JSON.stringify(s)) {
+      if (prev[i] !== old) allSame = false;
+      return old;
+    }
+    allSame = false;
+    return s;
+  });
+  return allSame ? prev : merged;
+}
+
 export default function SessionsLayout({
   children,
 }: {
@@ -222,13 +243,14 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
 
       // Apply memory limit: keep only first MAX_SESSIONS_IN_MEMORY
       const limitedSessions = (data.sessions || []).slice(0, MAX_SESSIONS_IN_MEMORY);
-      setSessions(limitedSessions);
+      // Keep object identity for unchanged rows so memoized sidebar items skip re-render on every poll
+      setSessions((prev) => reuseUnchangedSessions(prev, limitedSessions));
       setHasMore(limitedSessions.length < (data.total ?? 0));
       setLoading(false);
 
       // Lazy-load remote sessions in background (non-blocking)
       const remoteParams = new URLSearchParams(params);
-      remoteParams.set("include_remote", "true");
+      remoteParams.set("remote_only", "true");
       remoteParams.set("limit", String(MAX_SESSIONS_IN_MEMORY));
       fetch(`/api/sessions?${remoteParams}`, {
         signal: abort.signal,

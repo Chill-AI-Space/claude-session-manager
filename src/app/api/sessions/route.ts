@@ -21,6 +21,18 @@ export async function GET(request: NextRequest) {
   const offset = parseInt(searchParams.get("offset") || "0");
   const showArchived = searchParams.get("archived") === "true";
 
+  // Sidebar lazy-loads remote sessions separately — skip the local query entirely
+  // so a poll doesn't serialize the whole local list just to have it filtered out.
+  if (searchParams.get("remote_only") === "true") {
+    try {
+      const remoteResults = await fetchAllRemoteSessions({ limit: Math.max(limit, 100), search: search || undefined });
+      const remoteSessions = remoteResults.flatMap((r) => r.sessions);
+      return NextResponse.json({ sessions: remoteSessions, total: remoteSessions.length, limit, offset });
+    } catch {
+      return NextResponse.json({ sessions: [], total: 0, limit, offset });
+    }
+  }
+
   const db = getDb();
 
   // Build WHERE clause shared by both data and count queries
