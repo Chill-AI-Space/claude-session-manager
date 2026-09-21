@@ -3,6 +3,7 @@ import { getClaudePath } from "@/lib/claude-bin";
 import { getForgePath } from "@/lib/forge-bin";
 import { getCodexPath } from "@/lib/codex-bin";
 import { getOpencodePath } from "@/lib/opencode-bin";
+import { applyOpencodeProfile } from "@/lib/opencode-profiles";
 import { SessionRow } from "@/lib/types";
 
 /** Shell-quote a string for embedding as a single argument in a POSIX shell command. */
@@ -10,11 +11,20 @@ export function shellQuote(text: string): string {
   return `'${text.replace(/'/g, `'\\''`)}'`;
 }
 
-/** Interactive `opencode run "<prompt>"` in a fresh terminal. */
-export function buildOpencodeStartShellCommand(projectPath: string, message: string, modelOverride?: string): string {
+/**
+ * Interactive `opencode run "<prompt>"` in a fresh terminal.
+ *
+ * OpenCode has no single "model" flag equivalent to Claude's — this setup
+ * switches between named profiles (Quality, Value, Free, ...), each of
+ * which sets models for several OpenCode roles at once (see
+ * src/lib/opencode-profiles.ts). `profileId` is applied to
+ * ~/.config/opencode/opencode.json right before launch, the same way the
+ * `oc <profile>` shell function does, so `opencode run` picks it up.
+ */
+export function buildOpencodeStartShellCommand(projectPath: string, message: string, profileId?: string): string {
   const bin = getOpencodePath();
-  const modelFlag = modelOverride ? ` -m "${modelOverride}"` : "";
-  return `cd "${projectPath}" && "${bin}" run${modelFlag} ${shellQuote(message)}`;
+  if (profileId) applyOpencodeProfile(profileId);
+  return `cd "${projectPath}" && "${bin}" run ${shellQuote(message)}`;
 }
 
 /** Interactive `claude "<prompt>"` in a fresh terminal — a brand new session, not a resume. */

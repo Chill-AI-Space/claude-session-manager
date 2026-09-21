@@ -141,25 +141,17 @@ export async function POST(req: NextRequest) {
         send("step", { step: 4, total: 4, label: "Restarting server..." });
 
         const platform = os.platform();
-        if (platform === "darwin") {
-          // macOS: restart via launchd (detached so the response completes)
-          const plistPath = path.join(
-            os.homedir(),
-            "Library/LaunchAgents/com.vova.claude-sessions.plist"
-          );
-          // Spawn a detached shell that waits 1s then restarts launchd
+        if (platform !== "win32") {
+          // Soft restart: snapshots live sessions, restarts, resumes the ones that died (scripts/deploy-live.js).
+          // Detached so it outlives this server process.
           const restarter = spawn(
-            "bash",
-            [
-              "-c",
-              `sleep 1 && launchctl unload "${plistPath}" 2>/dev/null; sleep 1; launchctl load "${plistPath}"`,
-            ],
+            process.execPath,
+            [path.join(PROJECT_ROOT, "scripts", "deploy-live.js"), "--restart-only"],
             { detached: true, stdio: "ignore", cwd: PROJECT_ROOT }
           );
           restarter.unref();
-          send("step_done", { step: 4, output: "Restart scheduled via launchd" });
+          send("step_done", { step: 4, output: "Soft restart scheduled (live sessions will be resumed)" });
         } else {
-          // Linux/Windows: kill old next start, spawn new one
           const restarter = spawn(
             "bash",
             [

@@ -111,7 +111,13 @@ export function getModelPresetsForAgent(agent: AgentType): ModelPreset[] {
     return MODEL_PRESETS.filter((preset) => preset.model.startsWith("gpt"));
   }
 
-  // opencode and claude share the claude model list
+  if (agent === "opencode") {
+    // OpenCode doesn't take Claude-style model IDs (this list) as an `-m`
+    // value — it's driven by named profiles instead. See
+    // OpencodeProfileSelector / src/lib/opencode-profiles.ts.
+    return [];
+  }
+
   return MODEL_PRESETS.filter((preset) => preset.model.startsWith("claude"));
 }
 
@@ -125,6 +131,13 @@ export function getDefaultModelForAgent(agent: AgentType, claudeModel?: string):
 
   if (agent === "codex") {
     return "gpt-5.5";
+  }
+
+  if (agent === "opencode") {
+    // Matches DEFAULT_OPENCODE_PROFILE in src/lib/opencode-profiles.ts —
+    // duplicated as a literal here since that module pulls in Node's `fs`
+    // and can't be imported from this client component.
+    return "value";
   }
 
   return claudeModel || "claude-sonnet-5";

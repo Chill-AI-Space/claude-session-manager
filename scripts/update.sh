@@ -40,23 +40,9 @@ echo "[3/4] Building..."
 rm -rf .next
 npm run build 2>&1 | tail -5
 
-# 4. Restart server
+# 4. Restart server (soft: snapshots live sessions, restarts, resumes the ones that died)
 echo "[4/4] Restarting server..."
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  # macOS: use launchd
-  launchctl unload ~/Library/LaunchAgents/com.vova.claude-sessions.plist 2>/dev/null || true
-  sleep 1
-  launchctl load ~/Library/LaunchAgents/com.vova.claude-sessions.plist
-  sleep 3
-  echo "Server restarted via launchd"
-else
-  # Linux / WSL: kill old process, start new one
-  pkill -f "next start" 2>/dev/null || true
-  sleep 1
-  nohup npm run start > /dev/null 2>&1 &
-  sleep 3
-  echo "Server started in background (PID: $!)"
-fi
+node scripts/deploy-live.js --restart-only
 
 # Health check
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/claude-sessions 2>/dev/null || echo "000")

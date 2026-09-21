@@ -1,0 +1,54 @@
+name: CI + live deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Least privilege. Fork PRs get a read-only token and NO secrets, so they can build/test but never deploy.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      # --force: @next/swc-darwin-arm64 is a hard dependency (should be optional) and fails EBADPLATFORM on Linux
+      - run: npm ci --force
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
+
+  # Runs ONLY for pushes to main (= merged PRs; needs write access to the repo), never for pull_request events,
+  # and only after `check` is green. Does nothing until the repo variable DEPLOY_ENABLED is set to "true".
+  # The SSH key is scoped to the `production` environment and can only run scripts/deploy-live.js on the server
+  # (forced command in authorized_keys) — see docs/deploy-live-ci-cd-setup.md.
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Soft deploy (snapshot live sessions → build → restart → resume → smoke test)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts   # pinned host key, no trust-on-first-use
+          # The server side ignores any command we send: authorized_keys forces `node scripts/deploy-live.js --pull`.
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" deploy

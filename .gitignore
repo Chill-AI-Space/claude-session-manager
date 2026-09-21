@@ -48,6 +48,7 @@ next-env.d.ts
 
 # generated project icons
 /data/project-icons/
+/data/deploy-snapshots/
 
 # playwright artifacts
 .playwright-mcp/

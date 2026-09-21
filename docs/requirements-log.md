@@ -42,6 +42,10 @@ Running log of features/decisions for this project, with status. Update in place
 
 - **"Load N earlier messages" button** (commit `d2d8cea`): `loadAllMdMessages` callback existed but was never wired to any UI. Added clickable button at top of MD view showing count from `mdRenderStart`, spinner while loading.
 
+## Deploy
+
+- **[реализовано] Мягкий деплой на живом сервисе** — `npm run deploy:live` / `scripts/deploy-live.js`: снимок живых сессий → build → рестарт → resume упавших сессий сообщением "сервер передеплоен, восстановлено" → smoke test. Кнопка Update в UI и `scripts/update.sh` вызывают тот же скрипт (`--restart-only`). Ручной `launchctl unload/load` / `pkill` для деплоя запрещён (зафиксировано в CLAUDE.md и README).
+
 ## Known issues / планируется
 
 - ~~**Сообщение теряется когда сессия занята**~~ — **реализовано** (commit `7dfdecc`): `pendingReplies` Map в orchestrator, доставка на `session:completed`. Ответ юзеру — 200 "Message queued" вместо 409.

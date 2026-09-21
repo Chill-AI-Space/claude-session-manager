@@ -19,6 +19,7 @@ import Link from "next/link";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
 import { getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
 import { useAutodetect } from "@/hooks/useAutodetect";
+import { useOpencodeProfiles } from "@/hooks/useOpencodeProfiles";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
@@ -257,6 +258,7 @@ export default function SessionDetailPage({
   const [newSessionDragging, setNewSessionDragging] = useState(false);
   const newDragCounterRef = useRef(0);
   const newAutodetect = useAutodetect();
+  const opencodeProfiles = useOpencodeProfiles();
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
   const compute = useComputeNode();
 
@@ -2554,11 +2556,15 @@ export default function SessionDetailPage({
                     value={newSessionModel}
                     onChange={(e) => setNewSessionModel(e.target.value)}
                     className="text-[11px] px-2 py-1 rounded-md border border-border bg-card text-muted-foreground hover:border-violet-500/30 cursor-pointer max-w-[180px]"
-                    title="Model for new session"
+                    title={newSessionAgent === "opencode" ? "Model profile for new session" : "Model for new session"}
                   >
-                    {getModelPresetsForAgent(newSessionAgent).map((preset) => (
-                      <option key={preset.id} value={preset.model}>{preset.name}</option>
-                    ))}
+                    {newSessionAgent === "opencode"
+                      ? opencodeProfiles.profiles.map((profile) => (
+                          <option key={profile.id} value={profile.id}>{profile.name}</option>
+                        ))
+                      : getModelPresetsForAgent(newSessionAgent).map((preset) => (
+                          <option key={preset.id} value={preset.model}>{preset.name}</option>
+                        ))}
                   </select>
                 </div>
 

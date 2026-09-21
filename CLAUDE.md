@@ -75,7 +75,30 @@ To update later: `scripts\update.bat`
 ## Deploy workflow
 
 Always test on dev first, then deploy to production.
-**MANDATORY: After every deploy, run the health checks (step 3). If any check fails — fix and redeploy. Do NOT consider the deploy done until all checks pass.**
+**MANDATORY: After every deploy, run the health checks (step 3). If any check fails — fix and redeploy. Do NOT consider the deploy done until all checks pass.** (`deploy:live` already runs the API smoke test; the browser smoke test is still on you.)
+
+### ⚠️ Deploying to a live instance = `npm run deploy:live`. Nothing else.
+
+**Never** restart the service by hand (`launchctl unload/load`, `kickstart`, `pkill`, `npm run build` over a running server) and never hand-roll a deploy. A raw restart kills every Claude process the server spawned — those sessions silently stop mid-task and the user is left with dead sessions.
+
+**Merged to `main` → CI deploys automatically** (`.github/workflows/ci.yml`, job `deploy`; setup + security model: [docs/deploy-live-ci-cd-setup.md](docs/deploy-live-ci-cd-setup.md)). By hand:
+
+```bash
+npm run deploy:live                       # git pull --ff-only + install (if needed) + build + soft restart + resume + smoke test
+node scripts/deploy-live.js --restart-only   # code already built (this is what the UI "Update" button and scripts/update.sh run)
+node scripts/deploy-live.js --dry-run        # just list live sessions, change nothing
+```
+
+What `scripts/deploy-live.js` does, in order:
+1. Snapshots live sessions (`is_active` + orchestrator running) → `data/deploy-snapshots/*.json`.
+2. Pull / `npm install` (only if package.json changed) / build. A failed build aborts **before** the restart — sessions are untouched.
+3. Restarts the service (launchd on macOS) and waits until `/api/settings` is healthy.
+4. Resumes every snapshotted session that died in the restart via the orchestrator with a "server was redeployed, session restored, continue" message. Sessions that survived (e.g. interactive ones in a terminal) are skipped — no duplicates. Non-Claude agents (codex/forge/opencode) are reported, not auto-resumed.
+5. Runs `scripts/smoke-test.sh`; exit code ≠ 0 if anything failed.
+
+The work runs in a detached worker (log: `data/deploy-snapshots/deploy-*.log`), so it is safe to run from inside a session that the restart will kill — that session is in the snapshot and gets resumed too. Not supported on Windows (use `scripts\update.bat`).
+
+Manual steps below (dev server, health checks, troubleshooting) are for verification and debugging, **not** for deploying.
 
 ### Hotfix rule for this repo
 
@@ -113,7 +136,7 @@ Verify your changes work:
 - For settings changes: `curl http://localhost:3000/api/settings | jq .your_key`
 - For new UI sections: navigate to the page and confirm it renders
 
-### 2. Build and restart production (via launchd)
+### 2. Build and restart production (via launchd) — manual, for debugging only; for real deploys use `npm run deploy:live`
 
 Production runs as a **launchd service** (NOT nohup). The entrypoint is `scripts/tray.js` which:
 - Shows a **macOS menu bar icon** (Quasar symbol, grayscale, via `systray2`)

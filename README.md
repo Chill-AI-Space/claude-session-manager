@@ -19,6 +19,16 @@ Works on **macOS, Linux, and Windows**.
 - **Notifications** — browser + sound alerts when Claude finishes and needs your reply
 - **Auto-retry** — detects mid-execution crashes and auto-sends "continue"
 
+## Deploying (read this first)
+
+**Rule: deploy = `npm run deploy:live`. Never restart a live instance by hand** (`launchctl`, `systemctl`, `pkill`, `npm run build` over a running server) — every Claude session the server spawned would silently die.
+
+- **Merged to `main` → CI deploys automatically** (soft restart, live sessions are resumed). Nothing to run. Setup + security model: [docs/deploy-live-ci-cd-setup.md](docs/deploy-live-ci-cd-setup.md).
+- **Manual / local instance:** `npm run deploy:live` (`node scripts/deploy-live.js --dry-run` just lists live sessions).
+- What it does: snapshots live sessions → build → restart → resumes the ones the restart killed ("server was redeployed, session restored, continue") → smoke test.
+- The sidebar **Update** button and `scripts/update.sh` use the same script.
+- `npm run build` on a machine with a live instance prints a warning pointing here.
+
 ## Quick start
 
 ```bash
@@ -136,6 +146,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vova.claude-sessions
 Replace `/path/to/node` with `which node` output, and `/path/to/claude-session-manager` with where you cloned the repo.
 
 **Menu bar icon**: A white Claude icon appears in your menu bar. Click it to open the app or quit.
+
+**Deploying a new version to a running instance:** always use `npm run deploy:live` (or the sidebar Update button). It rebuilds, restarts the service and automatically resumes every live Claude session the restart killed. Do **not** restart via `launchctl`/`kickstart`/`pkill` by hand — running sessions would just die. Details: "Deploy workflow" in [CLAUDE.md](CLAUDE.md).
 
 **Manage the service:**
 
