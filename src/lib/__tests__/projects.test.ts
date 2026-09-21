@@ -13,6 +13,7 @@ function initTestDb(db: Database.Database) {
       project_dir TEXT NOT NULL,
       project_path TEXT NOT NULL,
       modified_at TEXT NOT NULL,
+      file_mtime INTEGER DEFAULT 0,
       archived INTEGER DEFAULT 0
     );
 

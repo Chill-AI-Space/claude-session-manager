@@ -33,7 +33,10 @@ const SYNC_PROJECTS_SQL = `
   GROUP BY s.project_dir
 `;
 
-// Used by listProjectsFromSessions — all projects, session_count = non-archived only
+// Used by listProjectsFromSessions — all projects, session_count = non-archived only.
+// last_activity prefers active sessions (to match session_count); falls back to
+// archived sessions only for projects that have no active session left at all,
+// so a fully-archived project doesn't show a null/stale last_activity.
 const LIST_PROJECTS_SQL = `
   SELECT
     s.project_dir,
@@ -42,7 +45,10 @@ const LIST_PROJECTS_SQL = `
     p.custom_name,
     p.color,
     SUM(CASE WHEN s.archived = 0 THEN 1 ELSE 0 END) as session_count,
-    MAX(${LAST_ACTIVITY_EXPR}) as last_activity
+    COALESCE(
+      MAX(CASE WHEN s.archived = 0 THEN (${LAST_ACTIVITY_EXPR}) END),
+      MAX(${LAST_ACTIVITY_EXPR})
+    ) as last_activity
   FROM sessions s
   LEFT JOIN projects p ON p.project_dir = s.project_dir
   GROUP BY s.project_dir
