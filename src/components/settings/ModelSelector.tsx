@@ -14,18 +14,32 @@ export interface ModelPreset {
 export const MODEL_PRESETS: ModelPreset[] = [
   // Claude models (default)
   {
+    id: "claude-sonnet-5",
+    name: "Claude Sonnet 5",
+    model: "claude-sonnet-5",
+    category: "balanced",
+    description: "Default Claude model",
+  },
+  {
+    id: "claude-opus-5",
+    name: "Claude Opus 5",
+    model: "claude-opus-5",
+    category: "quality",
+    description: "Highest quality",
+  },
+  {
     id: "claude-sonnet-4-6",
     name: "Claude Sonnet 4.6",
     model: "claude-sonnet-4-6",
     category: "balanced",
-    description: "Default Claude model",
+    description: "Previous default",
   },
   {
     id: "claude-opus-4-6",
     name: "Claude Opus 4.6",
     model: "claude-opus-4-6",
     category: "quality",
-    description: "Highest quality",
+    description: "Previous Opus",
   },
   {
     id: "claude-haiku-4-5",
@@ -36,11 +50,18 @@ export const MODEL_PRESETS: ModelPreset[] = [
   },
   // OpenAI / Codex models
   {
+    id: "gpt-5.5",
+    name: "GPT-5.5",
+    model: "gpt-5.5",
+    category: "quality",
+    description: "OpenAI GPT-5.5 (Codex default)",
+  },
+  {
     id: "gpt-5.4",
     name: "GPT-5.4",
     model: "gpt-5.4",
     category: "quality",
-    description: "OpenAI GPT-5.4 (Codex default)",
+    description: "OpenAI GPT-5.4",
   },
   {
     id: "gpt-4o",
@@ -90,6 +111,7 @@ export function getModelPresetsForAgent(agent: AgentType): ModelPreset[] {
     return MODEL_PRESETS.filter((preset) => preset.model.startsWith("gpt"));
   }
 
+  // opencode and claude share the claude model list
   return MODEL_PRESETS.filter((preset) => preset.model.startsWith("claude"));
 }
 
@@ -102,10 +124,10 @@ export function getDefaultModelForAgent(agent: AgentType, claudeModel?: string):
   }
 
   if (agent === "codex") {
-    return "gpt-5.4";
+    return "gpt-5.5";
   }
 
-  return claudeModel || "claude-sonnet-4-6";
+  return claudeModel || "claude-sonnet-5";
 }
 
 interface ModelSelectorProps {

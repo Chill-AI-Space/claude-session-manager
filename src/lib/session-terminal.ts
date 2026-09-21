@@ -2,11 +2,19 @@ import { getSetting } from "@/lib/db";
 import { getClaudePath } from "@/lib/claude-bin";
 import { getForgePath } from "@/lib/forge-bin";
 import { getCodexPath } from "@/lib/codex-bin";
+import { getOpencodePath } from "@/lib/opencode-bin";
 import { SessionRow } from "@/lib/types";
 
 /** Shell-quote a string for embedding as a single argument in a POSIX shell command. */
 export function shellQuote(text: string): string {
   return `'${text.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Interactive `opencode run "<prompt>"` in a fresh terminal. */
+export function buildOpencodeStartShellCommand(projectPath: string, message: string, modelOverride?: string): string {
+  const bin = getOpencodePath();
+  const modelFlag = modelOverride ? ` -m "${modelOverride}"` : "";
+  return `cd "${projectPath}" && "${bin}" run${modelFlag} ${shellQuote(message)}`;
 }
 
 /** Interactive `claude "<prompt>"` in a fresh terminal — a brand new session, not a resume. */
@@ -27,6 +35,12 @@ export function buildResumeShellCommand(session: SessionRow, message?: string): 
   const agentType = (session as SessionRow & { agent_type?: string }).agent_type ?? "claude";
   const isForge = agentType === "forge";
   const isCodex = agentType === "codex";
+  const isOpencode = agentType === "opencode";
+
+  if (isOpencode) {
+    const bin = getOpencodePath();
+    return `cd "${cwd}" && "${bin}" run -s "${session.session_id}"`;
+  }
 
   if (isCodex) {
     const bin = getCodexPath();

@@ -228,7 +228,7 @@ export function buildCliArgs(opts: {
   args.push("--verbose");
   args.push("--effort", effort);
 
-  const model = opts.model || getSetting("claude_model") || "claude-sonnet-4-6";
+  const model = opts.model || getSetting("claude_model") || "claude-sonnet-5";
   args.push("--model", model);
 
   if (opts.includeMaxTurns !== false && opts.sessionId) {
@@ -265,7 +265,7 @@ export function buildSessionContextPrompt(sessionId?: string): string | undefine
     lines.push(`Callback URL pattern: POST ${base}/api/sessions/{SESSION_ID}/reply  body: {"message":"..."}`);
     lines.push("(Your SESSION_ID is assigned at session start and visible in your conversation metadata.)");
   }
-  lines.push(`Start sub-session: POST ${base}/api/sessions/start  body: {"path":"...","message":"...","agent":"claude|codex|forge"}`);
+  lines.push(`Start sub-session: POST ${base}/api/sessions/start  body: {"path":"...","message":"...","agent":"claude|codex|forge|opencode"}`);
   lines.push(`Active sessions: GET ${base}/api/sessions`);
   lines.push("[End Context]");
   return lines.join("\n");

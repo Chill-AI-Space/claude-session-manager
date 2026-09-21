@@ -472,7 +472,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   // Auto-close terminal windows after permission escalation completes
   auto_close_escalation_terminals: "true",
   // Claude CLI model (used for terminal sessions)
-  claude_model: "claude-sonnet-4-6",
+  claude_model: "claude-sonnet-5",
   // Remote relay settings
   relay_enabled: "false",
   relay_node_id: "",
@@ -497,7 +497,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   // Worker integration
   worker_heartbeat_timeout_ms: "300000",
   worker_fallback_enabled: "true",
-  worker_fallback_model: "claude-sonnet-4-6",
+  worker_fallback_model: "claude-sonnet-5",
   worker_fallback_use_vertex: "false",
   worker_fallback_vertex_project: "",
   worker_fallback_vertex_region: "us-east5",
@@ -516,7 +516,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   telegram_bot_token: "",
   telegram_chat_id: "",
   // Agent selection — which AI agent to use for new sessions
-  default_agent: "codex",
+  default_agent: "opencode",
   // Session choreography — inject session context (session_id + callback URL) into system prompt
   inject_session_context: "true",
   // Base URL for callback URLs injected into sessions (e.g. http://localhost:3000 or relay URL)

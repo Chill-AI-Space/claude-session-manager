@@ -2,18 +2,20 @@
 
 import { Hammer } from "lucide-react";
 
-export type AgentType = "claude" | "forge" | "codex";
+export type AgentType = "claude" | "forge" | "codex" | "opencode";
 
 export const AGENT_CYCLE: Record<AgentType, AgentType> = {
-  claude: "forge",
+  claude: "opencode",
+  opencode: "forge",
   forge: "codex",
   codex: "claude",
 };
 
 export const DEFAULT_MODEL: Record<AgentType, string> = {
   claude: "",
+  opencode: "",
   forge: "models/gemini-2.5-flash",
-  codex: "gpt-5.4",
+  codex: "gpt-5.5",
 };
 
 interface AgentToggleButtonProps {
@@ -25,7 +27,8 @@ interface AgentToggleButtonProps {
 export function AgentToggleButton({ agent, onCycle, size = "sm" }: AgentToggleButtonProps) {
   const next = AGENT_CYCLE[agent];
   const titles: Record<AgentType, string> = {
-    claude: "Using Claude — click to switch to Forge",
+    claude: "Using Claude — click to switch to Opencode",
+    opencode: "Using Opencode — opens in terminal, click to switch to Forge",
     forge: "Using Forge — click to switch to Codex",
     codex: "Using Codex — opens in terminal, click to switch to Claude",
   };
@@ -40,7 +43,9 @@ export function AgentToggleButton({ agent, onCycle, size = "sm" }: AgentToggleBu
           ? "text-orange-400 border-orange-400/40 bg-orange-500/10 hover:bg-orange-500/20"
           : agent === "codex"
             ? "text-violet-400 border-violet-400/40 bg-violet-500/10 hover:bg-violet-500/20"
-            : "text-muted-foreground/50 border-border hover:text-foreground hover:bg-muted/50"
+            : agent === "opencode"
+              ? "text-emerald-400 border-emerald-400/40 bg-emerald-500/10 hover:bg-emerald-500/20"
+              : "text-muted-foreground/50 border-border hover:text-foreground hover:bg-muted/50"
       }`}
       title={titles[agent]}
       type="button"
@@ -49,6 +54,8 @@ export function AgentToggleButton({ agent, onCycle, size = "sm" }: AgentToggleBu
         <Hammer className="h-3 w-3" />
       ) : agent === "codex" ? (
         <span className="text-[10px] font-bold leading-none">{"{ }"}</span>
+      ) : agent === "opencode" ? (
+        <span className="text-[10px] font-bold leading-none">OC</span>
       ) : (
         <span className="text-[10px] font-bold leading-none">C</span>
       )}

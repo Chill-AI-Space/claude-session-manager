@@ -31,14 +31,14 @@ export async function POST(request: NextRequest) {
 
   const defaultAgentSetting = getSetting("default_agent");
   const defaultAgent =
-    defaultAgentSetting === "claude" || defaultAgentSetting === "codex" || defaultAgentSetting === "forge"
+    defaultAgentSetting === "claude" || defaultAgentSetting === "codex" || defaultAgentSetting === "forge" || defaultAgentSetting === "opencode"
       ? defaultAgentSetting
-      : "codex";
+      : "opencode";
 
   const normalizedAgent =
     agent === undefined
       ? defaultAgent
-      : agent === "claude" || agent === "codex" || agent === "forge"
+      : agent === "claude" || agent === "codex" || agent === "forge" || agent === "opencode"
         ? agent
         : null;
 
@@ -91,6 +91,30 @@ export async function POST(request: NextRequest) {
   if (normalizedAgent === "forge") {
     const stream = getOrchestrator().startForge(resolvedProjectPath, message.trim(), model);
     return sseResponse(stream);
+  }
+
+  if (normalizedAgent === "opencode") {
+    const { buildOpencodeStartShellCommand } = await import("@/lib/session-terminal");
+    const { openInTerminal } = await import("@/lib/terminal-launcher");
+    const shellCmd = buildOpencodeStartShellCommand(resolvedProjectPath, message.trim(), model);
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        const send = (data: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        };
+        try {
+          const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedProjectPath });
+          send({ type: "status", text: `Opencode opened in ${terminal}` });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          send({ type: "error", error: msg });
+        }
+        send({ type: "done" });
+        controller.close();
+      },
+    });
+    return new Response(stream, { headers: SSE_HEADERS });
   }
 
   if (normalizedAgent === "codex") {
