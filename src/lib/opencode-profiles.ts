@@ -148,7 +148,38 @@ export function applyOpencodeProfile(profileId: string): void {
     // No base.json — merge the profile onto an empty config.
   }
 
-  const mergedConfig = deepMergeJson(baseConfig, profileConfig);
+  const mergedConfig = allowAttachmentDirectory(deepMergeJson(baseConfig, profileConfig));
   fs.writeFileSync(MERGED_CONFIG_PATH, JSON.stringify(mergedConfig, null, 2));
   fs.writeFileSync(CURRENT_PROFILE_PATH, profileId);
+}
+
+/**
+ * Files attached in the Session Manager UI (screenshots, pasted files, drag &
+ * drop) are saved by /api/upload into <tmpdir>/session-drops — outside the
+ * project directory. OpenCode treats that as an "external_directory" and asks
+ * for permission; `opencode run` has nobody to answer, so it auto-rejects and
+ * the agent can't read the attachment ("permission requested:
+ * external_directory (...session-drops/*); auto-rejecting"). Allow reads of
+ * exactly that folder, keeping any rules the user already configured.
+ */
+function allowAttachmentDirectory(config: unknown): unknown {
+  const attachmentGlob = `${path.join(os.tmpdir(), "session-drops")}/*`;
+  const root = (typeof config === "object" && config !== null ? config : {}) as Record<string, unknown>;
+  const permission = root.permission;
+
+  // A blanket string action (e.g. "allow") already covers everything — leave it.
+  if (typeof permission === "string") return root;
+
+  const permissionRules = (typeof permission === "object" && permission !== null ? permission : {}) as Record<string, unknown>;
+  const externalRule = permissionRules.external_directory;
+  if (typeof externalRule === "string") return root;
+
+  const externalRules = (typeof externalRule === "object" && externalRule !== null ? externalRule : {}) as Record<string, unknown>;
+  return {
+    ...root,
+    permission: {
+      ...permissionRules,
+      external_directory: { ...externalRules, [attachmentGlob]: "allow" },
+    },
+  };
 }
