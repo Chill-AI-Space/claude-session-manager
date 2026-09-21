@@ -94,6 +94,8 @@ WorkingDirectory=/opt/claude-session-manager
 ExecStart=/usr/bin/node node_modules/.bin/next start -p 3000
 Restart=always
 RestartSec=5
+# restart must not kill running `claude` children; scripts/deploy-live.js resumes any that die anyway
+KillMode=process
 Environment=NODE_ENV=production
 Environment=ANTHROPIC_API_KEY=your-key-here
 

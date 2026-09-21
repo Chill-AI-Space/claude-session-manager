@@ -15,7 +15,7 @@
 //   --restart-only  skip pull/install/build (code is already built)
 //   --no-resume     don't resume dead sessions (still snapshots them)
 //   --dry-run       show live sessions and what would be resumed; change nothing
-// Env: PORT (default 3000)
+// Env: PORT (default 3000), DEPLOY_SYSTEMD_UNIT (Linux, default claude-session-manager)
 //
 // The real work runs in a detached worker, so deploying from inside a session that the restart kills
 // does not kill the deploy itself; that session is in the snapshot and gets resumed afterwards.
@@ -81,12 +81,21 @@ function run(cmd, args, opts = {}) {
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} failed (exit ${r.status})`);
 }
 
+function hasSystemdUnit(unit) {
+  return spawnSync("systemctl", ["cat", unit], { stdio: "ignore" }).status === 0;
+}
+
 function restartService() {
+  const unit = process.env.DEPLOY_SYSTEMD_UNIT || "claude-session-manager";
   if (process.platform === "darwin") {
     if (!fs.existsSync(PLIST)) throw new Error(`launchd plist not found: ${PLIST} (run scripts/install-mac.sh)`);
     spawnSync("launchctl", ["unload", PLIST], { stdio: "ignore" });
     spawnSync("sleep", ["1"]);
     run("launchctl", ["load", PLIST]);
+  } else if (hasSystemdUnit(unit)) {
+    // GCE / Linux VM: the unit must have KillMode=process so `claude` children aren't killed with the server
+    // (see docs/gce-vm-setup-guide.md). Sessions that die anyway get resumed below.
+    run("sudo", ["-n", "systemctl", "restart", unit]);
   } else {
     spawnSync("pkill", ["-f", "next start"], { stdio: "ignore" });
     spawnSync("sleep", ["1"]);
@@ -117,7 +126,7 @@ async function deploy() {
     if (has("--pull")) run("git", ["pull", "--ff-only", "origin", "main"]);
     const changed = spawnSync("git", ["diff", "--name-only", oldHead, "HEAD"], { cwd: ROOT, encoding: "utf8" }).stdout;
     if (/package(-lock)?\.json/.test(changed)) run("npm", ["install", "--prefer-offline"]);
-    run("npm", ["run", "build"]);
+    run("npm", ["run", "build"], { env: { ...process.env, DEPLOY_LIVE: "1" } });
   }
 
   // 3. Restart + wait for health

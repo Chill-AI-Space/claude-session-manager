@@ -81,6 +81,8 @@ Always test on dev first, then deploy to production.
 
 **Never** restart the service by hand (`launchctl unload/load`, `kickstart`, `pkill`, `npm run build` over a running server) and never hand-roll a deploy. A raw restart kills every Claude process the server spawned — those sessions silently stop mid-task and the user is left with dead sessions.
 
+**Merged to `main` → CI deploys automatically** (`.github/workflows/ci.yml`, job `deploy`; setup + security model: [docs/deploy-live-ci-cd-setup.md](docs/deploy-live-ci-cd-setup.md)). By hand:
+
 ```bash
 npm run deploy:live                       # git pull --ff-only + install (if needed) + build + soft restart + resume + smoke test
 node scripts/deploy-live.js --restart-only   # code already built (this is what the UI "Update" button and scripts/update.sh run)
