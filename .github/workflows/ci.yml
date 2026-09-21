@@ -19,7 +19,8 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-      - run: npm ci
+      # --force: @next/swc-darwin-arm64 is a hard dependency (should be optional) and fails EBADPLATFORM on Linux
+      - run: npm ci --force
       - run: npx tsc --noEmit
       - run: npm test
       - run: npm run build
