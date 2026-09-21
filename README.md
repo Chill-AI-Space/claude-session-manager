@@ -137,6 +137,8 @@ Replace `/path/to/node` with `which node` output, and `/path/to/claude-session-m
 
 **Menu bar icon**: A white Claude icon appears in your menu bar. Click it to open the app or quit.
 
+**Deploying a new version to a running instance:** always use `npm run deploy:live` (or the sidebar Update button). It rebuilds, restarts the service and automatically resumes every live Claude session the restart killed. Do **not** restart via `launchctl`/`kickstart`/`pkill` by hand — running sessions would just die. Details: "Deploy workflow" in [CLAUDE.md](CLAUDE.md).
+
 **Manage the service:**
 
 ```bash

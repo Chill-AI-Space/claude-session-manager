@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "deploy:live": "node scripts/deploy-live.js --pull",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest"
