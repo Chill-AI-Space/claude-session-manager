@@ -1500,6 +1500,16 @@ export default function SessionDetailPage({
             "border-border"
           }`}>
             <StatusBadge status={activityStatus} />
+            {data.metadata.agent_type && data.metadata.agent_type !== "claude" && (
+              <span className={`text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border shrink-0 ${
+                data.metadata.agent_type === "codex" ? "text-violet-400/80 border-violet-400/20 bg-violet-500/5" :
+                data.metadata.agent_type === "forge" ? "text-orange-400/80 border-orange-400/20 bg-orange-500/5" :
+                data.metadata.agent_type === "opencode" ? "text-emerald-400/80 border-emerald-400/20 bg-emerald-500/5" :
+                "text-muted-foreground border-border"
+              }`}>
+                {data.metadata.agent_type}
+              </span>
+            )}
             <h2 className="text-sm font-medium flex-1 min-w-0 line-clamp-2">
               {data.metadata.custom_name ||
               data.metadata.first_prompt?.slice(0, 200) ||

@@ -180,6 +180,9 @@ export const SessionListItemComponent = memo(
               {session.agent_type === "codex" && (
                 <span className="text-[9px] font-semibold uppercase tracking-wide text-violet-400/80 px-1 py-0.5 rounded border border-violet-400/20 bg-violet-500/5">codex</span>
               )}
+              {session.agent_type === "opencode" && (
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-emerald-400/80 px-1 py-0.5 rounded border border-emerald-400/20 bg-emerald-500/5">opencode</span>
+              )}
             </div>
           </div>
         </div>
