@@ -50,8 +50,19 @@ TOTAL=$(echo "$SESSIONS_JSON" | python3 -c "import json,sys; d=json.load(sys.std
 check "Sessions API responds ($SESSION_COUNT sessions, $TOTAL total)" "$SESSION_COUNT" "^[0-9]"
 
 # 3. Pick top session — verify detail loads with messages (skip if empty)
+# Terminal-based engines (OpenCode, Codex) are inserted with message_count=0 —
+# their transcript lives in the terminal, not in our DB — so prefer the newest
+# session that actually has indexed messages over a blind sessions[0], which
+# would otherwise flake whenever one of those is the most recently touched.
 echo "3. Session detail"
-TOP_SESSION=$(echo "$SESSIONS_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); ss=d.get('sessions',[]); print(ss[0]['session_id'] if ss else '')" 2>/dev/null || echo "")
+TOP_SESSION=$(echo "$SESSIONS_JSON" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+ss=d.get('sessions',[])
+with_messages = next((s for s in ss if s.get('message_count', 0) > 0), None)
+chosen = with_messages or (ss[0] if ss else None)
+print(chosen['session_id'] if chosen else '')
+" 2>/dev/null || echo "")
 if [ -z "$TOP_SESSION" ]; then
   skip "Session detail" "no sessions yet (clean install)"
   skip "MD content" "no sessions"
