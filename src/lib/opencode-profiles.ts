@@ -27,7 +27,14 @@ const BASE_CONFIG_PATH = path.join(OPENCODE_CONFIG_DIR, "base.json");
 const MERGED_CONFIG_PATH = path.join(OPENCODE_CONFIG_DIR, "opencode.json");
 const CURRENT_PROFILE_PATH = path.join(OPENCODE_CONFIG_DIR, ".current-profile");
 
-export const DEFAULT_OPENCODE_PROFILE = "max";
+// This is only a same-render fallback used before the live profile list
+// loads (see useOpencodeProfiles) — the real source of truth is
+// ~/.config/opencode/.current-profile (getCurrentOpencodeProfile below).
+// It WILL drift if profiles/ is reorganized by hand — that's what just
+// broke session creation ("Unknown OpenCode profile: max" after `max.json`
+// got archived and .current-profile moved to "deepseek-openrouter").
+// Check `ls ~/.config/opencode/profiles` before trusting this literal.
+export const DEFAULT_OPENCODE_PROFILE = "deepseek-openrouter";
 
 export interface OpencodeProfile {
   id: string;
@@ -99,14 +106,26 @@ export function listOpencodeProfiles(): OpencodeProfile[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Reads the currently active profile id from ~/.config/opencode/.current-profile. */
+/**
+ * Reads the currently active profile id from ~/.config/opencode/.current-profile.
+ * Verifies the file it names actually still exists (profiles get renamed/archived
+ * by hand) — falls back to DEFAULT_OPENCODE_PROFILE, and if even that's gone,
+ * to whatever profile genuinely exists on disk, rather than pointing callers at
+ * a dead profile id.
+ */
 export function getCurrentOpencodeProfile(): string {
+  let candidate = DEFAULT_OPENCODE_PROFILE;
   try {
     const value = fs.readFileSync(CURRENT_PROFILE_PATH, "utf-8").trim();
-    return value || DEFAULT_OPENCODE_PROFILE;
+    if (value) candidate = value;
   } catch {
-    return DEFAULT_OPENCODE_PROFILE;
+    // No .current-profile file yet — use the default.
   }
+
+  if (fs.existsSync(path.join(PROFILES_DIR, `${candidate}.json`))) return candidate;
+
+  const anyExisting = listOpencodeProfiles()[0]?.id;
+  return anyExisting ?? candidate;
 }
 
 /**
@@ -138,9 +157,26 @@ function deepMergeJson(base: unknown, override: unknown): unknown {
  * overrides, which an `opencode run -m` flag alone cannot express.
  */
 export function applyOpencodeProfile(profileId: string): void {
-  const profilePath = path.join(PROFILES_DIR, `${profileId}.json`);
+  let resolvedProfileId = profileId;
+  let profilePath = path.join(PROFILES_DIR, `${profileId}.json`);
+
+  // Profiles get renamed/archived by hand from time to time (see the
+  // DEFAULT_OPENCODE_PROFILE comment above) — a stale client (an old tab,
+  // a cached dropdown value) can still request a profile id that no longer
+  // exists. Throwing here used to abort session creation entirely with no
+  // terminal ever opening and no session_id ever coming back — from the UI
+  // this looked like "nothing happened", not an error. Fall back to
+  // whichever profile is actually live instead of hard-failing, and only
+  // throw if THAT is also missing (a genuinely broken setup).
   if (!fs.existsSync(profilePath)) {
-    throw new Error(`Unknown OpenCode profile: ${profileId}`);
+    const fallbackId = getCurrentOpencodeProfile();
+    const fallbackPath = path.join(PROFILES_DIR, `${fallbackId}.json`);
+    if (!fs.existsSync(fallbackPath)) {
+      throw new Error(`Unknown OpenCode profile: ${profileId} (fallback "${fallbackId}" also missing)`);
+    }
+    console.warn(`[opencode-profiles] Unknown profile "${profileId}" requested — falling back to current "${fallbackId}"`);
+    resolvedProfileId = fallbackId;
+    profilePath = fallbackPath;
   }
 
   const profileConfig = JSON.parse(fs.readFileSync(profilePath, "utf-8"));
@@ -154,7 +190,7 @@ export function applyOpencodeProfile(profileId: string): void {
 
   const mergedConfig = allowAttachmentDirectory(deepMergeJson(baseConfig, profileConfig));
   fs.writeFileSync(MERGED_CONFIG_PATH, JSON.stringify(mergedConfig, null, 2));
-  fs.writeFileSync(CURRENT_PROFILE_PATH, profileId);
+  fs.writeFileSync(CURRENT_PROFILE_PATH, resolvedProfileId);
 }
 
 /**

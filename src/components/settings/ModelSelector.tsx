@@ -136,8 +136,10 @@ export function getDefaultModelForAgent(agent: AgentType, claudeModel?: string):
   if (agent === "opencode") {
     // Matches DEFAULT_OPENCODE_PROFILE in src/lib/opencode-profiles.ts —
     // duplicated as a literal here since that module pulls in Node's `fs`
-    // and can't be imported from this client component.
-    return "value";
+    // and can't be imported from this client component. Keep these two
+    // in sync by hand; drift here breaks session creation outright
+    // ("Unknown OpenCode profile: <stale name>").
+    return "deepseek-openrouter";
   }
 
   return claudeModel || "claude-sonnet-5";
