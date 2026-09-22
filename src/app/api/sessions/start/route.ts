@@ -96,6 +96,8 @@ export async function POST(request: NextRequest) {
   if (normalizedAgent === "opencode") {
     const { buildOpencodeStartShellCommand } = await import("@/lib/session-terminal");
     const { openInTerminal } = await import("@/lib/terminal-launcher");
+    const { listOpencodeSessions } = await import("@/lib/opencode-db");
+    const { getDb } = await import("@/lib/db");
     // `model` here is actually an OpenCode profile id (e.g. "quality", "value")
     // — see OpencodeProfileSelector / src/lib/opencode-profiles.ts. Building
     // the shell command applies that profile to ~/.config/opencode/opencode.json,
@@ -108,9 +110,65 @@ export async function POST(request: NextRequest) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
         };
         try {
+          // Snapshot existing OpenCode session ids for this exact directory before
+          // launch, so we can tell which one is new (same pattern as the Codex branch).
+          const existingIds = new Set(listOpencodeSessions(resolvedProjectPath).map((s) => s.id));
           const shellCmd = buildOpencodeStartShellCommand(resolvedProjectPath, message.trim(), model);
           const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedProjectPath });
           send({ type: "status", text: `Opencode opened in ${terminal}` });
+
+          // OpenCode writes its own session row (in ~/.local/share/opencode/opencode.db)
+          // as soon as it starts, well before the model responds — poll for it so the
+          // UI can navigate to the new session instead of leaving the user stuck on
+          // "session started but no ID received".
+          let sessionId: string | null = null;
+          for (let i = 0; i < 90; i++) {
+            await new Promise((r) => setTimeout(r, 500));
+            const newSession = listOpencodeSessions(resolvedProjectPath).find((s) => !existingIds.has(s.id));
+            if (newSession) {
+              sessionId = newSession.id;
+              const now = new Date().toISOString();
+              const createdAt = new Date(newSession.time_created).toISOString();
+              const modifiedAt = new Date(newSession.time_updated).toISOString();
+              const projectDir = resolvedProjectPath.replace(/[\\/]/g, "-");
+              getDb().prepare(`
+                INSERT INTO sessions (
+                  session_id, jsonl_path, project_dir, project_path,
+                  git_branch, claude_version, model, agent_type,
+                  first_prompt, last_message, last_message_role, has_result,
+                  message_count, total_input_tokens, total_output_tokens,
+                  created_at, modified_at, file_mtime, file_size, last_scanned_at
+                ) VALUES (
+                  @session_id, @jsonl_path, @project_dir, @project_path,
+                  NULL, NULL, @model, 'opencode',
+                  @first_prompt, @last_message, NULL, 0,
+                  0, 0, 0,
+                  @created_at, @modified_at, @file_mtime, 0, @last_scanned_at
+                ) ON CONFLICT(session_id) DO UPDATE SET
+                  modified_at = @modified_at, file_mtime = @file_mtime,
+                  last_scanned_at = @last_scanned_at
+              `).run({
+                session_id: sessionId,
+                // No JSONL file for OpenCode — this column is NOT NULL but unused by the
+                // opencode resume path (session-terminal.ts resumes by session_id alone).
+                jsonl_path: `opencode://${sessionId}`,
+                project_dir: projectDir,
+                project_path: resolvedProjectPath,
+                model: model || null,
+                first_prompt: message.trim().slice(0, 1000),
+                last_message: message.trim().slice(-1000),
+                created_at: createdAt,
+                modified_at: modifiedAt,
+                file_mtime: newSession.time_updated,
+                last_scanned_at: now,
+              });
+              send({ type: "session_id", session_id: sessionId });
+              break;
+            }
+          }
+          if (!sessionId) {
+            send({ type: "status", text: "Opencode started — check sidebar for new session" });
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           send({ type: "error", error: msg });
