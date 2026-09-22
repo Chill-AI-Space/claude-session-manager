@@ -109,10 +109,72 @@ export async function GET(
         alarm: getSessionAlarm(sessionId),
       });
     }
+    // Fallback: OpenCode session may exist but not be scanned into our DB yet
+    // (e.g. background scanner hasn't run) — read straight from OpenCode's own DB.
+    const { getOpencodeSession, readOpencodeMessages } = await import("@/lib/opencode-db");
+    const opencodeSession = getOpencodeSession(sessionId);
+    if (opencodeSession) {
+      const opencodeMessages = readOpencodeMessages(sessionId);
+      const fileAgeMs = Date.now() - opencodeSession.time_updated;
+      const active = fileAgeMs < 5 * 60 * 1000;
+      return Response.json({
+        session_id: sessionId,
+        project_path: opencodeSession.directory,
+        messages: opencodeMessages,
+        messages_start: 0,
+        messages_total: opencodeMessages.length,
+        metadata: {
+          session_id: sessionId,
+          project_path: opencodeSession.directory,
+          jsonl_path: `opencode://${sessionId}`,
+          agent_type: "opencode",
+          generated_title: opencodeSession.title || null,
+          model: opencodeMessages.findLast?.((m) => m.type === "assistant")?.model || null,
+          created_at: new Date(opencodeSession.time_created).toISOString(),
+          modified_at: new Date(opencodeSession.time_updated).toISOString(),
+          file_mtime: opencodeSession.time_updated,
+          first_prompt: opencodeMessages.find((m) => m.type === "user")?.content ?? null,
+          last_message_role: opencodeMessages.at(-1)?.type ?? null,
+          tags: "[]",
+          pinned: 0,
+          archived: 0,
+          custom_name: null,
+          has_result: opencodeMessages.some((m) => m.type === "assistant") ? 1 : 0,
+          delegation_status: null,
+          reply_to_session_id: null,
+        },
+        is_active: active,
+        has_result: opencodeMessages.some((m) => m.type === "assistant"),
+        file_age_ms: Math.round(fileAgeMs),
+        process_vitals: active ? (getSessionVitals(sessionId) ?? getSessionVitalsByCwd(opencodeSession.directory)) : null,
+        alarm: getSessionAlarm(sessionId),
+      });
+    }
     return Response.json(
       { error: "Session not found" },
       { status: 404 }
     );
+  }
+
+  // ── OpenCode sessions: read from ~/.local/share/opencode/opencode.db ─────
+  if ((session as SessionRow & { agent_type?: string }).agent_type === "opencode") {
+    const { readOpencodeMessages } = await import("@/lib/opencode-db");
+    const opencodeMessages = readOpencodeMessages(sessionId);
+    const fileAgeMs = Date.now() - session.file_mtime;
+    const active = fileAgeMs < 5 * 60 * 1000;
+    return Response.json({
+      session_id: session.session_id,
+      project_path: session.project_path,
+      messages: opencodeMessages,
+      messages_start: 0,
+      messages_total: opencodeMessages.length,
+      metadata: { ...session, last_message_role: opencodeMessages.at(-1)?.type ?? null },
+      is_active: active,
+      has_result: opencodeMessages.some((m) => m.type === "assistant"),
+      file_age_ms: Math.round(fileAgeMs),
+      process_vitals: active ? (getSessionVitals(sessionId) ?? getSessionVitalsByCwd(session.project_path)) : null,
+      alarm: getSessionAlarm(sessionId),
+    });
   }
 
   // ── Codex sessions: read from JSONL rollout file ─────────────────────────
