@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getDb } from "@/lib/db";
-import { SessionRow } from "@/lib/types";
+import { ParsedMessage, SessionRow } from "@/lib/types";
 import { sessionToMarkdownPaginated } from "@/lib/jsonl-to-md";
 import { resolveNode, proxyJSON } from "@/lib/remote-compute";
 
@@ -8,6 +8,62 @@ export const dynamic = "force-dynamic";
 
 /** Default: render last 30 messages. Use ?limit=0 for all, ?offset=X&limit=Y for explicit range. */
 const DEFAULT_MESSAGE_LIMIT = 30;
+
+/** Renders OpenCode ParsedMessage[] as markdown — shared by the scanned-session and live-DB-fallback paths below. */
+function renderOpencodeMarkdown(
+  allMessages: ParsedMessage[],
+  sessionId: string,
+  messageLimit: number | undefined,
+  messageOffset: number | undefined
+) {
+  const totalMessages = allMessages.length;
+  const renderStart = messageLimit === 0 || messageLimit == null
+    ? 0
+    : Math.max(0, totalMessages - messageLimit - (messageOffset ?? 0));
+  const renderEnd = messageLimit === 0 || messageLimit == null
+    ? totalMessages
+    : Math.max(renderStart, totalMessages - (messageOffset ?? 0));
+  const messages = allMessages.slice(renderStart, renderEnd);
+  const parts: string[] = [];
+  for (const m of messages) {
+    if (m.type === "user") {
+      parts.push(`**You**\n\n${m.content as string}\n`);
+    } else if (m.type === "assistant") {
+      const blocks = Array.isArray(m.content) ? m.content : [];
+      const textParts: string[] = [];
+      const toolParts: string[] = [];
+      const toolResultParts: string[] = [];
+      for (const b of blocks) {
+        if (b.type === "text" && b.text?.trim()) {
+          textParts.push(b.text);
+        } else if (b.type === "thinking" && b.thinking?.trim()) {
+          textParts.push(`_${b.thinking}_`);
+        } else if (b.type === "tool_use") {
+          const input = b.input as Record<string, unknown>;
+          const cmd = input.command ?? input.filePath ?? input.file_path ?? input.query ?? input.url ?? Object.values(input)[0];
+          const detail = cmd ? `: \`${String(cmd).slice(0, 120)}\`` : "";
+          toolParts.push(`🔧 **${b.name}**${detail}`);
+        } else if (b.type === "tool_result") {
+          const result = typeof b.content === "string" ? b.content.trim() : String(b.content ?? "").trim();
+          if (result) {
+            toolResultParts.push(`\`\`\`text\n${result}\n\`\`\``);
+          }
+        }
+      }
+      const text = [...textParts, ...toolParts, ...toolResultParts].join("\n\n");
+      if (text) parts.push(`${text}\n`);
+    }
+  }
+  const markdown = parts.length > 0 ? parts.join("\n---\n\n") : "*(No messages yet)*\n";
+  return {
+    markdown,
+    session_id: sessionId,
+    total_messages: totalMessages,
+    render_start: renderStart,
+    render_end: renderEnd,
+    has_earlier: renderStart > 0,
+  };
+}
 
 export async function GET(
   req: NextRequest,
@@ -38,10 +94,6 @@ export async function GET(
     .prepare("SELECT jsonl_path, project_path, previous_session_id, agent_type FROM sessions WHERE session_id = ?")
     .get(sessionId) as (Pick<SessionRow, "jsonl_path" | "project_path" | "previous_session_id"> & { agent_type?: string }) | undefined;
 
-  if (!session) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-
   const limitParam = req.nextUrl.searchParams.get("limit");
   const offsetParam = req.nextUrl.searchParams.get("offset");
 
@@ -50,6 +102,20 @@ export async function GET(
     ? (parseInt(limitParam) || undefined)
     : DEFAULT_MESSAGE_LIMIT;
   const messageOffset = offsetParam != null ? parseInt(offsetParam) : undefined;
+
+  if (!session) {
+    // Fallback: OpenCode session may exist but not be scanned into our DB yet
+    // (same situation [sessionId]/route.ts handles) — read straight from
+    // OpenCode's own DB rather than 404ing.
+    const { getOpencodeSession, readOpencodeMessages } = await import("@/lib/opencode-db");
+    const opencodeSession = getOpencodeSession(sessionId);
+    if (opencodeSession) {
+      return Response.json(
+        renderOpencodeMarkdown(readOpencodeMessages(sessionId), sessionId, messageLimit, messageOffset)
+      );
+    }
+    return Response.json({ error: "Session not found" }, { status: 404 });
+  }
 
   // ── Codex sessions: render from rollout JSONL ────────────────────────────
   if (session.agent_type === "codex") {
@@ -105,54 +171,9 @@ export async function GET(
   // ── OpenCode sessions: render from ~/.local/share/opencode/opencode.db ───
   if (session.agent_type === "opencode") {
     const { readOpencodeMessages } = await import("@/lib/opencode-db");
-    const allMessages = readOpencodeMessages(sessionId);
-    const totalMessages = allMessages.length;
-    const renderStart = messageLimit === 0 || messageLimit == null
-      ? 0
-      : Math.max(0, totalMessages - messageLimit - (messageOffset ?? 0));
-    const renderEnd = messageLimit === 0 || messageLimit == null
-      ? totalMessages
-      : Math.max(renderStart, totalMessages - (messageOffset ?? 0));
-    const messages = allMessages.slice(renderStart, renderEnd);
-    const parts: string[] = [];
-    for (const m of messages) {
-      if (m.type === "user") {
-        parts.push(`**You**\n\n${m.content as string}\n`);
-      } else if (m.type === "assistant") {
-        const blocks = Array.isArray(m.content) ? m.content : [];
-        const textParts: string[] = [];
-        const toolParts: string[] = [];
-        const toolResultParts: string[] = [];
-        for (const b of blocks) {
-          if (b.type === "text" && b.text?.trim()) {
-            textParts.push(b.text);
-          } else if (b.type === "thinking" && b.thinking?.trim()) {
-            textParts.push(`_${b.thinking}_`);
-          } else if (b.type === "tool_use") {
-            const input = b.input as Record<string, unknown>;
-            const cmd = input.command ?? input.filePath ?? input.file_path ?? input.query ?? input.url ?? Object.values(input)[0];
-            const detail = cmd ? `: \`${String(cmd).slice(0, 120)}\`` : "";
-            toolParts.push(`🔧 **${b.name}**${detail}`);
-          } else if (b.type === "tool_result") {
-            const result = typeof b.content === "string" ? b.content.trim() : String(b.content ?? "").trim();
-            if (result) {
-              toolResultParts.push(`\`\`\`text\n${result}\n\`\`\``);
-            }
-          }
-        }
-        const text = [...textParts, ...toolParts, ...toolResultParts].join("\n\n");
-        if (text) parts.push(`${text}\n`);
-      }
-    }
-    const markdown = parts.length > 0 ? parts.join("\n---\n\n") : "*(No messages yet)*\n";
-    return Response.json({
-      markdown,
-      session_id: sessionId,
-      total_messages: totalMessages,
-      render_start: renderStart,
-      render_end: renderEnd,
-      has_earlier: renderStart > 0,
-    });
+    return Response.json(
+      renderOpencodeMarkdown(readOpencodeMessages(sessionId), sessionId, messageLimit, messageOffset)
+    );
   }
 
   // ── Forge sessions: render from Forge SQLite ─────────────────────────────
