@@ -12,19 +12,27 @@ export function shellQuote(text: string): string {
 }
 
 /**
- * Interactive `opencode run "<prompt>"` in a fresh terminal.
+ * Interactive `opencode --prompt "<prompt>"` in a fresh terminal.
+ *
+ * This must be the root command with --prompt, NOT `opencode run <message>`.
+ * `run` is a one-shot/scripting subcommand — it answers once and the process
+ * exits back to the shell, with no way to type a follow-up in the same
+ * window (unlike Claude/Codex, which drop into an interactive REPL after the
+ * first message). The root command's default action is the interactive TUI;
+ * --prompt sends the initial message into it and leaves it running for
+ * follow-ups, matching how Claude/Codex sessions behave here.
  *
  * OpenCode has no single "model" flag equivalent to Claude's — this setup
  * switches between named profiles (Quality, Value, Free, ...), each of
  * which sets models for several OpenCode roles at once (see
  * src/lib/opencode-profiles.ts). `profileId` is applied to
  * ~/.config/opencode/opencode.json right before launch, the same way the
- * `oc <profile>` shell function does, so `opencode run` picks it up.
+ * `oc <profile>` shell function does, so the TUI picks it up.
  */
 export function buildOpencodeStartShellCommand(projectPath: string, message: string, profileId?: string): string {
   const bin = getOpencodePath();
   if (profileId) applyOpencodeProfile(profileId);
-  return `cd "${projectPath}" && "${bin}" run ${shellQuote(message)}`;
+  return `cd "${projectPath}" && "${bin}" --prompt ${shellQuote(message)}`;
 }
 
 /** Interactive `claude "<prompt>"` in a fresh terminal — a brand new session, not a resume. */
@@ -49,7 +57,10 @@ export function buildResumeShellCommand(session: SessionRow, message?: string): 
 
   if (isOpencode) {
     const bin = getOpencodePath();
-    return `cd "${cwd}" && "${bin}" run -s "${session.session_id}"`;
+    // Root command's --session, not `run -s` — same reasoning as the start
+    // command above: this needs to reopen the interactive TUI attached to
+    // that session, not run one more one-shot exchange and exit.
+    return `cd "${cwd}" && "${bin}" --session "${session.session_id}"`;
   }
 
   if (isCodex) {
