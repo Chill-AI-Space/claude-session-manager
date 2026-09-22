@@ -154,6 +154,49 @@ export async function POST(
     return new Response(stream, { headers: SSE_HEADERS });
   }
 
+  if (agentType === "opencode") {
+    // Same reasoning as Codex above: OpenCode can't be driven over the Claude
+    // SSE runner. Before this branch existed, replying to an OpenCode session
+    // silently fell through to the Claude-only code below (PID-map/TTY
+    // detection tuned for `claude`, then a headless `orchestrator.resume()`
+    // that spawns the `claude` binary) — the wrong engine entirely.
+    //
+    // No live-terminal text injection here (unlike Claude/Codex) — detecting
+    // a *running* OpenCode TUI process for this session_id would need its
+    // own PID/TTY tracking, which doesn't exist yet. Simpler and correct for
+    // now: always resume in a (possibly new) terminal via `opencode --session
+    // <id> --prompt <message>` — the root command's interactive TUI, not the
+    // one-shot `run` subcommand (see session-terminal.ts).
+    db.prepare(
+      "UPDATE sessions SET last_message = ?, last_message_role = 'user', modified_at = ? WHERE session_id = ?"
+    ).run(message.slice(0, 1000), new Date().toISOString(), sessionId);
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        const send = (data: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        };
+        try {
+          const { buildResumeShellCommand } = await import("@/lib/session-terminal");
+          const shellCmd = buildResumeShellCommand(session, message);
+          const { terminal } = await openInTerminal(shellCmd);
+          logAction("service", "opencode_reply_opened", `${terminal} msg_len:${message.length}`, sessionId);
+          send({ type: "status", text: `Opencode resumed in ${terminal}` });
+          send({ type: "done", result: "Opencode resumed", is_error: false });
+        } catch (err) {
+          const text = err instanceof Error ? err.message : String(err);
+          logAction("service", "opencode_reply_error", text, sessionId);
+          send({ type: "error", text });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, { headers: SSE_HEADERS });
+  }
+
   // If the session is currently open in a live terminal, type the reply
   // straight into it — spawning a second --resume process against the same
   // session_id forks its transcript (two processes, one file).

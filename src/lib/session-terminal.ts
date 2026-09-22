@@ -59,8 +59,11 @@ export function buildResumeShellCommand(session: SessionRow, message?: string): 
     const bin = getOpencodePath();
     // Root command's --session, not `run -s` — same reasoning as the start
     // command above: this needs to reopen the interactive TUI attached to
-    // that session, not run one more one-shot exchange and exit.
-    return `cd "${cwd}" && "${bin}" --session "${session.session_id}"`;
+    // that session, not run one more one-shot exchange and exit. --prompt
+    // is accepted alongside --session (both root flags), so a reply can
+    // resume the session AND send the new message in one shot.
+    const promptFlag = message ? ` --prompt ${shellQuote(message)}` : "";
+    return `cd "${cwd}" && "${bin}" --session "${session.session_id}"${promptFlag}`;
   }
 
   if (isCodex) {
