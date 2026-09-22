@@ -27,7 +27,7 @@ const BASE_CONFIG_PATH = path.join(OPENCODE_CONFIG_DIR, "base.json");
 const MERGED_CONFIG_PATH = path.join(OPENCODE_CONFIG_DIR, "opencode.json");
 const CURRENT_PROFILE_PATH = path.join(OPENCODE_CONFIG_DIR, ".current-profile");
 
-export const DEFAULT_OPENCODE_PROFILE = "value";
+export const DEFAULT_OPENCODE_PROFILE = "max";
 
 export interface OpencodeProfile {
   id: string;
@@ -40,12 +40,16 @@ export interface OpencodeProfile {
 // entry here still shows up (labeled with its own file name), so adding a
 // new profiles/<id>.json file doesn't require a code change.
 const PROFILE_DISPLAY_NAMES: Record<string, { name: string; description: string }> = {
+  max: {
+    name: "Max (default)",
+    description: "OpenCode Go — grok-4.7 for everything, single best model available for now",
+  },
   quality: {
     name: "Quality",
     description: "DeepSeek V4 Flash (paid) as main worker, GigaChat Ultra for planning",
   },
   value: {
-    name: "Value (default)",
+    name: "Value",
     description: "Free-tier DeepSeek V4 Flash, paid endpoint only as fallback",
   },
   free: {
