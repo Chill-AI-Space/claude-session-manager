@@ -18,12 +18,24 @@ function asString(s: string): string {
 }
 
 /**
- * For long shell commands, write to a temp script and return a short invocation.
- * AppleScript `do script` / `write text` silently fails on very long strings (~2000+ chars).
+ * iTerm2's AppleScript `write text` truncates long strings at ~1024 chars
+ * (macOS PATH_MAX), which silently cuts a command in half — e.g. an unterminated
+ * `--prompt '…` leaves the shell stuck at a `quote>` continuation prompt.
+ *
+ * So for anything above this length, write the command to a temp script and
+ * return a short `bash <file>` invocation instead. Embedded newlines are handled
+ * the same way: `write text` turns them into Enter, executing the command early.
  */
-function wrapLongCommand(shellCmd: string): string {
-  if (shellCmd.length <= 1200) return shellCmd;
-  const tmpFile = path.join(os.tmpdir(), `csm-launch-${Date.now()}.sh`);
+const MAX_WRITE_TEXT_LENGTH = 800;
+
+export function wrapLongCommand(shellCmd: string): string {
+  if (shellCmd.length <= MAX_WRITE_TEXT_LENGTH && !shellCmd.includes("\n")) {
+    return shellCmd;
+  }
+  const tmpFile = path.join(
+    os.tmpdir(),
+    `csm-launch-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.sh`
+  );
   fs.writeFileSync(tmpFile, `#!/bin/bash\n${shellCmd}\n`, { mode: 0o755 });
   return `bash ${tmpFile}`;
 }
@@ -82,11 +94,13 @@ export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | 
   const useIterm = hasMacApp("iTerm");
   const iTermWasRunning = useIterm && isMacProcessRunning("iTerm2");
 
+  // Wrap long/newline-y commands before either branch types them into a terminal.
+  const safeCmd = wrapLongCommand(shellCmd);
+
   if (options.autoClose) {
-    return openMacAutoClose(shellCmd, useIterm, iTermWasRunning);
+    return openMacAutoClose(safeCmd, useIterm, iTermWasRunning);
   }
 
-  const safeCmd = wrapLongCommand(shellCmd);
   const script = useIterm
     ? [
         'tell application "iTerm"',
