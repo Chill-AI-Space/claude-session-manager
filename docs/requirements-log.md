@@ -42,6 +42,14 @@ Running log of features/decisions for this project, with status. Update in place
 
 - **"Load N earlier messages" button** (commit `d2d8cea`): `loadAllMdMessages` callback existed but was never wired to any UI. Added clickable button at top of MD view showing count from `mdRenderStart`, spinner while loading.
 
+## Default model → Opus 5.5
+
+- **[реализовано] Модель по умолчанию — Claude Opus 5.5** (`claude-opus-5-5`) для веб-запуска сессий. Меняется `SETTING_DEFAULTS.claude_model` (`src/lib/db.ts`), fallback в `buildCliArgs` (`src/lib/orchestrator.ts`), пресеты в `ModelSelector.tsx`. Документация: `docs/default-model-and-5-5-migration.md`.
+
+## Надёжность запуска сессий
+
+- **[реализовано] Длинный промпт запуска больше не ломает терминал** — iTerm2 AppleScript `write text` молча обрезает строку на ~1024 символов; обрезанный `--prompt '<незакрытая кавычка` оставлял шелл в `quote>` (`cmdand quote>`), запуск зависал. Длинные команды теперь пишутся во временный скрипт (`wrapLongCommand`, порог снижен 1200→800, + переносы строк), а промпты Claude/OpenCode/Codex грузятся из temp-файла через `$PROMPT`/`$SYS_PROMPT` (`src/lib/prompt-file.ts`, `session-terminal.ts`, `codex-command.ts`). Команды запуска стали ~300 символов вместо ~1000+. Тесты: `terminal-launcher.test.ts`, `session-terminal.test.ts`.
+
 ## Deploy
 
 - **[реализовано] Мягкий деплой на живом сервисе** — `npm run deploy:live` / `scripts/deploy-live.js`: снимок живых сессий → build → рестарт → resume упавших сессий сообщением "сервер передеплоен, восстановлено" → smoke test. Кнопка Update в UI и `scripts/update.sh` вызывают тот же скрипт (`--restart-only`). Ручной `launchctl unload/load` / `pkill` для деплоя запрещён (зафиксировано в CLAUDE.md и README).

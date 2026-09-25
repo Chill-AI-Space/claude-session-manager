@@ -1,19 +1,4 @@
-import fs from "fs";
-import os from "os";
-import path from "path";
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-function writeTempPromptFile(prompt: string): string {
-  const promptPath = path.join(
-    os.tmpdir(),
-    `csm-codex-prompt-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`
-  );
-  fs.writeFileSync(promptPath, prompt, "utf8");
-  return promptPath;
-}
+import { buildPromptLoader, shellQuote, writeTempPromptFile } from "./prompt-file";
 
 function buildPrefix(projectPath: string): string {
   return `cd ${shellQuote(projectPath)} &&`;
@@ -26,12 +11,6 @@ function buildFlags(bin: string, skipPermissions: boolean, model?: string): stri
   return parts.join(" ");
 }
 
-function buildPromptLoader(promptPath: string): string {
-  // cat exit code gates the && chain. rm is in a { rm; true; } group so its
-  // exit code never prevents exec — cleanup always succeeds from &&'s perspective.
-  return `PROMPT_FILE=${shellQuote(promptPath)} && PROMPT="$(cat "$PROMPT_FILE")" && { rm -f "$PROMPT_FILE"; true; }`;
-}
-
 export function buildCodexStartShellCommand(opts: {
   projectPath: string;
   bin: string;
@@ -39,7 +18,7 @@ export function buildCodexStartShellCommand(opts: {
   skipPermissions: boolean;
   model?: string;
 }): string {
-  const promptPath = writeTempPromptFile(opts.message);
+  const promptPath = writeTempPromptFile(opts.message, "csm-codex-prompt");
   return [
     buildPrefix(opts.projectPath),
     buildPromptLoader(promptPath),
@@ -55,7 +34,7 @@ export function buildCodexResumeShellCommand(opts: {
   message: string;
   skipPermissions: boolean;
 }): string {
-  const promptPath = writeTempPromptFile(opts.message);
+  const promptPath = writeTempPromptFile(opts.message, "csm-codex-prompt");
   return [
     buildPrefix(opts.projectPath),
     buildPromptLoader(promptPath),
