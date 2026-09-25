@@ -14,18 +14,25 @@ export interface ModelPreset {
 export const MODEL_PRESETS: ModelPreset[] = [
   // Claude models (default)
   {
+    id: "claude-opus-5-5",
+    name: "Claude Opus 5.5",
+    model: "claude-opus-5-5",
+    category: "quality",
+    description: "Default — most capable",
+  },
+  {
     id: "claude-sonnet-5",
     name: "Claude Sonnet 5",
     model: "claude-sonnet-5",
     category: "balanced",
-    description: "Default Claude model",
+    description: "Efficient everyday Claude model",
   },
   {
     id: "claude-opus-5",
     name: "Claude Opus 5",
     model: "claude-opus-5",
     category: "quality",
-    description: "Highest quality",
+    description: "Previous Opus",
   },
   {
     id: "claude-sonnet-4-6",
@@ -142,7 +149,7 @@ export function getDefaultModelForAgent(agent: AgentType, claudeModel?: string):
     return "deepseek-openrouter";
   }
 
-  return claudeModel || "claude-sonnet-5";
+  return claudeModel || "claude-opus-5-5";
 }
 
 interface ModelSelectorProps {

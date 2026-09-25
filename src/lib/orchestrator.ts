@@ -228,7 +228,7 @@ export function buildCliArgs(opts: {
   args.push("--verbose");
   args.push("--effort", effort);
 
-  const model = opts.model || getSetting("claude_model") || "claude-sonnet-5";
+  const model = opts.model || getSetting("claude_model") || "claude-opus-5-5";
   args.push("--model", model);
 
   if (opts.includeMaxTurns !== false && opts.sessionId) {
