@@ -24,7 +24,7 @@ export function SummaryAiSettings({ settings, onUpdate, savedKey }: SettingsComp
         </p>
         <ModelSelector
           settingKey="claude_model"
-          currentModel={settings.claude_model || "claude-sonnet-4-6"}
+          currentModel={settings.claude_model || "claude-opus-5-5"}
           onUpdate={onUpdate}
         />
       </div>

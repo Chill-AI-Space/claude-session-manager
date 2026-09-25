@@ -472,7 +472,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   // Auto-close terminal windows after permission escalation completes
   auto_close_escalation_terminals: "true",
   // Claude CLI model (used for terminal sessions)
-  claude_model: "claude-sonnet-5",
+  claude_model: "claude-opus-5-5",
   // Remote relay settings
   relay_enabled: "false",
   relay_node_id: "",
