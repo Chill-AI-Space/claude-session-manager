@@ -78,8 +78,11 @@ export function useSessionStart(opts?: UseSessionStartOptions) {
                   router.push(`/claude-sessions/${obj.session_id}`);
                 }
                 if (obj.type === "error") {
-                  trackEvent("session_start_sse_error", correlationId, undefined, { error: obj.text, elapsedMs: Date.now() - startedAt });
-                  setError(obj.text);
+                  // The server sends { type: "error", error: <msg> } — reading
+                  // obj.text showed "undefined" and hid the real failure.
+                  const errorText = typeof obj.error === "string" ? obj.error : obj.text;
+                  trackEvent("session_start_sse_error", correlationId, undefined, { error: errorText, elapsedMs: Date.now() - startedAt });
+                  setError(errorText || "Failed to start session");
                   if (timerRef.current) clearTimeout(timerRef.current);
                   setStarting(false);
                 }
