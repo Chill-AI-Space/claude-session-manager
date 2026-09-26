@@ -95,7 +95,15 @@ export async function openInTerminal(shellCmd: string, opts?: TerminalOptions | 
   const iTermWasRunning = useIterm && isMacProcessRunning("iTerm2");
 
   // Wrap long/newline-y commands before either branch types them into a terminal.
-  const safeCmd = wrapLongCommand(shellCmd);
+  //
+  // Prepend one sacrificial space: `write text` types into a freshly spawned
+  // interactive shell whose rc file may still be running. If that rc blocks on
+  // a prompt that reads a single char — e.g. oh-my-zsh's "[oh-my-zsh] Would you
+  // like to update? [Y/n]" (a `read -k 1`) — it silently eats the first char of
+  // the command, turning `cd /project` into `d /project` and launching the agent
+  // in $HOME instead of the project dir. The space absorbs that read and is a
+  // harmless no-op (leading whitespace) when nothing consumes it.
+  const safeCmd = " " + wrapLongCommand(shellCmd);
 
   if (options.autoClose) {
     return openMacAutoClose(safeCmd, useIterm, iTermWasRunning);
