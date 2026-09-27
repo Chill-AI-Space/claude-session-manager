@@ -8,6 +8,7 @@ import { buildCodexResumeShellCommand } from "@/lib/codex-command";
 import { openInTerminal } from "@/lib/terminal-launcher";
 import { getTTY, sendTextToTerminalTTYVerified } from "@/lib/macos-terminal-control";
 import { getLiveSessionFromPidMap } from "@/lib/session-pid-map";
+import { findLiveSessionProcesses } from "@/lib/session-liveness";
 import { sseResponse, SSE_HEADERS } from "@/lib/claude-runner";
 import { resolveNode, proxySSE } from "@/lib/remote-compute";
 
@@ -206,7 +207,11 @@ export async function POST(
     // modified transcript in a shared cwd, which misattributes when several
     // sessions share a working directory.
     const fromPidMap = getLiveSessionFromPidMap(sessionId);
-    const liveProc = fromPidMap ? { pid: fromPidMap.pid } : detectActiveClaudeSessions().find((p) => p.sessionId === sessionId);
+    // Fresh check as last resort: the detector cache is empty right after a restart, and falling
+    // through to orchestrator.resume() with a live process would fork the session.
+    const liveProc = fromPidMap
+      ? { pid: fromPidMap.pid }
+      : detectActiveClaudeSessions().find((p) => p.sessionId === sessionId) ?? findLiveSessionProcesses(sessionId)[0];
     const tty = fromPidMap ? fromPidMap.tty : liveProc ? getTTY(liveProc.pid) : null;
 
     if (tty) {

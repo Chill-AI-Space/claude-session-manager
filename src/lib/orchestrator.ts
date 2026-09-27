@@ -18,6 +18,7 @@ import { getClaudePath } from "./claude-bin";
 import { getCleanEnv, claudeProjectsDir } from "./utils";
 import { createSSEStream, sseResponse } from "./claude-runner";
 import { killSessionProcesses, isSessionActive } from "./process-detector";
+import { findLiveSessionProcesses, killSessionAndWait } from "./session-liveness";
 import { openInTerminal } from "./terminal-launcher";
 import { scanSessions } from "./scanner";
 import { generateTitleBatch } from "./title-generator";
@@ -831,6 +832,9 @@ class SessionOrchestrator extends EventEmitter {
   private permissionCheckTimer: NodeJS.Timeout | null = null;
   // Messages queued while session was busy — delivered on next session:completed
   private pendingReplies = new Map<string, string[]>();
+  // Resumes we have spawned (or are about to) and that haven't exited yet: sessionId → reason.
+  // Together with the fresh process check in claimResume() this keeps one session at one process.
+  private resumeClaims = new Map<string, string>();
 
   constructor() {
     super();
@@ -852,6 +856,42 @@ class SessionOrchestrator extends EventEmitter {
     this.on("session:completed", ({ sessionId }: { sessionId: string }) => {
       this.deliverPendingReply(sessionId).catch(() => {});
     });
+  }
+
+  // ── Single-process guard ──────────────────────────────────────────────────
+
+  /**
+   * Gate in front of EVERY `claude --resume <id>` spawn: one session → at most one live process.
+   * Refuses when we already have a resume of this session in flight, or when any live process is
+   * bound to it right now (fresh ps + ~/.claude/sessions registry, never the cached detector —
+   * that cache is empty right after a restart, which is how deploys and babysitter paths cloned
+   * sessions whose original process was still running). Idempotent: a second call is a no-op.
+   */
+  claimResume(sessionId: string, reason: string): boolean {
+    const holder = this.resumeClaims.get(sessionId);
+    if (holder) {
+      logAction("service", "resume_skipped_duplicate", `${reason}: resume already in flight (${holder})`, sessionId);
+      return false;
+    }
+    const live = findLiveSessionProcesses(sessionId);
+    if (live.length > 0) {
+      logAction("service", "resume_skipped_alive", `${reason}: live process pid:${live.map((p) => p.pid).join(",")}`, sessionId);
+      return false;
+    }
+    this.resumeClaims.set(sessionId, reason);
+    return true;
+  }
+
+  /** Drop the in-flight claim. `afterMs` keeps it a bit longer for processes we can't watch (terminal launches). */
+  releaseResume(sessionId: string, afterMs = 0): void {
+    if (afterMs <= 0) {
+      this.resumeClaims.delete(sessionId);
+      return;
+    }
+    const reason = this.resumeClaims.get(sessionId);
+    setTimeout(() => {
+      if (this.resumeClaims.get(sessionId) === reason) this.resumeClaims.delete(sessionId);
+    }, afterMs).unref?.();
   }
 
   // ── Pending reply queue ───────────────────────────────────────────────────
@@ -1061,6 +1101,18 @@ class SessionOrchestrator extends EventEmitter {
     // Cancel any pending stall_continue — user is actively replying
     this.queue.cancel(`stall_continue:${sessionId}`);
 
+    if (!this.claimResume(sessionId, "reply")) {
+      const text = "Session already has a live process (or a resume in flight) — not starting a second one";
+      return new ReadableStream({
+        start(controller) {
+          const enc = new TextEncoder();
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "error", error: text })}\n\n`));
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "done", result: text, is_error: true })}\n\n`));
+          controller.close();
+        },
+      });
+    }
+
     const contextPrompt = buildSessionContextPrompt(sessionId);
     const args = buildCliArgs({ sessionId, message, includeMaxTurns: true, appendSystemPrompt: contextPrompt });
 
@@ -1084,6 +1136,7 @@ class SessionOrchestrator extends EventEmitter {
         if (state) state.lastActivity = Date.now();
       },
       onClose: () => {
+        this.releaseResume(sessionId);
         this.transition(sessionId, "completed");
         this.emit("session:completed", { sessionId });
       },
@@ -1528,6 +1581,7 @@ If it requires architectural decisions or major changes — write a short summar
               .prepare("SELECT project_path FROM sessions WHERE session_id = ?")
               .get(sessionId) as { project_path: string } | undefined;
             if (!session) throw new Error(`Session ${sessionId} not found`);
+            if (!this.claimResume(sessionId, `enqueued_${type}`)) return;
 
             // Fire-and-forget (no SSE consumer)
             const args = buildCliArgs({ sessionId, message, includeMaxTurns: true });
@@ -1541,7 +1595,9 @@ If it requires architectural decisions or major changes — write a short summar
             proc.stdout?.resume();
             proc.stderr?.resume();
             proc.unref();
+            proc.on("error", () => this.releaseResume(sessionId));
             proc.on("close", (code: number | null) => {
+              this.releaseResume(sessionId);
               logAction("service", code === 0 ? "enqueued_task_done" : "enqueued_task_failed", `exit:${code}`, sessionId);
               this.transition(sessionId, "completed");
             });
@@ -1646,6 +1702,10 @@ If it requires architectural decisions or major changes — write a short summar
       return;
     }
 
+    if (!this.claimResume(sessionId, "crash_retry")) {
+      this.transition(sessionId, "running");
+      return;
+    }
     this.transition(sessionId, "retrying");
     this.emit("session:retrying", { sessionId, attempt: (state?.retryCount ?? 0) + 1 });
     logAction("service", "auto_retry_fired", "orchestrator", sessionId);
@@ -1676,6 +1736,7 @@ If it requires architectural decisions or major changes — write a short summar
 
     return new Promise<void>((resolve) => {
       proc.on("close", (code: number | null) => {
+        this.releaseResume(sessionId);
         logAction("service", code === 0 ? "auto_retry_done" : "auto_retry_failed", `exit:${code}`, sessionId);
         this.transition(sessionId, code === 0 ? "running" : "crashed");
         resolve();
@@ -1742,6 +1803,15 @@ If it requires architectural decisions or major changes — write a short summar
       logAction("service", "stall_continue_force_resume", `skipped ${stSkips} times, forcing resume`, sessionId);
     }
 
+    // The stalled process is by definition still alive — a --resume next to it would fork the
+    // session into two processes. Stop it first; if it won't die, don't resume at all.
+    const { survivors } = await killSessionAndWait(sessionId);
+    if (survivors.length > 0) {
+      logAction("service", "stall_continue_skipped", `stalled process pid:${survivors.join(",")} did not exit`, sessionId);
+      return;
+    }
+    if (!this.claimResume(sessionId, "stall_continue")) return;
+
     this.transition(sessionId, "continuing");
     this.emit("session:continuing", { sessionId });
     logAction("service", "stall_continue_fired", `stalled >${STALL_THRESHOLD_MS / 60_000}min`, sessionId);
@@ -1767,6 +1837,7 @@ If it requires architectural decisions or major changes — write a short summar
 
     return new Promise<void>((resolve) => {
       proc.on("close", (code: number | null) => {
+        this.releaseResume(sessionId);
         logAction("service", code === 0 ? "stall_continue_done" : "stall_continue_failed", `exit:${code}`, sessionId);
         this.transition(sessionId, code === 0 ? "running" : "idle");
         resolve();
@@ -1847,6 +1918,7 @@ If it requires architectural decisions or major changes — write a short summar
       return;
     }
 
+    if (!this.claimResume(sessionId, "incomplete_exit")) return;
     this.transition(sessionId, "retrying");
     this.emit("session:retrying", { sessionId, attempt: (state?.retryCount ?? 0) + 1 });
     logAction("service", "incomplete_exit_fired", "orchestrator", sessionId);
@@ -1877,6 +1949,7 @@ If it requires architectural decisions or major changes — write a short summar
 
     return new Promise<void>((resolve) => {
       proc.on("close", (code: number | null) => {
+        this.releaseResume(sessionId);
         logAction("service", code === 0 ? "incomplete_exit_done" : "incomplete_exit_failed", `exit:${code}`, sessionId);
         this.transition(sessionId, code === 0 ? "completed" : "crashed");
         resolve();
@@ -1901,13 +1974,25 @@ If it requires architectural decisions or major changes — write a short summar
       return;
     }
 
-    // Still alive? Kill the stuck process
-    if (isSessionActive(sessionId)) {
-      logAction("service", "permission_wait_killing", `session stuck on tool approval`, sessionId);
-      killSessionProcesses(sessionId);
-      // Wait for process to die and release locks
-      await new Promise((r) => setTimeout(r, 3000));
+    // A process running with --dangerously-skip-permissions never waits for approval — a long tool
+    // call only looks like it. Killing/resuming it would clone a perfectly healthy session.
+    const live = findLiveSessionProcesses(sessionId);
+    if (!isTestTrigger && live.some((p) => p.command?.includes("--dangerously-skip-permissions"))) {
+      logAction("service", "permission_wait_skipped", "live process already runs with --dangerously-skip-permissions", sessionId);
+      return;
     }
+
+    // Still alive? Kill the stuck process — and make sure it is really gone before resuming,
+    // otherwise the terminal --resume below becomes a second process of the same session.
+    if (live.length > 0) {
+      logAction("service", "permission_wait_killing", `session stuck on tool approval pid:${live.map((p) => p.pid).join(",")}`, sessionId);
+      const { survivors } = await killSessionAndWait(sessionId);
+      if (survivors.length > 0) {
+        logAction("service", "permission_wait_skipped", `stuck process pid:${survivors.join(",")} did not exit`, sessionId);
+        return;
+      }
+    }
+    if (!this.claimResume(sessionId, "permission_wait")) return;
 
     this.transition(sessionId, "retrying");
     this.emit("session:retrying", { sessionId, reason: "permission_wait" });
@@ -1926,6 +2011,8 @@ If it requires architectural decisions or major changes — write a short summar
       logAction("service", "permission_wait_failed", `${err}`, sessionId);
       this.transition(sessionId, "crashed");
     }
+    // Terminal process isn't ours to watch; ps/registry see it once it's up
+    this.releaseResume(sessionId, 60_000);
   }
 
   private async executePermissionEscalation(sessionId: string): Promise<void> {
@@ -1942,6 +2029,7 @@ If it requires architectural decisions or major changes — write a short summar
       return;
     }
 
+    if (!this.claimResume(sessionId, "permission_escalation")) return;
     logAction("service", "permission_escalation_fired", "pushing to terminal", sessionId);
 
     const claudePath = getClaudePath();
@@ -1954,6 +2042,7 @@ If it requires architectural decisions or major changes — write a short summar
     } catch (err) {
       logAction("service", "permission_escalation_failed", `${err}`, sessionId);
     }
+    this.releaseResume(sessionId, 60_000);
   }
 
   // ── State transitions ─────────────────────────────────────────────────────

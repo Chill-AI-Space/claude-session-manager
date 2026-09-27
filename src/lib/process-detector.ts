@@ -4,6 +4,7 @@ import path from "path";
 import { claudeProjectsDir } from "./utils";
 import type { CodexThreadRow } from "./codex-db";
 import { listCodexThreads } from "./codex-db";
+import { findLiveSessionProcesses } from "./session-liveness";
 
 const isWin = process.platform === "win32";
 
@@ -564,8 +565,11 @@ export function getSessionVitalsByCwd(projectPath: string): ProcessVitals | null
 }
 
 export function killSessionProcesses(sessionId: string): number[] {
-  cachedResult = null;
-  const matching = detectActiveClaudeSessions().filter((p) => p.sessionId === sessionId);
+  // Fresh lookup: the cached detector returns [] when cold (it used to be nulled right here,
+  // so this killed nothing and callers went on to spawn a --resume clone next to the survivor).
+  const pids = new Set<number>(detectActiveClaudeSessions().filter((p) => p.sessionId === sessionId).map((p) => p.pid));
+  for (const p of findLiveSessionProcesses(sessionId)) pids.add(p.pid);
+  const matching = [...pids].map((pid) => ({ pid }));
   const killed: number[] = [];
   for (const proc of matching) {
     try {
