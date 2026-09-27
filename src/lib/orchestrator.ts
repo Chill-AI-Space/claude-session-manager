@@ -13,7 +13,7 @@
  */
 import { EventEmitter } from "events";
 import spawn from "cross-spawn";
-import { getDb, getSetting, logAction } from "./db";
+import { getDb, getSetting, logAction, isBabysitterDisabled } from "./db";
 import { getClaudePath } from "./claude-bin";
 import { getCleanEnv, claudeProjectsDir } from "./utils";
 import { createSSEStream, sseResponse } from "./claude-runner";
@@ -1965,6 +1965,10 @@ If it requires architectural decisions or major changes — write a short summar
 
     if (!session) return;
     if (getSetting("auto_escalate_permissions") === "false") return;
+    if (isBabysitterDisabled(sessionId)) {
+      logAction("service", "permission_wait_skipped", "babysitter disabled for session", sessionId);
+      return;
+    }
 
     // Re-check: still looks like a permission wait? (skip re-check for test word triggers)
     const testWord = getSetting("permission_escalation_test_word");
@@ -2114,6 +2118,9 @@ If it requires architectural decisions or major changes — write a short summar
       }>;
 
       for (const session of candidates) {
+        // Session opted out of babysitting (DELETE /alarm) — the scanner honours this, so must we
+        if (isBabysitterDisabled(session.session_id)) continue;
+
         // Skip if orchestrator already handling this session
         const state = this.status(session.session_id);
         if (state && !["idle", "completed", "failed"].includes(state.phase)) continue;

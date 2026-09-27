@@ -33,10 +33,12 @@ vi.mock("../session-liveness", () => ({
 }));
 
 const row = { project_path: "/tmp/proj", jsonl_path: "/tmp/none.jsonl", last_message: null as string | null };
+const babysitterDisabled = new Set<string>();
 const settings: Record<string, string> = { permission_check_interval_ms: "0", auto_escalate_permissions: "true" };
 vi.mock("../db", () => ({
   getSetting: (k: string) => settings[k] ?? "",
   logAction: vi.fn(),
+  isBabysitterDisabled: (id: string) => babysitterDisabled.has(id),
   getDb: () => ({
     prepare: () => ({
       get: () => row,
@@ -73,6 +75,7 @@ describe("orchestrator: one session → at most one live process", () => {
     live.clear();
     spawned.length = 0;
     terminalLaunches.length = 0;
+    babysitterDisabled.clear();
     delete (globalThis as Record<string, unknown>).__sessionOrchestrator;
   });
 
@@ -128,6 +131,19 @@ describe("orchestrator: one session → at most one live process", () => {
       await o.executePermissionWait(SID);
       await o.executePermissionWait(SID);
       expect(terminalLaunches).toHaveLength(1);
+    } finally {
+      fs.unlinkSync(row.jsonl_path);
+    }
+  });
+
+  it("permission-wait respects a per-session babysitter opt-out (DELETE /alarm)", async () => {
+    row.jsonl_path = path.join(os.tmpdir(), `perm-wait-off-${Date.now()}.jsonl`);
+    fs.writeFileSync(row.jsonl_path, JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Bash" }] } }) + "\n");
+    try {
+      babysitterDisabled.add(SID);
+      const o = getOrchestrator() as unknown as { executePermissionWait(id: string): Promise<void> };
+      await o.executePermissionWait(SID);
+      expect(terminalLaunches).toHaveLength(0);
     } finally {
       fs.unlinkSync(row.jsonl_path);
     }
