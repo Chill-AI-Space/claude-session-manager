@@ -348,6 +348,7 @@ Task types: `start`, `resume`, `crash_retry`, `stall_continue`, `incomplete_exit
 | `orchestrator_crash_retry_delay_ms` | `30000` | Delay before auto-retry after crash |
 | `orchestrator_stall_continue_delay_ms` | `10000` | Delay before auto-continue on stall |
 | `orchestrator_max_retries` | `3` | Max crash retries per session before marking as failed |
+| `subsession_agent_override` | `""` | Force the agent for sessions spawned via curl/API (not from the browser UI): `claude`/`opencode`/`codex`/`forge`, empty = off. Steers spawning away from an agent whose quota is running out. |
 
 ### How scanner integrates (Session Babysitter)
 

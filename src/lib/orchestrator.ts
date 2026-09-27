@@ -266,9 +266,27 @@ export function buildSessionContextPrompt(sessionId?: string): string | undefine
     lines.push("(Your SESSION_ID is assigned at session start and visible in your conversation metadata.)");
   }
   lines.push(`Start sub-session: POST ${base}/api/sessions/start  body: {"path":"...","message":"...","agent":"claude|codex|forge|opencode"}`);
+  const override = getSetting("subsession_agent_override");
+  if (override) lines.push(`  — Sub-sessions are currently forced to agent "${override}" (server-side rule; any other "agent" value is overridden).`);
   lines.push(`Active sessions: GET ${base}/api/sessions`);
   lines.push("[End Context]");
   return lines.join("\n");
+}
+
+/** Which agent to spawn for which subtask — reflects the subsession_agent_override setting. */
+export function subsessionAgentGuidance(): string[] {
+  const override = getSetting("subsession_agent_override");
+  if (override) {
+    return [
+      `If you spawn sub-sessions, use "agent": "${override}" — all sub-sessions are currently forced to ${override} (server-side rule).`,
+    ];
+  }
+  return [
+    `If you need to spawn sub-sessions as part of your work, ALWAYS specify "agent" explicitly:`,
+    `  "agent": "opencode" — writing / implementing code (default choice for implementation)`,
+    `  "agent": "claude"   — review, analysis, planning, research`,
+    `Never omit "agent" — the default agent may be wrong for the subtask you are spawning.`,
+  ];
 }
 
 /** Build the delegation contract block injected when a session is spawned with reply_to_session_id. */
@@ -282,10 +300,7 @@ function buildDelegationPrompt(replyToSessionId: string, delegationTask: string 
     `  - Plans / findings / reports → save to a dated file and commit ("docs/YYYY-MM-DD-description.md")`,
     `  - Nothing should exist only in session context — if it's not in git, it will be lost`,
     ``,
-    `If you need to spawn sub-sessions as part of your work, ALWAYS specify "agent" explicitly:`,
-    `  "agent": "codex"  — writing / implementing code`,
-    `  "agent": "claude" — review, analysis, planning, research`,
-    `Never omit "agent" — the default agent may be wrong for the subtask you are spawning.`,
+    ...subsessionAgentGuidance(),
     `Always set "path" to the target repository root, not a scratch folder.`,
     ``,
     `CRITICAL: Always use -N (no-buffer) with curl and capture the session_id from the SSE response.`,

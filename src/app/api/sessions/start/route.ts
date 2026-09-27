@@ -10,9 +10,14 @@ import { SSE_HEADERS } from "@/lib/claude-runner";
 
 export const dynamic = "force-dynamic";
 
+type Agent = "claude" | "codex" | "forge" | "opencode";
+function isAgent(v: unknown): v is Agent {
+  return v === "claude" || v === "codex" || v === "forge" || v === "opencode";
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { path: projectPath, message, correlationId, verbose, model, agent, previous_session_id, on_complete_url, reply_to_session_id, delegation_task } = body as {
+  const { path: projectPath, message, correlationId, verbose, model: requestedModel, agent, previous_session_id, on_complete_url, reply_to_session_id, delegation_task } = body as {
     path: string;
     message: string;
     correlationId?: string;
@@ -30,12 +35,9 @@ export async function POST(request: NextRequest) {
   }
 
   const defaultAgentSetting = getSetting("default_agent");
-  const defaultAgent =
-    defaultAgentSetting === "claude" || defaultAgentSetting === "codex" || defaultAgentSetting === "forge" || defaultAgentSetting === "opencode"
-      ? defaultAgentSetting
-      : "opencode";
+  const defaultAgent = isAgent(defaultAgentSetting) ? defaultAgentSetting : "opencode";
 
-  const normalizedAgent =
+  let normalizedAgent =
     agent === undefined
       ? defaultAgent
       : agent === "claude" || agent === "codex" || agent === "forge" || agent === "opencode"
@@ -44,6 +46,19 @@ export async function POST(request: NextRequest) {
 
   if (normalizedAgent === null) {
     return Response.json({ error: `invalid agent: ${String(agent)}` }, { status: 400 });
+  }
+
+  // Sub-session agent override: sessions spawned by other sessions (curl — no
+  // Sec-Fetch-* headers) get the forced agent; starts from the browser UI keep
+  // whatever the user picked. Used to steer spawning away from an agent whose
+  // quota is running out without relying on prompt instructions.
+  let model = requestedModel;
+  const override = getSetting("subsession_agent_override");
+  const fromBrowser = request.headers.has("sec-fetch-site");
+  if (!fromBrowser && isAgent(override) && override !== normalizedAgent) {
+    logAction("service", "subsession_agent_override", JSON.stringify({ requested: normalizedAgent, forced: override, path: projectPath }));
+    normalizedAgent = override;
+    model = undefined; // model ids are agent-specific (e.g. a codex model on claude would fail)
   }
 
   // Check if a specific node was requested, or use default compute node
@@ -187,6 +202,7 @@ export async function POST(request: NextRequest) {
     const { openInTerminal } = await import("@/lib/terminal-launcher");
     const { listCodexThreads } = await import("@/lib/codex-db");
     const { getDb } = await import("@/lib/db");
+    const { subsessionAgentGuidance } = await import("@/lib/orchestrator");
     const bin = getCodexPath();
     const skipPermissions = getSetting("dangerously_skip_permissions") === "true";
 
@@ -201,7 +217,7 @@ export async function POST(request: NextRequest) {
         "[Delegation Contract]",
         `You were spawned to handle a delegated task${delegation_task ? `: "${delegation_task}"` : ""}.`,
         `Before reporting back, persist your work: code → commit to branch; plans/findings → save to dated file (docs/YYYY-MM-DD-name.md) and commit. Nothing in session context only — if not in git, it will be lost.`,
-        `If you spawn sub-sessions, ALWAYS specify "agent" explicitly: "agent":"codex" for code, "agent":"claude" for review/analysis. Never omit "agent" — the default agent may be wrong for the task.`,
+        ...subsessionAgentGuidance(),
         `CRITICAL: use -N (no-buffer) with curl and capture session_id: CHILD_ID=$(curl -s -N -X POST ".../start" ... | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id":"\\([^"]*\\)".*/\\1/'). If CHILD_ID empty — spawn failed, retry.`,
         `When done, report back by running ONE of these:`,
         `  curl -s -X POST "${base}/api/sessions/${reply_to_session_id}/reply" -H "Content-Type: application/json" -d '{"message": "DONE: <summary> | committed: <branch>"}'`,

@@ -517,6 +517,10 @@ const SETTING_DEFAULTS: Record<string, string> = {
   telegram_chat_id: "",
   // Agent selection — which AI agent to use for new sessions
   default_agent: "opencode",
+  // Forces the agent for sessions spawned programmatically (curl from other sessions,
+  // orchestrator callers) — requests from the browser UI are not affected.
+  // "" = off (honour the requested agent); "claude" | "codex" | "forge" | "opencode" = force.
+  subsession_agent_override: "",
   // Session choreography — inject session context (session_id + callback URL) into system prompt
   inject_session_context: "true",
   // Base URL for callback URLs injected into sessions (e.g. http://localhost:3000 or relay URL)

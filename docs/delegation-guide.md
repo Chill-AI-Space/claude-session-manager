@@ -91,9 +91,9 @@ Verify: `curl -s "http://localhost:3000/api/sessions/my-id?path=$(pwd)"`
 
 **If the child crashes** without replying → babysitter pings it 3×, then auto-sends FAILED to you.
 
-**Agent types:** `"claude"` (default), `"codex"`, `"forge"`.
+**Agent types:** `"claude"`, `"opencode"`, `"codex"`, `"forge"`.
 
-> **Always specify `agent` explicitly.** Default is `"claude"` — but for writing code you want `"codex"`. Omitting `agent` on an implementation task creates a Claude session when you expected Codex.
+> **Always specify `agent` explicitly.** `"opencode"` for writing code, `"claude"` for planning/review/research. If the `subsession_agent_override` setting is set, the server forces that agent for every spawned sub-session regardless of what you pass.
 
 ---
 

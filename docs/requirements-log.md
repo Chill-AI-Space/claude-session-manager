@@ -54,6 +54,11 @@ Running log of features/decisions for this project, with status. Update in place
 
 - **[реализовано] Мягкий деплой на живом сервисе** — `npm run deploy:live` / `scripts/deploy-live.js`: снимок живых сессий → build → рестарт → resume упавших сессий сообщением "сервер передеплоен, восстановлено" → smoke test. Кнопка Update в UI и `scripts/update.sh` вызывают тот же скрипт (`--restart-only`). Ручной `launchctl unload/load` / `pkill` для деплоя запрещён (зафиксировано в CLAUDE.md и README).
 
+## Выбор агента для подсессий
+
+- [реализовано] `subsession_agent_override` — серверное правило: все сессии, заспавненные через curl/API (не из браузерного UI), принудительно запускаются указанным агентом; model сбрасывается. Причина: делегирующий промпт толкал на codex, лимит codex кончался. План: ночь 2026-09-27 → `claude`, утром → `opencode` (Claude — планировщик, opencode — исполнитель-сиблинг).
+- [реализовано] Дефолтная подсказка в делегирующем промпте: код → `opencode` (было `codex`), анализ/планирование → `claude`.
+
 ## Known issues / планируется
 
 - ~~**Сообщение теряется когда сессия занята**~~ — **реализовано** (commit `7dfdecc`): `pendingReplies` Map в orchestrator, доставка на `session:completed`. Ответ юзеру — 200 "Message queued" вместо 409.
