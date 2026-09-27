@@ -53,3 +53,9 @@ next-env.d.ts
 # playwright artifacts
 .playwright-mcp/
 compact_impact_data.json
+
+# build artifacts in nested apps (workers/*)
+.next/
+
+# local tool logs
+.caliber/
