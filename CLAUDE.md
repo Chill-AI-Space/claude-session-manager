@@ -349,6 +349,7 @@ Task types: `start`, `resume`, `crash_retry`, `stall_continue`, `incomplete_exit
 | `orchestrator_stall_continue_delay_ms` | `10000` | Delay before auto-continue on stall |
 | `orchestrator_max_retries` | `3` | Max crash retries per session before marking as failed |
 | `subsession_agent_override` | `""` | Force the agent for sessions spawned via curl/API (not from the browser UI): `claude`/`opencode`/`codex`/`forge`, empty = off. Steers spawning away from an agent whose quota is running out. |
+| `sessions_worktree_default` | `"false"` | Start browser-UI sessions in their own git worktree. Sub-sessions (curl/API) default to a worktree regardless; explicit `worktree` in the start body wins. See "Session worktrees" below. |
 
 ### How scanner integrates (Session Babysitter)
 
@@ -401,6 +402,18 @@ When writing new code, follow these rules to keep Windows compatibility:
 - **Signals**: `SIGTERM`/`SIGKILL` work differently. Use `proc.kill()` without arguments for cross-platform compatibility
 - **Line endings**: JSONL parsing should handle `\r\n` (use `split(/\r?\n/)`)
 - **Path in Claude projects dir**: `pathToProjectDir()` replaces both `/` and `\` with `-`
+
+## Session worktrees (`src/lib/session-worktree.ts`)
+
+`POST /api/sessions/start` can run the new session in its own `git worktree` so parallel sessions on one repo don't share a working tree. Decision (`resolveWorktreeDecision`): explicit `worktree` in body → wins; browser start (has `Sec-Fetch-*`) → `sessions_worktree_default`; curl/sub-session → on.
+
+- Branch `session/<slug>-<YYYYMMDD-HHMMSS>` from the source repo's HEAD, dir `<repo-root>/../.worktrees/<repo-name>/<branch-with-dashes>`; agent cwd = same subfolder inside it. Only `git worktree add` runs against the source — never checkout/stash/reset/clean there.
+- Session row: `project_path` = worktree path (resume/reply untouched); `worktree_source_path`, `worktree_branch` recorded when the `session_id` SSE event passes (`withWorktreeStatus` in `session-worktree-registry.ts`).
+- Non-git path, already a linked worktree, or `git worktree add` failure → start in the original path + `status` event with the reason + `logAction("session_worktree_skipped")`. Never a 500.
+- Remote nodes get the resolved `worktree` flag forwarded.
+- Cleanup: `GET /api/worktrees` (dry-run list with reasons), `POST /api/worktrees` (remove), button in Settings → Session Worktrees. Removes only clean worktrees whose branch has no commits outside other refs and with no active session / process cwd inside. No automatic TTL deletion.
+- Known limitation: `node_modules` / `.env` are not copied; ports are shared.
+- If a sub-session must work in the caller's own checkout (e.g. to see uncommitted files), pass `"worktree": false`.
 
 ## Sessions Choreography
 

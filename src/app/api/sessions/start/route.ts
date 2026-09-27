@@ -3,10 +3,11 @@ import os from "os";
 import path from "path";
 import { stat } from "fs/promises";
 import { getOrchestrator } from "@/lib/orchestrator";
-import { sseResponse } from "@/lib/claude-runner";
 import { getSetting, logAction } from "@/lib/db";
 import { getComputeNode, resolveNode, proxySSE } from "@/lib/remote-compute";
 import { SSE_HEADERS } from "@/lib/claude-runner";
+import { prepareSessionWorktree, resolveWorktreeDecision } from "@/lib/session-worktree";
+import { withWorktreeStatus } from "@/lib/session-worktree-registry";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ function isAgent(v: unknown): v is Agent {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { path: projectPath, message, correlationId, verbose, model: requestedModel, agent, previous_session_id, on_complete_url, reply_to_session_id, delegation_task } = body as {
+  const { path: projectPath, message, correlationId, verbose, model: requestedModel, agent, previous_session_id, on_complete_url, reply_to_session_id, delegation_task, worktree } = body as {
     path: string;
     message: string;
     correlationId?: string;
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
     on_complete_url?: string;
     reply_to_session_id?: string;
     delegation_task?: string;
+    worktree?: boolean;
   };
 
   if (!projectPath || !message?.trim()) {
@@ -61,6 +63,14 @@ export async function POST(request: NextRequest) {
     model = undefined; // model ids are agent-specific (e.g. a codex model on claude would fail)
   }
 
+  // Per-session git worktree: explicit body value wins; browser starts follow the
+  // setting (default off); sub-sessions (curl) default to on.
+  const useWorktree = resolveWorktreeDecision({
+    explicit: worktree,
+    fromBrowser,
+    settingDefault: getSetting("sessions_worktree_default"),
+  });
+
   // Check if a specific node was requested, or use default compute node
   const nodeId = request.nextUrl.searchParams.get("node");
   const node = resolveNode(nodeId) || getComputeNode();
@@ -76,6 +86,9 @@ export async function POST(request: NextRequest) {
         verbose: verbose ?? false,
         agent: normalizedAgent ?? undefined,
         model,
+        // Pass the resolved decision — the proxied request has no Sec-Fetch-* headers,
+        // so the remote side would otherwise treat every start as a sub-session.
+        worktree: useWorktree,
       });
       return new Response(stream, { headers: SSE_HEADERS });
     } catch (err) {
@@ -89,13 +102,13 @@ export async function POST(request: NextRequest) {
     logAction("service", "session_start_api_received", JSON.stringify({ correlationId, path: projectPath }));
   }
 
-  const resolvedProjectPath = path.resolve(projectPath);
-  if (!resolvedProjectPath.startsWith(os.homedir())) {
+  const requestedPath = path.resolve(projectPath);
+  if (!requestedPath.startsWith(os.homedir())) {
     return Response.json({ error: "Path must be within home directory" }, { status: 403 });
   }
 
   try {
-    const s = await stat(resolvedProjectPath);
+    const s = await stat(requestedPath);
     if (!s.isDirectory()) {
       return Response.json({ error: "Path is not a directory" }, { status: 400 });
     }
@@ -103,9 +116,32 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Path does not exist" }, { status: 404 });
   }
 
+  // Everything below runs the agent in `resolvedProjectPath` — the worktree when one
+  // was created, so the session's project_path (and resume/reply/terminals) point there.
+  let resolvedProjectPath = requestedPath;
+  let worktreeStatus: string | null = null;
+  let worktreeRecord: { sourcePath: string; branch: string } | undefined;
+  if (useWorktree) {
+    const wt = await prepareSessionWorktree(requestedPath, message.trim());
+    if (wt.kind === "worktree") {
+      resolvedProjectPath = wt.cwd;
+      worktreeRecord = { sourcePath: wt.sourcePath, branch: wt.branch };
+      worktreeStatus = `Worktree: ${wt.cwd} (branch ${wt.branch})`;
+      logAction("service", "session_worktree_created", JSON.stringify({ source: requestedPath, worktree: wt.dir, branch: wt.branch, agent: normalizedAgent }));
+    } else {
+      worktreeStatus = `Worktree skipped (${wt.reason}) — running in ${requestedPath}`;
+      logAction("service", "session_worktree_skipped", JSON.stringify({ path: requestedPath, reason: wt.reason, agent: normalizedAgent }));
+    }
+  }
+  const respond = (stream: ReadableStream) =>
+    new Response(
+      worktreeStatus ? withWorktreeStatus(stream, worktreeStatus, worktreeRecord) : stream,
+      { headers: SSE_HEADERS },
+    );
+
   if (normalizedAgent === "forge") {
     const stream = getOrchestrator().startForge(resolvedProjectPath, message.trim(), model);
-    return sseResponse(stream);
+    return respond(stream);
   }
 
   if (normalizedAgent === "opencode") {
@@ -192,7 +228,7 @@ export async function POST(request: NextRequest) {
         controller.close();
       },
     });
-    return new Response(stream, { headers: SSE_HEADERS });
+    return respond(stream);
   }
 
   if (normalizedAgent === "codex") {
@@ -318,7 +354,7 @@ export async function POST(request: NextRequest) {
         controller.close();
       },
     });
-    return new Response(stream, { headers: SSE_HEADERS });
+    return respond(stream);
   }
 
   // At this point, only Claude remains: codex/forge were handled above.
@@ -401,12 +437,12 @@ export async function POST(request: NextRequest) {
         controller.close();
       },
     });
-    return new Response(stream, { headers: SSE_HEADERS });
+    return respond(stream);
   }
 
   // Automated/programmatic spawn — headless, so the caller's curl/orchestrator
   // gets an SSE stream to parse, with delegation linkage + completion webhook
   // bookkeeping intact.
   const stream = getOrchestrator().start(resolvedProjectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url, reply_to_session_id, delegation_task);
-  return sseResponse(stream);
+  return respond(stream);
 }

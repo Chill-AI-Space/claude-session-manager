@@ -95,6 +95,8 @@ Verify: `curl -s "http://localhost:3000/api/sessions/my-id?path=$(pwd)"`
 
 > **Always specify `agent` explicitly.** `"opencode"` for writing code, `"claude"` for planning/review/research. If the `subsession_agent_override` setting is set, the server forces that agent for every spawned sub-session regardless of what you pass.
 
+> **Sub-sessions run in their own git worktree by default** (branch `session/<slug>-<ts>`, dir `../.worktrees/<repo>/…`), so they never touch your checkout. Their work is visible to you only after they **commit** on that branch. Pass `"worktree": false` if the child must work in your checkout (e.g. on your uncommitted files).
+
 ---
 
 ## What to include in the message

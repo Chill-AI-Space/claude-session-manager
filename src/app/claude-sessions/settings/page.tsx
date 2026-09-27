@@ -9,6 +9,7 @@ import {
   MacOSPermissionsSettings,
   MaintenanceSettings,
   TerminalSettings,
+  WorktreeSettings,
   NotificationsSettings,
   SearchSettings,
   AppearanceSettings,
@@ -95,6 +96,7 @@ export default function SettingsPage() {
     "system-setup": "system setup health check database jsonl cli",
     "macos-permissions": "macos permissions accessibility terminal focus",
     "terminal-integration": "terminal auto kill retry crash continue stall close new session reply",
+    "worktrees": "worktree worktrees git branch isolation parallel sessions cleanup sessions_worktree_default",
     "notifications": "notifications sound browser tab badge notify",
     "deep-search": "deep search vector pre-filter gemini google ai api key",
     "folder-browser": "folder browser start path browse",
@@ -192,6 +194,11 @@ export default function SettingsPage() {
         {/* ── Terminal Integration ── */}
         {sectionVisible("terminal-integration") && (
           <TerminalSettings settings={settings} onUpdate={updateSetting} savedKey={savedKey} />
+        )}
+
+        {/* ── Session Worktrees ── */}
+        {sectionVisible("worktrees") && (
+          <WorktreeSettings settings={settings} onUpdate={updateSetting} savedKey={savedKey} />
         )}
 
         {/* ── Notifications ── */}
