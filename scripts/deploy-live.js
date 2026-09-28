@@ -75,6 +75,54 @@ async function liveSessions() {
   return [...live.values()];
 }
 
+/**
+ * Session ids that have a live `claude` process right now, read directly from `ps` and Claude Code's
+ * registry (~/.claude/sessions/<pid>.json). Do NOT use the server's is_active for this: right after a
+ * restart its process-detector cache is cold and reports nothing alive — that made every deploy say
+ * "survived: 0" and --resume clones of sessions whose original process was still running.
+ */
+function liveSessionIdsLocal(psText, registry, isAlive) {
+  const ids = new Set();
+  for (const line of (psText || "").split(/\r?\n/)) {
+    const m = line.trim().match(/^(\d+)\s+(.+)$/);
+    if (!m) continue;
+    const head = m[2].trim().split(/\s+/).slice(0, 2);
+    if (!head.some((t) => /(^|[\\/])claude(\.exe)?$/.test(t) || /claude-code[\\/]cli\.m?js$/.test(t))) continue;
+    const r = m[2].match(/(?:--resume|-r|--session-id)[\s=]+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
+    if (r) ids.add(r[1]);
+  }
+  for (const e of registry || []) {
+    if (e && typeof e.sessionId === "string" && typeof e.pid === "number" && isAlive(e.pid)) ids.add(e.sessionId);
+  }
+  return ids;
+}
+
+function readLiveSessionIdsLocal() {
+  const ps = spawnSync("ps", ["axo", "pid=,command="], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }).stdout || "";
+  const dir = path.join(os.homedir(), ".claude", "sessions");
+  const registry = [];
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (!/^\d+\.json$/.test(f)) continue;
+      try { registry.push(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"))); } catch {}
+    }
+  } catch {}
+  const isAlive = (pid) => {
+    try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
+  };
+  return liveSessionIdsLocal(ps, registry, isAlive);
+}
+
+/** Which snapshotted sessions to resume: dead now, claude, and each id at most once. */
+function sessionsToResume(before, liveIds) {
+  const seen = new Set();
+  return before.filter((s) => {
+    if (liveIds.has(s.sessionId) || seen.has(s.sessionId)) return false;
+    seen.add(s.sessionId);
+    return true;
+  });
+}
+
 function run(cmd, args, opts = {}) {
   log(`$ ${cmd} ${args.join(" ")}`);
   const r = spawnSync(cmd, args, { cwd: ROOT, stdio: "inherit", shell: process.platform === "win32", ...opts });
@@ -142,7 +190,8 @@ async function deploy() {
   // 4. Resume sessions that died in the restart
   await sleep(5000); // let process detection settle
   const after = new Set((await liveSessions()).map((s) => s.sessionId));
-  const lost = before.filter((s) => !after.has(s.sessionId));
+  for (const id of readLiveSessionIdsLocal()) after.add(id);
+  const lost = sessionsToResume(before, after);
   log(`survived restart: ${before.length - lost.length}, died: ${lost.length}`);
   if (has("--no-resume")) {
     log("--no-resume: dead sessions NOT resumed: " + lost.map((s) => s.sessionId).join(", "));
@@ -211,4 +260,6 @@ async function main() {
   }
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { liveSessionIdsLocal, sessionsToResume };
