@@ -52,33 +52,60 @@ export function withWorktreeStatus(
   const decoder = new TextDecoder();
   let buffer = "";
   let recorded = false;
+  let cancelled = false;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+  const tryRecord = (chunk: string): void => {
+    if (!record || recorded) return;
+    buffer = (buffer + chunk).slice(-4096);
+    const m = buffer.match(/"type":"session_id","session_id":"([^"]+)"/);
+    if (m) {
+      recorded = true;
+      recordSessionWorktree(m[1], record.sourcePath, record.branch);
+    }
+  };
+
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "status", text: statusText, status: statusText })}\n\n`));
-      const reader = stream.getReader();
+      reader = stream.getReader();
       try {
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
           const chunk = typeof value === "string" ? value : decoder.decode(value, { stream: true });
-          if (record && !recorded) {
-            buffer = (buffer + chunk).slice(-4096);
-            const m = buffer.match(/"type":"session_id","session_id":"([^"]+)"/);
-            if (m) {
-              recorded = true;
-              recordSessionWorktree(m[1], record.sourcePath, record.branch);
-            }
+          tryRecord(chunk);
+          if (cancelled) {
+            // Consumer is gone: keep draining only until the worktree record
+            // is captured — cleanup discovers repos via worktree_source_path —
+            // then release the source instead of enqueueing into a dead
+            // controller (enqueue after cancel throws).
+            if (!record || recorded) break;
+            continue;
           }
           controller.enqueue(typeof value === "string" ? encoder.encode(value) : value);
         }
       } catch (err) {
-        controller.error(err);
+        if (!cancelled) controller.error(err);
         return;
       }
-      controller.close();
+      if (cancelled) {
+        await reader.cancel().catch(() => {});
+      } else {
+        controller.close();
+      }
     },
     cancel(reason) {
-      return stream.cancel(reason);
+      cancelled = true;
+      // `stream` is locked by the reader taken in start() — calling
+      // stream.cancel() here throws "ReadableStream is locked" (surfaced as
+      // Next's "failed to pipe response"). Cancel via the reader instead;
+      // when a record is still pending, start()'s drain loop releases the
+      // source itself once session_id has passed through.
+      if (!record || recorded) {
+        void reader?.cancel(reason).catch(() => {});
+      }
+      return Promise.resolve();
     },
   });
 }
