@@ -59,6 +59,16 @@ Running log of features/decisions for this project, with status. Update in place
 - [реализовано] `subsession_agent_override` — серверное правило: все сессии, заспавненные через curl/API (не из браузерного UI), принудительно запускаются указанным агентом; model сбрасывается. Причина: делегирующий промпт толкал на codex, лимит codex кончался. План: ночь 2026-09-27 → `claude`, утром → `opencode` (Claude — планировщик, opencode — исполнитель-сиблинг).
 - [реализовано] Дефолтная подсказка в делегирующем промпте: код → `opencode` (было `codex`), анализ/планирование → `claude`.
 
+## Изоляция параллельных сессий (git worktree)
+
+- [реализовано] `worktree?: boolean` в body `/api/sessions/start`; настройка `sessions_worktree_default` (UI-тоггл, дефолт false для браузера); sub-sessions (без `Sec-Fetch-*`) — дефолт true; явный параметр побеждает. Worktree создаёт сам Session Manager (`git worktree add`), поэтому работает для claude/codex/opencode/forge.
+- [реализовано] Ветка `session/<slug>-<timestamp>` от HEAD исходного репо, папка `<repo>/../.worktrees/<repo-name>/<branch>`; подпапка сохраняется; исходный checkout не трогается. `project_path` = worktree, `worktree_source_path`/`worktree_branch` — новые колонки sessions. Status-событие в SSE.
+- [реализовано] Фоллбэк: не git / linked worktree / ошибка `git worktree add` → старт в исходном path + logAction + status с причиной.
+- [реализовано] Remote nodes: резолвленный `worktree` пробрасывается на VM.
+- [реализовано] Консервативная очистка: `GET/POST /api/worktrees` + кнопка в Settings. Удаляет только чистый worktree без уникальных (незапушенных) коммитов и без активной сессии/процесса внутри. Без TTL.
+- [ограничение, не решаем] node_modules/.env не копируются, порты общие.
+- [отклонено] `claude -w` — только для Claude, не для codex/opencode/forge.
+
 ## Known issues / планируется
 
 - ~~**Сообщение теряется когда сессия занята**~~ — **реализовано** (commit `7dfdecc`): `pendingReplies` Map в orchestrator, доставка на `session:completed`. Ответ юзеру — 200 "Message queued" вместо 409.

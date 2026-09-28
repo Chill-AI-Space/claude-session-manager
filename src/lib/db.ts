@@ -258,6 +258,13 @@ function initTables(db: Database.Database) {
   if (!colNames.has("delegation_last_ping_at")) {
     db.exec("ALTER TABLE sessions ADD COLUMN delegation_last_ping_at INTEGER");
   }
+  // Per-session git worktree (project_path = the worktree; these keep the origin)
+  if (!colNames.has("worktree_source_path")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN worktree_source_path TEXT");
+  }
+  if (!colNames.has("worktree_branch")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN worktree_branch TEXT");
+  }
   // actions_log migrations
   const actionCols = db.prepare("PRAGMA table_info(actions_log)").all() as { name: string }[];
   const actionColNames = new Set(actionCols.map((c) => c.name));
@@ -521,6 +528,10 @@ const SETTING_DEFAULTS: Record<string, string> = {
   // orchestrator callers) — requests from the browser UI are not affected.
   // "" = off (honour the requested agent); "claude" | "codex" | "forge" | "opencode" = force.
   subsession_agent_override: "",
+  // Run each new session in its own git worktree (session/<slug>-<ts> branch) when the
+  // path is a git repo. Applies to browser UI starts; curl/API sub-sessions default to
+  // a worktree regardless, and an explicit `worktree` in the start body always wins.
+  sessions_worktree_default: "false",
   // Session choreography — inject session context (session_id + callback URL) into system prompt
   inject_session_context: "true",
   // Base URL for callback URLs injected into sessions (e.g. http://localhost:3000 or relay URL)

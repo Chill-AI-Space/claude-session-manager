@@ -7,6 +7,7 @@ export { WorkersSettings } from "./WorkersSettings";
 export { NewSessionFromReplySettings } from "./NewSessionFromReplySettings";
 export { PermissionsSettings } from "./PermissionsSettings";
 export { TerminalSettings } from "./TerminalSettings";
+export { WorktreeSettings } from "./WorktreeSettings";
 export { NotificationsSettings } from "./NotificationsSettings";
 export { SearchSettings } from "./SearchSettings";
 export { AppearanceSettings } from "./AppearanceSettings";
