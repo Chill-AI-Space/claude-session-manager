@@ -99,6 +99,33 @@ describe("extractCodexRolloutIndex", () => {
       },
     });
   });
+
+  // codex-cli ≥ ~0.150 ships text as event_msg/item_completed items and no
+  // longer emits user_message/agent_message — without this the count stayed 0.
+  it("indexes the item_completed format (codex-cli ≥ 0.150)", () => {
+    const tempPath = writeTempRollout([
+      { type: "event_msg", payload: { type: "task_started" } },
+      { type: "response_item", payload: { type: "message", role: "developer", content: [{ type: "text", text: "<skills_instructions>…" }] } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "text", text: "<recommended_plugins>…" }] } },
+      { type: "event_msg", payload: { type: "item_completed", item: { type: "UserMessage", content: [{ type: "text", text: "Find API bug" }] } } },
+      { type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage", phase: "commentary", content: [{ type: "Text", text: "Looking at the auth module" }] } } },
+      { type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage", phase: "final_answer", content: [{ type: "Text", text: "I found the failing route" }] } } },
+      { type: "event_msg", payload: { type: "task_complete" } },
+    ]);
+
+    expect(extractCodexRolloutIndex(tempPath)).toEqual({
+      hasResult: true,
+      // system-context response_item messages must not leak into the index
+      searchText: "Find API bug\nLooking at the auth module\nI found the failing route",
+      summary: {
+        // one user item + one assistant turn (both AgentMessages merge into it,
+        // same as multiple agent_message events did in the old format)
+        messageCount: 2,
+        lastMessage: "Looking at the auth module",
+        lastMessageRole: "assistant",
+      },
+    });
+  });
 });
 
 describe("readCodexMessagesPaginated", () => {
@@ -129,5 +156,35 @@ describe("readCodexMessagesPaginated", () => {
       "one",
       "assistant",
     ]);
+  });
+
+  // codex-cli ≥ ~0.150: without item_completed handling the codex chat in the
+  // UI showed tool blocks only — no user bubbles, no assistant text.
+  it("renders the item_completed format (codex-cli ≥ 0.150)", () => {
+    const tempPath = writeTempRollout([
+      { type: "event_msg", payload: { type: "task_started" } },
+      { type: "response_item", payload: { type: "message", role: "developer", content: [{ type: "text", text: "<skills_instructions>…" }] } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "text", text: "<recommended_plugins>…" }] } },
+      { type: "event_msg", payload: { type: "item_completed", item: { type: "UserMessage", content: [{ type: "text", text: "Find API bug" }] } } },
+      { type: "response_item", payload: { type: "function_call", name: "exec_command", arguments: "{}" } },
+      { type: "response_item", payload: { type: "function_call_output", call_id: "call-1", output: "ok" } },
+      { type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage", phase: "final_answer", content: [{ type: "Text", text: "I found the failing route" }] } } },
+      { type: "event_msg", payload: { type: "task_complete" } },
+    ]);
+
+    const { messages } = readCodexMessagesPaginated(tempPath, { pageSize: 10 });
+    expect(messages.map((m) => m.type)).toEqual(["user", "assistant"]);
+    expect(messages[0].content).toBe("Find API bug");
+
+    const blocks = Array.isArray(messages[1].content) ? messages[1].content : [];
+    const kinds = blocks.map((b) => b.type);
+    expect(kinds).toEqual(["tool_use", "tool_result", "text"]);
+    const textBlock = blocks.find((b) => b.type === "text");
+    expect(textBlock && "text" in textBlock ? textBlock.text : "").toBe("I found the failing route");
+
+    // system-context messages (developer role / <…> user context) stay hidden
+    const all = JSON.stringify(messages);
+    expect(all).not.toContain("skills_instructions");
+    expect(all).not.toContain("recommended_plugins");
   });
 });

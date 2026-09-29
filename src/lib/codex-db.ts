@@ -165,6 +165,25 @@ interface Turn {
   seenText: Set<string>;
 }
 
+/**
+ * Text of an `event_msg/item_completed` UserMessage/AgentMessage payload
+ * (codex-cli ≥ ~0.150 stopped emitting `user_message`/`agent_message` events
+ * and only ships these items — content parts use "text" for user and "Text"
+ * for agent, so we just concatenate every string part).
+ */
+function extractItemText(item: Record<string, unknown>): string {
+  const content = item.content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const part of content) {
+    if (part && typeof part === "object") {
+      const t = (part as { text?: unknown }).text;
+      if (typeof t === "string" && t.trim()) parts.push(t);
+    }
+  }
+  return parts.join("\n");
+}
+
 function getRolloutStat(rolloutPath: string): { mtimeMs: number; size: number } | null {
   try {
     const stat = fs.statSync(rolloutPath);
@@ -290,6 +309,31 @@ export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
         if (!turn.seenText.has(msg)) {
           turn.seenText.add(msg);
           turn.blocks.push({ type: "text", text: msg });
+        }
+      } else if (pt === "item_completed") {
+        // codex-cli ≥ ~0.150: user/agent text ships as completed items instead
+        // of user_message/agent_message events (verified disjoint from the old
+        // events across all rollout files — a file never has both).
+        const item = (p.item ?? {}) as Record<string, unknown>;
+        const itemType = item.type as string | undefined;
+        if (itemType === "UserMessage") {
+          const msg = extractItemText(item);
+          if (!msg) continue;
+          emitTurn();
+          messages.push({
+            uuid: `codex-${idx++}`,
+            type: "user",
+            timestamp: ts,
+            content: msg,
+          });
+        } else if (itemType === "AgentMessage") {
+          const msg = extractItemText(item);
+          if (!msg) continue;
+          if (!turn) turn = { timestamp: ts, blocks: [], seenText: new Set() };
+          if (!turn.seenText.has(msg)) {
+            turn.seenText.add(msg);
+            turn.blocks.push({ type: "text", text: msg });
+          }
         }
       } else if (pt === "task_complete") {
         emitTurn();
@@ -454,6 +498,30 @@ export function extractCodexRolloutIndex(rolloutPath: string): CodexRolloutIndex
             turnSeenText.add(msg);
             turnHasContent = true;
             if (!turnFirstText) turnFirstText = msg;
+          }
+        } else if (pt === "item_completed") {
+          // codex-cli ≥ ~0.150: text ships as completed items instead of
+          // user_message/agent_message events (disjoint from them per file).
+          const item = (p.item ?? {}) as Record<string, unknown>;
+          const itemType = item.type as string | undefined;
+          if (itemType === "UserMessage") {
+            const msg = extractItemText(item);
+            emitTurn();
+            if (!msg) continue;
+            appendSearchText(msg);
+            messageCount++;
+            lastMessage = msg.trim();
+            lastMessageRole = "user";
+          } else if (itemType === "AgentMessage") {
+            const msg = extractItemText(item);
+            if (!msg) continue;
+            appendSearchText(msg);
+            ensureTurn();
+            if (!turnSeenText.has(msg)) {
+              turnSeenText.add(msg);
+              turnHasContent = true;
+              if (!turnFirstText) turnFirstText = msg;
+            }
           }
         } else if (pt === "task_complete") {
           hasResult = true;
