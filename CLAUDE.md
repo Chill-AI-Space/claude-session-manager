@@ -368,7 +368,7 @@ Any process that can make HTTP requests can control sessions:
 # Start a new session
 curl -X POST http://localhost:3000/api/sessions/start \
   -H "Content-Type: application/json" \
-  -d '{"path":"/path/to/project","message":"fix the bug in auth.ts","agent":"claude"}'
+  -d '{"path":"/path/to/project","message":"fix the bug in auth.ts","agent":"opencode"}'
 
 # Resume an existing session
 curl -X POST http://localhost:3000/api/sessions/{sessionId}/reply \
@@ -431,7 +431,7 @@ curl -s "http://localhost:3000/api/sessions/my-id?path=$(pwd)"
 ```bash
 curl -s -X POST "http://localhost:3000/api/sessions/start" \
   -H "Content-Type: application/json" \
-  -d '{"path":"/abs/path","message":"task","reply_to_session_id":"YOUR_ID","agent":"claude"}'
+  -d '{"path":"/abs/path","message":"task","reply_to_session_id":"YOUR_ID","agent":"opencode"}'
 ```
 
 **Rule: commit before passing work to another session.** Uncommitted changes are invisible across session boundaries.
@@ -439,3 +439,7 @@ curl -s -X POST "http://localhost:3000/api/sessions/start" \
 ### Приоритет задач — не спрашивай, действуй
 
 Если все задачи нужны и вопрос только в порядке выполнения — **не спрашивай**. Выбери наиболее логичный порядок (критический баг → блокеры → параллельные задачи) и начинай. Спрашивать о порядке имеет смысл только если одна задача **отменяет** другую.
+
+## Чеклисты и планы — не для репозиториев с pull requestами
+
+Чеклисты (checklist.md и подобные трекеры) и планы НЕ живут в репозитории, где есть pull requestы: общий файл становится гарантированным merge conflict при параллельных PR (дважды за день: trained-assist-agent #1790, #1829), а статус CI/merge и так виден в GitHub. Планы и трекеры статуса -> issue или тело PR. Исключение: репо в статусе draft (нет PR-флоу, одна ветка) — локальный чеклист там допустим.

@@ -135,6 +135,9 @@ Found on the **Store** page (package icon) → click a plugin → settings panel
 - **Default**: false
 - **Plugin**: permission-bridge
 - Pass `--dangerously-skip-permissions` when resuming from web UI.
+- One toggle for every agent: OpenCode sessions get `--auto` (auto-approve
+  permissions that are not explicitly denied), Codex gets
+  `--dangerously-bypass-approvals-and-sandbox` — on start and on resume alike.
 
 ### max_turns
 - **Default**: 80

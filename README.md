@@ -279,7 +279,7 @@ Available at **Settings** (gear icon in sidebar):
 | Setting | Default | Description |
 |---------|---------|-------------|
 | **Max turns per reply** | 80 | Tool-use cycles per web reply. Set 100-200 for complex tasks |
-| **Skip permissions** | off | Pass `--dangerously-skip-permissions` to Claude |
+| **Skip permissions** | off | Auto-approve tool permissions: Claude `--dangerously-skip-permissions`, OpenCode `--auto`, Codex `--dangerously-bypass-approvals-and-sandbox` |
 | **Auto-kill terminal** | off | Kill terminal session before sending a web reply |
 | **Auto-retry on crash** | on | Auto-send "continue" after 30s on crash |
 | **Auto-continue on stall** | off | Auto-send "continue" when idle 5+ min |
