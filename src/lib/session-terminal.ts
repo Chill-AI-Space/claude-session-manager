@@ -10,6 +10,19 @@ import { SessionRow } from "@/lib/types";
 export { shellQuote } from "@/lib/prompt-file";
 
 /**
+ * OpenCode's counterpart of Claude's `--dangerously-skip-permissions` /
+ * Codex's `--dangerously-bypass-approvals-and-sandbox`: `--auto`
+ * auto-approves permissions that are not explicitly denied. Without it an
+ * OpenCode session started from the UI stops on every prompt it has nobody
+ * watching to answer (unlike a hand-opened terminal), so the shared
+ * "Skip permissions" setting silently didn't apply to this agent at all.
+ * Honours the same setting, so one toggle covers all three agents.
+ */
+function opencodeAutoFlag(): string {
+  return getSetting("dangerously_skip_permissions") === "true" ? " --auto" : "";
+}
+
+/**
  * Interactive `opencode --prompt <prompt>` in a fresh terminal.
  *
  * This must be the root command with --prompt, NOT `opencode run <message>`.
@@ -34,7 +47,7 @@ export function buildOpencodeStartShellCommand(projectPath: string, message: str
   const bin = getOpencodePath();
   if (profileId) applyOpencodeProfile(profileId);
   const promptPath = writeTempPromptFile(message, "csm-opencode-prompt");
-  return `cd ${shellQuote(projectPath)} && ${buildPromptLoader(promptPath)} && ${shellQuote(bin)} --prompt "$PROMPT"`;
+  return `cd ${shellQuote(projectPath)} && ${buildPromptLoader(promptPath)} && ${shellQuote(bin)}${opencodeAutoFlag()} --prompt "$PROMPT"`;
 }
 
 /** Interactive `claude "<prompt>"` in a fresh terminal — a brand new session, not a resume. */
@@ -79,7 +92,7 @@ export function buildResumeShellCommand(session: SessionRow, message?: string): 
     // that session, not run one more one-shot exchange and exit. --prompt
     // is accepted alongside --session (both root flags), so a reply can
     // resume the session AND send the new message in one shot.
-    return `cd ${shellQuote(cwd)}${promptLoader} && ${shellQuote(bin)} --session ${shellQuote(session.session_id)}${promptFlag}`;
+    return `cd ${shellQuote(cwd)}${promptLoader} && ${shellQuote(bin)}${opencodeAutoFlag()} --session ${shellQuote(session.session_id)}${promptFlag}`;
   }
 
   if (isCodex) {
