@@ -3,10 +3,11 @@ import os from "os";
 import path from "path";
 import { stat } from "fs/promises";
 import { getOrchestrator } from "@/lib/orchestrator";
-import { getSetting, logAction } from "@/lib/db";
+import { getDb, getSetting, logAction } from "@/lib/db";
 import { getComputeNode, resolveNode, proxySSE } from "@/lib/remote-compute";
 import { SSE_HEADERS } from "@/lib/claude-runner";
 import { prepareSessionWorktree, resolveWorktreeDecision } from "@/lib/session-worktree";
+import { originUrl, resolveProjectPath } from "@/lib/project-path";
 import { withWorktreeStatus } from "@/lib/session-worktree-registry";
 
 export const dynamic = "force-dynamic";
@@ -63,11 +64,10 @@ export async function POST(request: NextRequest) {
     model = undefined; // model ids are agent-specific (e.g. a codex model on claude would fail)
   }
 
-  // Per-session git worktree: explicit body value wins; browser starts follow the
-  // setting (default off); sub-sessions (curl) default to on.
+  // Per-session git worktree: explicit body value wins, otherwise the
+  // sessions_worktree_default setting — same rule for browser and curl starts.
   const useWorktree = resolveWorktreeDecision({
     explicit: worktree,
-    fromBrowser,
     settingDefault: getSetting("sessions_worktree_default"),
   });
 
@@ -107,8 +107,20 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Path must be within home directory" }, { status: 403 });
   }
 
+  // Project folder: a session/linked worktree path maps back to the project
+  // that owns it (or that project folder is created in ~/Code when missing) —
+  // see src/lib/project-path.ts. Ordinary paths are returned untouched.
+  const project = await resolveProjectPath(requestedPath, { findOriginUrl: lookupOriginUrl });
+  const startPath = project.path;
+  if (!startPath.startsWith(os.homedir())) {
+    return Response.json({ error: "Path must be within home directory" }, { status: 403 });
+  }
+  if (project.redirected) {
+    logAction("service", "session_project_resolved", JSON.stringify({ requested: requestedPath, resolved: startPath, created: project.created, note: project.note, agent: normalizedAgent }));
+  }
+
   try {
-    const s = await stat(requestedPath);
+    const s = await stat(startPath);
     if (!s.isDirectory()) {
       return Response.json({ error: "Path is not a directory" }, { status: 400 });
     }
@@ -118,24 +130,25 @@ export async function POST(request: NextRequest) {
 
   // Everything below runs the agent in `resolvedProjectPath` — the worktree when one
   // was created, so the session's project_path (and resume/reply/terminals) point there.
-  let resolvedProjectPath = requestedPath;
+  let resolvedProjectPath = startPath;
   let worktreeStatus: string | null = null;
   let worktreeRecord: { sourcePath: string; branch: string } | undefined;
   if (useWorktree) {
-    const wt = await prepareSessionWorktree(requestedPath, message.trim());
+    const wt = await prepareSessionWorktree(startPath, message.trim());
     if (wt.kind === "worktree") {
       resolvedProjectPath = wt.cwd;
       worktreeRecord = { sourcePath: wt.sourcePath, branch: wt.branch };
       worktreeStatus = `Worktree: ${wt.cwd} (branch ${wt.branch})`;
-      logAction("service", "session_worktree_created", JSON.stringify({ source: requestedPath, worktree: wt.dir, branch: wt.branch, agent: normalizedAgent }));
+      logAction("service", "session_worktree_created", JSON.stringify({ source: startPath, worktree: wt.dir, branch: wt.branch, agent: normalizedAgent }));
     } else {
-      worktreeStatus = `Worktree skipped (${wt.reason}) — running in ${requestedPath}`;
-      logAction("service", "session_worktree_skipped", JSON.stringify({ path: requestedPath, reason: wt.reason, agent: normalizedAgent }));
+      worktreeStatus = `Worktree skipped (${wt.reason}) — running in ${startPath}`;
+      logAction("service", "session_worktree_skipped", JSON.stringify({ path: startPath, reason: wt.reason, agent: normalizedAgent }));
     }
   }
+  const startupStatus = [project.note, worktreeStatus].filter(Boolean).join(" · ") || null;
   const respond = (stream: ReadableStream) =>
     new Response(
-      worktreeStatus ? withWorktreeStatus(stream, worktreeStatus, worktreeRecord) : stream,
+      startupStatus ? withWorktreeStatus(stream, startupStatus, worktreeRecord) : stream,
       { headers: SSE_HEADERS },
     );
 
@@ -445,4 +458,30 @@ export async function POST(request: NextRequest) {
   // bookkeeping intact.
   const stream = getOrchestrator().start(resolvedProjectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url, reply_to_session_id, delegation_task);
   return respond(stream);
+}
+
+/**
+ * Clone URL for a repo we only know by name: look at project paths earlier
+ * sessions used and ask git for their origin. Lives here so project-path.ts
+ * stays free of DB imports (same split as session-worktree.ts).
+ */
+async function lookupOriginUrl(repoName: string): Promise<string | null> {
+  let rows: { project_path: string | null }[] = [];
+  try {
+    rows = getDb()
+      .prepare(
+        `SELECT project_path FROM sessions
+          WHERE project_path IS NOT NULL AND LOWER(project_path) LIKE '%/' || LOWER(?)
+          ORDER BY file_mtime DESC LIMIT 5`,
+      )
+      .all(repoName) as { project_path: string | null }[];
+  } catch {
+    return null;
+  }
+  for (const row of rows) {
+    if (!row.project_path) continue;
+    const url = await originUrl(row.project_path);
+    if (url) return url;
+  }
+  return null;
 }
