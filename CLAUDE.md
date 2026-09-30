@@ -412,7 +412,7 @@ Every start resolves its path through `resolveProjectPath()` before anything els
 - a path that does not exist → `~/Code/<basename>`, created if missing;
 - no project folder anywhere → `~/Code/<repo>` is created (`git clone <origin>` when the URL is known — from the path itself or a past `sessions.project_path` — otherwise `mkdir`).
 
-Redirects are logged as `session_project_resolved` and reported in the first SSE `status` event. Never throws: on failure the requested path is used as is. Human-readable walkthrough: **[docs/spawn-guide.md](docs/spawn-guide.md)**.
+Redirects are logged as `session_project_resolved` and reported in the first SSE `status` event. The relay/Telegram start path (`src/lib/relay-client.ts`, `start` + `start_terminal`) applies the same resolution — only the log's `via` field differs. Never throws: on failure the requested path is used as is. Human-readable walkthrough: **[docs/spawn-guide.md](docs/spawn-guide.md)**.
 
 ## Session worktrees (`src/lib/session-worktree.ts`)
 

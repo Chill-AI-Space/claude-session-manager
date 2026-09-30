@@ -243,7 +243,7 @@ Every `POST /api/sessions/start` resolves its path through `resolveProjectPath()
 - path that does not exist → `~/Code/<basename>`, created if missing;
 - no project folder anywhere → `~/Code/<repo>` is created — `git clone <origin>` when the URL is known, otherwise `mkdir`.
 
-Redirects are logged as `session_project_resolved` and reported in the first SSE `status` event. Details and the curl recipe: [docs/spawn-guide.md](docs/spawn-guide.md).
+Redirects are logged as `session_project_resolved` and reported in the first SSE `status` event. The relay/Telegram start path (`src/lib/relay-client.ts`) resolves the same way. Details and the curl recipe: [docs/spawn-guide.md](docs/spawn-guide.md).
 
 ## Session Worktrees (parallel-session isolation)
 

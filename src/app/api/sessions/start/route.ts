@@ -3,11 +3,12 @@ import os from "os";
 import path from "path";
 import { stat } from "fs/promises";
 import { getOrchestrator } from "@/lib/orchestrator";
-import { getDb, getSetting, logAction } from "@/lib/db";
+import { getSetting, logAction } from "@/lib/db";
 import { getComputeNode, resolveNode, proxySSE } from "@/lib/remote-compute";
 import { SSE_HEADERS } from "@/lib/claude-runner";
 import { prepareSessionWorktree, resolveWorktreeDecision } from "@/lib/session-worktree";
-import { originUrl, resolveProjectPath } from "@/lib/project-path";
+import { resolveProjectPath } from "@/lib/project-path";
+import { lookupOriginUrl } from "@/lib/origin-lookup";
 import { withWorktreeStatus } from "@/lib/session-worktree-registry";
 
 export const dynamic = "force-dynamic";
@@ -458,30 +459,4 @@ export async function POST(request: NextRequest) {
   // bookkeeping intact.
   const stream = getOrchestrator().start(resolvedProjectPath, message.trim(), correlationId, verbose ?? false, model, previous_session_id, on_complete_url, reply_to_session_id, delegation_task);
   return respond(stream);
-}
-
-/**
- * Clone URL for a repo we only know by name: look at project paths earlier
- * sessions used and ask git for their origin. Lives here so project-path.ts
- * stays free of DB imports (same split as session-worktree.ts).
- */
-async function lookupOriginUrl(repoName: string): Promise<string | null> {
-  let rows: { project_path: string | null }[] = [];
-  try {
-    rows = getDb()
-      .prepare(
-        `SELECT project_path FROM sessions
-          WHERE project_path IS NOT NULL AND LOWER(project_path) LIKE '%/' || LOWER(?)
-          ORDER BY file_mtime DESC LIMIT 5`,
-      )
-      .all(repoName) as { project_path: string | null }[];
-  } catch {
-    return null;
-  }
-  for (const row of rows) {
-    if (!row.project_path) continue;
-    const url = await originUrl(row.project_path);
-    if (url) return url;
-  }
-  return null;
 }
