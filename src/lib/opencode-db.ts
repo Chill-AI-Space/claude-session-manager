@@ -61,6 +61,145 @@ export function listOpencodeSessions(directory?: string): OpencodeSessionRow[] {
   }
 }
 
+/** Session row as the background scanner needs it — top-level sessions only. */
+export interface OpencodeIndexRow {
+  id: string;
+  directory: string;
+  title: string;
+  time_created: number; // epoch ms
+  time_updated: number; // epoch ms
+  /** Raw `session.model` JSON (`{"id":…,"providerID":…}`) — parse with opencodeModelLabel. */
+  model: string | null;
+  tokens_input: number;
+  tokens_output: number;
+}
+
+/**
+ * Lists sessions worth indexing into our `sessions` table: top-level only
+ * (`parent_id IS NULL` — subagent children are not sidebar sessions) and not
+ * archived (`time_archived IS NULL`). Empty if the DB is missing/unreadable.
+ */
+export function listIndexableOpencodeSessions(): OpencodeIndexRow[] {
+  const db = getOpencodeDb();
+  if (!db) return [];
+  try {
+    return db
+      .prepare(
+        `SELECT id, directory, title, time_created, time_updated, model, tokens_input, tokens_output
+         FROM session
+         WHERE parent_id IS NULL AND time_archived IS NULL
+         ORDER BY time_updated DESC`
+      )
+      .all() as OpencodeIndexRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** `{"id":"mimo-v2.6-flash","providerID":"opencode-go"}` → `opencode-go/mimo-v2.6-flash`. */
+export function opencodeModelLabel(modelJson: string | null | undefined): string | null {
+  if (!modelJson) return null;
+  try {
+    const m = JSON.parse(modelJson) as { id?: string; providerID?: string };
+    if (m?.id && m?.providerID) return `${m.providerID}/${m.id}`;
+    return m?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Light per-session text the scanner stores (never a full transcript read). */
+export interface OpencodeSessionIndexText {
+  firstPrompt: string | null;
+  lastMessage: string | null;
+  lastMessageRole: string | null;
+  messageCount: number;
+}
+
+function parsePartText(raw: string): string | null {
+  try {
+    const p = JSON.parse(raw) as OpencodePartData;
+    if (p.type === "text" && p.text?.trim()) return p.text;
+  } catch {
+    /* malformed part — skip */
+  }
+  return null;
+}
+
+/**
+ * First prompt / last text message / message count for one session.
+ * All queries ride existing indexes (`message_session_time_created_id_idx`,
+ * `part_message_id_id_idx`) with small LIMITs — never a full transcript read,
+ * so a scan of every session can't walk OpenCode's multi-GB DB.
+ */
+export function getOpencodeSessionIndexText(sessionId: string): OpencodeSessionIndexText | null {
+  const db = getOpencodeDb();
+  if (!db) return null;
+
+  try {
+    const countRow = db
+      .prepare(`SELECT COUNT(*) AS c FROM message WHERE session_id = ?`)
+      .get(sessionId) as { c: number };
+
+    let firstPrompt: string | null = null;
+    const firstUser = db
+      .prepare(
+        `SELECT id FROM message
+         WHERE session_id = ? AND json_extract(data, '$.role') = 'user'
+         ORDER BY time_created ASC, id ASC LIMIT 1`
+      )
+      .get(sessionId) as { id: string } | undefined;
+    if (firstUser) {
+      const parts = db
+        .prepare(`SELECT data FROM part WHERE message_id = ? ORDER BY time_created ASC, id ASC LIMIT 10`)
+        .all(firstUser.id) as { data: string }[];
+      for (const part of parts) {
+        const text = parsePartText(part.data);
+        if (text) {
+          firstPrompt = text;
+          break;
+        }
+      }
+    }
+
+    let lastMessage: string | null = null;
+    let lastMessageRole: string | null = null;
+    const recentMessages = db
+      .prepare(`SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT 6`)
+      .all(sessionId) as { id: string; data: string }[];
+    for (const msg of recentMessages) {
+      let role: string | null = null;
+      try {
+        role = (JSON.parse(msg.data) as { role?: string }).role ?? null;
+      } catch {
+        /* skip */
+      }
+      const parts = db
+        .prepare(`SELECT data FROM part WHERE message_id = ? ORDER BY time_created ASC, id ASC`)
+        .all(msg.id) as { data: string }[];
+      const texts: string[] = [];
+      for (const part of parts) {
+        const text = parsePartText(part.data);
+        if (text) texts.push(text);
+      }
+      if (texts.length > 0) {
+        lastMessage = texts.join("\n");
+        lastMessageRole = role;
+        break;
+      }
+    }
+
+    return {
+      firstPrompt,
+      lastMessage,
+      lastMessageRole,
+      messageCount: countRow?.c ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Single session row by id, or null if the DB is missing or the id doesn't exist. */
 export function getOpencodeSession(sessionId: string): OpencodeSessionRow | null {
   const db = getOpencodeDb();
@@ -191,22 +330,39 @@ export function readOpencodeMessages(sessionId: string): ParsedMessage[] {
   }
 }
 
-/** First user message text for a session, if any (from the `part` table's text parts). */
+/**
+ * First user message text for a session, if any (from the `part` table's text parts).
+ * First prompts are immutable, so a FOUND prompt is cached per session id — the
+ * process detector resolves them on every cache refresh. "Not found yet" is NOT
+ * cached (the message lands milliseconds after the session row appears; caching
+ * that null would poison the prompt match forever).
+ * A missing/unreadable DB is NOT cached: the file may appear later.
+ */
+const firstUserMessageCache = new Map<string, string>();
+
 export function getOpencodeFirstUserMessage(sessionId: string): string | null {
+  const cached = firstUserMessageCache.get(sessionId);
+  if (cached !== undefined) return cached;
   const db = getOpencodeDb();
   if (!db) return null;
   try {
-    const row = db
+    const rows = db
       .prepare(
         `SELECT p.data FROM part p
          JOIN message m ON m.id = p.message_id
          WHERE p.session_id = ? AND json_extract(m.data, '$.role') = 'user'
-         ORDER BY p.time_created ASC LIMIT 1`
+         ORDER BY m.time_created ASC, m.id ASC, p.time_created ASC, p.id ASC
+         LIMIT 10`
       )
-      .get(sessionId) as { data: string } | undefined;
-    if (!row) return null;
-    const parsed = JSON.parse(row.data) as { type?: string; text?: string };
-    return parsed.type === "text" ? parsed.text ?? null : null;
+      .all(sessionId) as { data: string }[];
+    for (const row of rows) {
+      const text = parsePartText(row.data);
+      if (text) {
+        firstUserMessageCache.set(sessionId, text);
+        return text;
+      }
+    }
+    return null;
   } catch {
     return null;
   }

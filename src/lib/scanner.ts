@@ -503,6 +503,16 @@ export async function scanSessions(
     dlog.warn("scanner", `codex scan failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // Post-scan: index OpenCode sessions from ~/.local/share/opencode/opencode.db
+  try {
+    const { scanOpencodeSessions } = await import("./opencode-scanner");
+    const opencodeResult = await scanOpencodeSessions(db, existingMtimes, mode, upsertSession);
+    sessionsScanned += opencodeResult.scanned;
+    sessionsSkipped += opencodeResult.skipped;
+  } catch (err) {
+    dlog.warn("scanner", `opencode scan failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   const projectsSynced = syncProjectsFromSessions(db);
 
   // Post-scan: detect incomplete exits from DB (catches files skipped by incremental scan)
