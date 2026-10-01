@@ -108,11 +108,18 @@ async function _generateTitleBatchInner(
   // Re-title every 6 messages (~3 exchanges) since last title was generated
   const RETITLE_INTERVAL = 6;
 
-  const whereClause = force
+  // Claude transcripts only: codex/forge/opencode rows are titled from their own
+  // DBs, and readSessionMessages can't parse their jsonl_path (rollout files /
+  // `opencode://` markers) — feeding them into the batch makes summary generation
+  // fail and (generated === 0) aborts generateAllMissingTitles early, starving
+  // real Claude sessions of titles.
+  const agentFilter = " AND (agent_type IS NULL OR agent_type = 'claude')";
+
+  const whereClause = (force
     ? "WHERE first_prompt IS NOT NULL"
     : `WHERE first_prompt IS NOT NULL
        AND (generated_title IS NULL
-            OR message_count >= COALESCE(titled_at_count, 0) + ${RETITLE_INTERVAL})`;
+            OR message_count >= COALESCE(titled_at_count, 0) + ${RETITLE_INTERVAL})`) + agentFilter;
 
   const sessions = db
     .prepare(

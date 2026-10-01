@@ -31,6 +31,7 @@ export async function POST(
   const processes = detectActiveClaudeSessions();
   const proc = processes.find((p) => p.sessionId === sessionId);
   const tty = proc ? getTTY(proc.pid) : null;
+  const agentType = (session as SessionRow & { agent_type?: string }).agent_type ?? "claude";
   const focusResult = controlTerminalSession({
     action: "focus",
     tty,
@@ -53,7 +54,9 @@ export async function POST(
     return Response.json({ error: focusResult.error }, { status: 500 });
   }
 
-  if (!proc) {
+  // No process, or an OpenCode session running detached (manager-spawned
+  // `opencode --auto` has no TTY to focus) — reopen it in a terminal instead.
+  if (!proc || (!tty && agentType === "opencode")) {
     try {
       const shellCmd = buildResumeShellCommand(session);
       const { terminal } = await openInTerminal(shellCmd);

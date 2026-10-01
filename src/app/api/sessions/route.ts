@@ -4,12 +4,14 @@ import { getActiveSessionIds } from "@/lib/process-detector";
 import { SessionRow, SessionListItem } from "@/lib/types";
 import { fetchAllRemoteSessions } from "@/lib/remote-compute";
 import { ensureCodexBackgroundScanner } from "@/lib/codex-background-scanner";
+import { ensureOpencodeBackgroundScanner } from "@/lib/opencode-background-scanner";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  // Ensure Codex sessions are scanned periodically (no-op if already running)
+  // Ensure Codex/OpenCode sessions are scanned periodically (no-op if already running)
   ensureCodexBackgroundScanner();
+  ensureOpencodeBackgroundScanner();
 
   const searchParams = request.nextUrl.searchParams;
   const project = searchParams.get("project");
@@ -164,6 +166,10 @@ export async function GET(request: NextRequest) {
       isActive = !row.has_result && fileAgeMs < 5 * 60 * 1000;
     } else if (agentType === "forge") {
       isActive = fileAgeMs < 5 * 60 * 1000;
+    } else if (agentType === "opencode") {
+      // OpenCode sessions are live if their process is detected (binding via
+      // --session/-s flags or cwd+prompt) or the session was updated recently.
+      isActive = activeIds.has(row.session_id) || fileAgeMs < 5 * 60 * 1000;
     } else {
       isActive = activeIds.has(row.session_id);
     }

@@ -116,7 +116,12 @@ export async function GET(
     if (opencodeSession) {
       const opencodeMessages = readOpencodeMessages(sessionId);
       const fileAgeMs = Date.now() - opencodeSession.time_updated;
-      const active = fileAgeMs < 5 * 60 * 1000;
+      const vitals = getSessionVitals(sessionId) ?? getSessionVitalsByCwd(opencodeSession.directory);
+      const active = fileAgeMs < 5 * 60 * 1000 || getSessionVitals(sessionId) !== null;
+      // Index it now so it appears in the session list (fire-and-forget)
+      import("@/lib/opencode-background-scanner").then(({ ensureOpencodeBackgroundScanner }) => {
+        ensureOpencodeBackgroundScanner();
+      }).catch(() => {});
       return Response.json({
         session_id: sessionId,
         project_path: opencodeSession.directory,
@@ -146,7 +151,7 @@ export async function GET(
         is_active: active,
         has_result: opencodeMessages.some((m) => m.type === "assistant"),
         file_age_ms: Math.round(fileAgeMs),
-        process_vitals: active ? (getSessionVitals(sessionId) ?? getSessionVitalsByCwd(opencodeSession.directory)) : null,
+        process_vitals: active ? vitals : null,
         alarm: getSessionAlarm(sessionId),
       });
     }
@@ -161,7 +166,8 @@ export async function GET(
     const { readOpencodeMessages } = await import("@/lib/opencode-db");
     const opencodeMessages = readOpencodeMessages(sessionId);
     const fileAgeMs = Date.now() - session.file_mtime;
-    const active = fileAgeMs < 5 * 60 * 1000;
+    const vitals = getSessionVitals(sessionId) ?? getSessionVitalsByCwd(session.project_path);
+    const active = fileAgeMs < 5 * 60 * 1000 || getSessionVitals(sessionId) !== null;
     return Response.json({
       session_id: session.session_id,
       project_path: session.project_path,
@@ -172,7 +178,7 @@ export async function GET(
       is_active: active,
       has_result: opencodeMessages.some((m) => m.type === "assistant"),
       file_age_ms: Math.round(fileAgeMs),
-      process_vitals: active ? (getSessionVitals(sessionId) ?? getSessionVitalsByCwd(session.project_path)) : null,
+      process_vitals: active ? vitals : null,
       alarm: getSessionAlarm(sessionId),
     });
   }

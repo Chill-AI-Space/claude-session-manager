@@ -4,6 +4,7 @@ import path from "path";
 import { claudeProjectsDir } from "./utils";
 import type { CodexThreadRow } from "./codex-db";
 import { listCodexThreads } from "./codex-db";
+import { listIndexableOpencodeSessions, getOpencodeFirstUserMessage } from "./opencode-db";
 import { findLiveSessionProcesses } from "./session-liveness";
 
 const isWin = process.platform === "win32";
@@ -63,8 +64,11 @@ function refreshTcpAsync(pid: number): void {
   });
 }
 
-// Cache active sessions for 5 seconds
-let cachedResult: { processes: ActiveProcess[]; timestamp: number } | null = null;
+// Cache active sessions for 5 seconds.
+// `processes` is deduped by session id (one representative per session — what
+// the UI polls); `raw` keeps every bound process so killing a session can take
+// out ALL its pids (e.g. an attached `opencode run -s …` next to its TUI).
+let cachedResult: { processes: ActiveProcess[]; raw: ActiveProcess[]; timestamp: number } | null = null;
 const CACHE_TTL_MS = 8000;
 
 const CLAUDE_DIR = claudeProjectsDir();
@@ -85,6 +89,69 @@ function normalizePath(p: string): string {
 
 function isCodexCommand(command: string): boolean {
   return /(^|[\/\s])codex(\s|$)/.test(command);
+}
+
+/**
+ * True when the process IS the OpenCode CLI — argv[0] basename is `opencode`
+ * (`/Users/…/.opencode/bin/opencode --auto --prompt …`). Ground truth on argv[0],
+ * not a token match, so `vim opencode` or a claude prompt *mentioning* opencode
+ * can never be treated as an OpenCode session.
+ */
+export function isOpencodeCommand(command: string): boolean {
+  const first = command.trim().split(/\s+/)[0] ?? "";
+  return first !== "" && path.basename(first) === "opencode";
+}
+
+/** `--session ses_…` (interactive attach/resume) or `run -s ses_…` (one-shot). */
+const OPENCODE_SESSION_RE = /(?:--session|-s)\s+(ses_[0-9A-Za-z]+)/;
+
+/**
+ * OpenCode session id from argv, or null.
+ * Session flags always precede the prompt text, so for the `--prompt` shape we
+ * only search the head before `--prompt` — a prompt that *quotes*
+ * `--session ses_…` can't steal the binding. For `run -s ses_ …` (no --prompt)
+ * the flag sits right after `run`, so a short head covers it too.
+ */
+function extractOpencodeSessionId(command: string): string | null {
+  if (!isOpencodeCommand(command)) return null;
+  const promptIdx = command.indexOf("--prompt ");
+  const head = promptIdx >= 0 ? command.slice(0, promptIdx) : command.slice(0, 160);
+  const m = head.match(OPENCODE_SESSION_RE);
+  return m ? m[1] : null;
+}
+
+/**
+ * Initial prompt of a fresh `opencode --auto --prompt <text>` command, for
+ * cwd+prompt session assignment. `ps` escapes embedded newlines as the literal
+ * `\012`, which `normalizePromptText` alone would not collapse — undo that first.
+ */
+function extractOpencodeInitialPrompt(command: string): string | null {
+  if (!isOpencodeCommand(command)) return null;
+  if (extractOpencodeSessionId(command)) return null; // attached to an existing session
+  const promptIdx = command.indexOf("--prompt ");
+  if (promptIdx < 0) return null;
+  const raw = command.slice(promptIdx + "--prompt ".length).replace(/\\012/g, "\n");
+  const prompt = normalizePromptText(raw);
+  return prompt || null;
+}
+
+/**
+ * The ps grep is broad (agent names appear inside other commands' prompts) —
+ * keep only lines that are actually an agent process: the OpenCode CLI on
+ * argv[0], or a command containing a claude/codex token (exactly what matched
+ * the grep before opencode was added to it).
+ */
+function isAgentProcessLine(command: string): boolean {
+  return isOpencodeCommand(command) || /(^|[\/\s])(claude|codex)(\s|$)/.test(command);
+}
+
+/** Session id for a detected process — claude/codex resume UUIDs vs OpenCode `ses_` ids. */
+function sessionIdFromCommand(command: string): string | null {
+  const opencodeSession = extractOpencodeSessionId(command);
+  if (opencodeSession) return opencodeSession;
+  if (isOpencodeCommand(command)) return null; // opencode never uses claude/codex resume ids
+  const resumeMatch = command.match(RESUME_RE);
+  return resumeMatch ? resumeMatch[1] : null;
 }
 
 function normalizePromptText(text: string | null | undefined): string {
@@ -296,14 +363,127 @@ export function assignCodexSessionIdsByCwd(
   }
 }
 
+/** OpenCode session candidates for cwd-based assignment (from opencode.db). */
+export interface OpencodeSessionCandidate {
+  id: string;
+  directory: string;
+  time_created: number; // epoch ms
+  time_updated: number; // epoch ms
+  /** Pre-resolved first prompt when the caller has it; otherwise `opts.firstPromptOf`. */
+  first_user_message?: string | null;
+}
+
+/**
+ * Bind OpenCode processes started without `--session/-s` (`opencode --auto
+ * --prompt …`) to a session in the same directory: exact prompt → substring →
+ * nearest session start to the process start → most recently updated, always
+ * skipping already-claimed ids. Pure logic, no I/O — prompts resolve lazily
+ * via `opts.firstPromptOf` (opencode.db read, cached there).
+ */
+export function assignOpencodeSessionIdsByCwd(
+  processes: ActiveProcess[],
+  sessions: OpencodeSessionCandidate[],
+  claimed: Set<string>,
+  opts: { firstPromptOf?: (id: string) => string | null; now?: () => number } = {}
+): void {
+  const byCwd = new Map<string, OpencodeSessionCandidate[]>();
+  for (const session of sessions) {
+    if (!session.directory) continue;
+    const key = normalizePath(session.directory);
+    const bucket = byCwd.get(key);
+    if (bucket) bucket.push(session);
+    else byCwd.set(key, [session]);
+  }
+  for (const bucket of byCwd.values()) {
+    bucket.sort((a, b) => b.time_updated - a.time_updated);
+  }
+
+  type OpencodeProcessGroup = {
+    cwd: string;
+    tty: string | null;
+    prompt: string | null;
+    processes: ActiveProcess[];
+    minElapsed: number;
+  };
+
+  const unresolvedGroups = new Map<string, OpencodeProcessGroup>();
+  for (const proc of processes) {
+    if (proc.sessionId || !proc.cwd || !isOpencodeCommand(proc.command)) continue;
+    const cwd = normalizePath(proc.cwd);
+    const tty = proc.tty ?? null;
+    const prompt = extractOpencodeInitialPrompt(proc.command);
+    const key = `${cwd}::${tty ?? "no-tty"}::${prompt ?? "no-prompt"}`;
+    const existing = unresolvedGroups.get(key);
+    if (existing) {
+      existing.processes.push(proc);
+      existing.minElapsed = Math.min(existing.minElapsed, proc.elapsedSecs ?? Number.MAX_SAFE_INTEGER);
+    } else {
+      unresolvedGroups.set(key, {
+        cwd,
+        tty,
+        prompt,
+        processes: [proc],
+        minElapsed: proc.elapsedSecs ?? Number.MAX_SAFE_INTEGER,
+      });
+    }
+  }
+
+  const nowMs = (opts.now ?? Date.now)();
+  for (const group of unresolvedGroups.values()) {
+    const candidates = byCwd.get(group.cwd) ?? [];
+    if (candidates.length === 0) continue;
+    const promptOf = (s: OpencodeSessionCandidate): string | null =>
+      s.first_user_message ?? opts.firstPromptOf?.(s.id) ?? null;
+
+    const normalizedPrompt = normalizePromptText(group.prompt);
+    let matched = normalizedPrompt
+      ? candidates.filter((s) => normalizePromptText(promptOf(s)) === normalizedPrompt)
+      : [];
+
+    if (matched.length === 0 && normalizedPrompt) {
+      matched = candidates.filter((s) => {
+        const candidatePrompt = normalizePromptText(promptOf(s));
+        return (
+          candidatePrompt.length > 0 &&
+          (normalizedPrompt.includes(candidatePrompt) || candidatePrompt.includes(normalizedPrompt))
+        );
+      });
+    }
+
+    let chosen: OpencodeSessionCandidate | undefined;
+    if (matched.length > 0) {
+      chosen = matched.slice().sort((a, b) => b.time_updated - a.time_updated)[0];
+    } else {
+      const procStart = nowMs - (group.minElapsed === Number.MAX_SAFE_INTEGER ? 0 : group.minElapsed * 1000);
+      chosen = candidates
+        .filter((s) => !claimed.has(s.id))
+        .sort(
+          (a, b) =>
+            Math.abs(a.time_created - procStart) - Math.abs(b.time_created - procStart) ||
+            b.time_updated - a.time_updated
+        )[0];
+    }
+    if (!chosen) continue;
+
+    for (const proc of group.processes) {
+      proc.sessionId = chosen.id;
+    }
+    claimed.add(chosen.id);
+  }
+}
+
 /** Assign session IDs, deduplicate — pure logic, no I/O */
 function finalizeProcesses(processes: ActiveProcess[]): ActiveProcess[] {
   const claimed = new Set<string>(
     processes.filter((p) => p.sessionId).map((p) => p.sessionId!)
   );
   assignCodexSessionIdsByCwd(processes, listCodexThreads(), claimed);
+  assignOpencodeSessionIdsByCwd(processes, listIndexableOpencodeSessions(), claimed, {
+    firstPromptOf: getOpencodeFirstUserMessage,
+  });
   for (const proc of processes) {
     if (proc.sessionId || !proc.cwd) continue;
+    if (isOpencodeCommand(proc.command)) continue; // OpenCode never owns a Claude JSONL session
     const projectDir = pathToProjectDir(proc.cwd);
     proc.sessionId = findMostRecentSession(projectDir, claimed);
     if (proc.sessionId) claimed.add(proc.sessionId);
@@ -325,7 +505,7 @@ function finalizeProcesses(processes: ActiveProcess[]): ActiveProcess[] {
 /** Async version of detectUnix: runs ps + lsof via exec() so it never blocks the event loop */
 function detectUnixAsync(callback: (processes: ActiveProcess[]) => void): void {
   exec(
-    'ps axo pid=,etime=,tty=,command= | grep -E "(/| |^)(claude|codex)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
+    'ps axo pid=,etime=,tty=,command= | grep -E "(/| |^)(claude|codex|opencode)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
     { encoding: "utf-8", timeout: 3000 },
     (psErr, psOutput) => {
       if (psErr || !psOutput?.trim()) { callback([]); return; }
@@ -337,10 +517,8 @@ function detectUnixAsync(callback: (processes: ActiveProcess[]) => void): void {
         const elapsedSecs = parseElapsedTime(match[2]);
         const tty = match[3] === "??" ? null : match[3];
         const command = match[4];
-        let sessionId: string | null = null;
-        const resumeMatch = command.match(RESUME_RE);
-        if (resumeMatch) sessionId = resumeMatch[1];
-        processes.push({ pid, sessionId, cwd: null, command, elapsedSecs, tty });
+        if (!isAgentProcessLine(command)) continue;
+        processes.push({ pid, sessionId: sessionIdFromCommand(command), cwd: null, command, elapsedSecs, tty });
       }
       const pids = processes.map((p) => p.pid);
       if (pids.length === 0) { callback(processes); return; }
@@ -373,9 +551,9 @@ function scheduleAsyncRefresh(): void {
   asyncRefreshRunning = true;
   detectUnixAsync((rawProcesses) => {
     try {
-      cachedResult = { processes: finalizeProcesses(rawProcesses), timestamp: Date.now() };
+      cachedResult = { processes: finalizeProcesses(rawProcesses), raw: rawProcesses, timestamp: Date.now() };
     } catch {
-      cachedResult = { processes: [], timestamp: Date.now() };
+      cachedResult = { processes: [], raw: [], timestamp: Date.now() };
     }
     asyncRefreshRunning = false;
   });
@@ -432,7 +610,7 @@ const RESUME_RE = /(?:--)?resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 /** Unix: use ps + lsof to find claude/codex processes and their CWDs */
 function detectUnix(): ActiveProcess[] {
   const psOutput = execSync(
-    'ps axo pid=,etime=,tty=,command= | grep -E "(/| |^)(claude|codex)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
+    'ps axo pid=,etime=,tty=,command= | grep -E "(/| |^)(claude|codex|opencode)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
     { encoding: "utf-8", timeout: 3000 }
   ).trim();
 
@@ -446,12 +624,9 @@ function detectUnix(): ActiveProcess[] {
     const elapsedSecs = parseElapsedTime(match[2]);
     const tty = match[3] === "??" ? null : match[3];
     const command = match[4];
+    if (!isAgentProcessLine(command)) continue;
 
-    let sessionId: string | null = null;
-    const resumeMatch = command.match(RESUME_RE);
-    if (resumeMatch) sessionId = resumeMatch[1];
-
-    processes.push({ pid, sessionId, cwd: null, command, elapsedSecs, tty });
+    processes.push({ pid, sessionId: sessionIdFromCommand(command), cwd: null, command, elapsedSecs, tty });
   }
 
   // Get CWDs for all PIDs in one lsof call
@@ -567,7 +742,22 @@ export function getSessionVitalsByCwd(projectPath: string): ProcessVitals | null
 export function killSessionProcesses(sessionId: string): number[] {
   // Fresh lookup: the cached detector returns [] when cold (it used to be nulled right here,
   // so this killed nothing and callers went on to spawn a --resume clone next to the survivor).
-  const pids = new Set<number>(detectActiveClaudeSessions().filter((p) => p.sessionId === sessionId).map((p) => p.pid));
+  // Prefer the RAW process list — every pid bound to this session (an attached
+  // `opencode run -s …` shares its session with the TUI; dedupe would keep one).
+  // Cold cache → one synchronous pass: OpenCode has no ~/.claude/sessions registry
+  // fallback in findLiveSessionProcesses, so waiting for the async refresh would kill nothing.
+  let source: ActiveProcess[] | undefined = cachedResult?.raw;
+  if (!source || (cachedResult && Date.now() - cachedResult.timestamp >= CACHE_TTL_MS)) {
+    try {
+      const raw = detectUnix();
+      const finalized = finalizeProcesses(raw);
+      cachedResult = { processes: finalized, raw, timestamp: Date.now() };
+      source = raw;
+    } catch {
+      source = source ?? [];
+    }
+  }
+  const pids = new Set<number>(source.filter((p) => p.sessionId === sessionId).map((p) => p.pid));
   for (const p of findLiveSessionProcesses(sessionId)) pids.add(p.pid);
   const matching = [...pids].map((pid) => ({ pid }));
   const killed: number[] = [];
