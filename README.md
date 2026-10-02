@@ -234,11 +234,22 @@ curl -s "http://localhost:3000/api/sessions/peers" | jq '.peers[] | {session_id,
 
 The active alarm is visible in the session detail UI (⏰ indicator with remaining time + cancel button).
 
+## Project Folder (where a session runs)
+
+Every `POST /api/sessions/start` resolves its path through `resolveProjectPath()` (`src/lib/project-path.ts`) so a session lands in the **project folder — `~/Code/<repo-name>`** and never in a throwaway directory:
+
+- ordinary existing folder → used as is;
+- `…/.worktrees/<repo>/…` or any linked worktree → redirected to `~/Code/<repo>`, else to the checkout owning that worktree;
+- path that does not exist → `~/Code/<basename>`, created if missing;
+- no project folder anywhere → `~/Code/<repo>` is created — `git clone <origin>` when the URL is known, otherwise `mkdir`.
+
+Redirects are logged as `session_project_resolved` and reported in the first SSE `status` event. The relay/Telegram start path (`src/lib/relay-client.ts`) resolves the same way. Details and the curl recipe: [docs/spawn-guide.md](docs/spawn-guide.md).
+
 ## Session Worktrees (parallel-session isolation)
 
 Two sessions started on the same repo path would share one working tree — one's checkout breaks the other, foreign uncommitted changes land in commits. So a new session can get its **own git worktree**:
 
-- `POST /api/sessions/start` accepts `"worktree": true|false`. Without it: **sub-sessions** (curl/API, no `Sec-Fetch-*` headers) get a worktree, **browser UI** starts follow the `sessions_worktree_default` setting (Settings → Session Worktrees, default off).
+- `POST /api/sessions/start` accepts `"worktree": true|false`. Without it: the `sessions_worktree_default` setting decides (Settings → Session Worktrees, default **off**) — the same rule for browser starts and for sub-sessions (curl/API).
 - If `path` is inside a git repo (root or subfolder) and isn't already a linked worktree, the Session Manager runs `git worktree add -b session/<slug>-<YYYYMMDD-HHMMSS> ../.worktrees/<repo>/<branch> HEAD` and starts the agent there (same subfolder). Works for every agent (claude, codex, opencode, forge). The source checkout is never touched (no checkout/stash/reset/clean).
 - The session's `project_path` is the worktree (resume/reply/terminals work unchanged); `worktree_source_path` + `worktree_branch` columns keep the origin. The SSE stream starts with a `status` event `Worktree: <path> (branch <name>)`.
 - Not a git repo / creation failed → no error: logged (`session_worktree_skipped`) and the session starts in the original path, with the reason in a `status` event.
@@ -283,7 +294,7 @@ Available at **Settings** (gear icon in sidebar):
 | **Auto-kill terminal** | off | Kill terminal session before sending a web reply |
 | **Auto-retry on crash** | on | Auto-send "continue" after 30s on crash |
 | **Auto-continue on stall** | off | Auto-send "continue" when idle 5+ min |
-| **Session worktrees** | off | Start browser-UI sessions in their own git worktree (API sub-sessions always do, unless `"worktree": false`) |
+| **Session worktrees** | off | Start new sessions in their own git worktree (browser and API alike; `"worktree": true|false` in the start body wins) |
 
 ## Project structure
 

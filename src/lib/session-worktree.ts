@@ -33,20 +33,19 @@ async function git(cwd: string, args: string[]): Promise<string> {
 // ── Decision ────────────────────────────────────────────────────────────────
 
 /**
- * Explicit `worktree` in the request body always wins. Otherwise: browser UI
- * starts follow the `sessions_worktree_default` setting (default off), while
- * sub-sessions (curl/API — no Sec-Fetch-* headers) default to on.
+ * Explicit `worktree` in the request body always wins; otherwise the
+ * `sessions_worktree_default` setting decides — for browser starts and for
+ * sub-sessions (curl/API) alike. Default is off: sessions run in the project
+ * folder itself (see `project-path.ts` for worktree → project redirection).
  */
 export function resolveWorktreeDecision(opts: {
   explicit: unknown;
-  fromBrowser: boolean;
   settingDefault: string | undefined;
 }): boolean {
   if (typeof opts.explicit === "boolean") return opts.explicit;
   if (opts.explicit === "true") return true;
   if (opts.explicit === "false") return false;
-  if (opts.fromBrowser) return opts.settingDefault === "true";
-  return true;
+  return opts.settingDefault === "true";
 }
 
 // ── Git detection ───────────────────────────────────────────────────────────

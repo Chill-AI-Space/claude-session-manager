@@ -41,17 +41,17 @@ afterEach(() => {
 
 describe("resolveWorktreeDecision", () => {
   it("explicit value always wins", () => {
-    expect(resolveWorktreeDecision({ explicit: false, fromBrowser: false, settingDefault: "true" })).toBe(false);
-    expect(resolveWorktreeDecision({ explicit: true, fromBrowser: true, settingDefault: "false" })).toBe(true);
-    expect(resolveWorktreeDecision({ explicit: "false", fromBrowser: false, settingDefault: undefined })).toBe(false);
+    expect(resolveWorktreeDecision({ explicit: false, settingDefault: "true" })).toBe(false);
+    expect(resolveWorktreeDecision({ explicit: true, settingDefault: "false" })).toBe(true);
+    expect(resolveWorktreeDecision({ explicit: "false", settingDefault: undefined })).toBe(false);
   });
-  it("browser starts follow the setting (default off)", () => {
-    expect(resolveWorktreeDecision({ explicit: undefined, fromBrowser: true, settingDefault: "false" })).toBe(false);
-    expect(resolveWorktreeDecision({ explicit: undefined, fromBrowser: true, settingDefault: undefined })).toBe(false);
-    expect(resolveWorktreeDecision({ explicit: undefined, fromBrowser: true, settingDefault: "true" })).toBe(true);
+  it("follows the setting when no explicit value (default off)", () => {
+    expect(resolveWorktreeDecision({ explicit: undefined, settingDefault: "false" })).toBe(false);
+    expect(resolveWorktreeDecision({ explicit: undefined, settingDefault: undefined })).toBe(false);
+    expect(resolveWorktreeDecision({ explicit: undefined, settingDefault: "true" })).toBe(true);
   });
-  it("sub-sessions (no Sec-Fetch headers) default to on regardless of setting", () => {
-    expect(resolveWorktreeDecision({ explicit: undefined, fromBrowser: false, settingDefault: "false" })).toBe(true);
+  it("applies the same rule to sub-sessions as to browser starts", () => {
+    expect(resolveWorktreeDecision({ explicit: undefined, settingDefault: "false" })).toBe(false);
   });
 });
 

@@ -349,7 +349,7 @@ Task types: `start`, `resume`, `crash_retry`, `stall_continue`, `incomplete_exit
 | `orchestrator_stall_continue_delay_ms` | `10000` | Delay before auto-continue on stall |
 | `orchestrator_max_retries` | `3` | Max crash retries per session before marking as failed |
 | `subsession_agent_override` | `""` | Force the agent for sessions spawned via curl/API (not from the browser UI): `claude`/`opencode`/`codex`/`forge`, empty = off. Steers spawning away from an agent whose quota is running out. |
-| `sessions_worktree_default` | `"false"` | Start browser-UI sessions in their own git worktree. Sub-sessions (curl/API) default to a worktree regardless; explicit `worktree` in the start body wins. See "Session worktrees" below. |
+| `sessions_worktree_default` | `"false"` | Start new sessions in their own git worktree. Applies to browser starts and sub-sessions (curl/API) alike; explicit `worktree` in the start body wins. See "Session worktrees" below. |
 
 ### How scanner integrates (Session Babysitter)
 
@@ -365,7 +365,7 @@ Scanner detects crashes/stalls/incomplete exits during JSONL scan and delegates 
 Any process that can make HTTP requests can control sessions:
 
 ```bash
-# Start a new session
+# Start a new session (path = repo root; worktree/scratch paths resolve to ~/Code/<repo> — see docs/spawn-guide.md)
 curl -X POST http://localhost:3000/api/sessions/start \
   -H "Content-Type: application/json" \
   -d '{"path":"/path/to/project","message":"fix the bug in auth.ts","agent":"opencode"}'
@@ -403,9 +403,20 @@ When writing new code, follow these rules to keep Windows compatibility:
 - **Line endings**: JSONL parsing should handle `\r\n` (use `split(/\r?\n/)`)
 - **Path in Claude projects dir**: `pathToProjectDir()` replaces both `/` and `\` with `-`
 
+## Project folder (`src/lib/project-path.ts`)
+
+Every start resolves its path through `resolveProjectPath()` before anything else, so a session always lands in the **project folder — `~/Code/<repo-name>`** and never in a throwaway directory:
+
+- ordinary existing folder (repo root or subfolder) → used as is;
+- a `…/.worktrees/<repo>/…` or any linked worktree → redirected to `~/Code/<repo>`, else to the checkout that owns that worktree;
+- a path that does not exist → `~/Code/<basename>`, created if missing;
+- no project folder anywhere → `~/Code/<repo>` is created (`git clone <origin>` when the URL is known — from the path itself or a past `sessions.project_path` — otherwise `mkdir`).
+
+Redirects are logged as `session_project_resolved` and reported in the first SSE `status` event. The relay/Telegram start path (`src/lib/relay-client.ts`, `start` + `start_terminal`) applies the same resolution — only the log's `via` field differs. Never throws: on failure the requested path is used as is. Human-readable walkthrough: **[docs/spawn-guide.md](docs/spawn-guide.md)**.
+
 ## Session worktrees (`src/lib/session-worktree.ts`)
 
-`POST /api/sessions/start` can run the new session in its own `git worktree` so parallel sessions on one repo don't share a working tree. Decision (`resolveWorktreeDecision`): explicit `worktree` in body → wins; browser start (has `Sec-Fetch-*`) → `sessions_worktree_default`; curl/sub-session → on.
+`POST /api/sessions/start` can run the new session in its own `git worktree` so parallel sessions on one repo don't share a working tree — opt-in, off by default. Decision (`resolveWorktreeDecision`): explicit `worktree` in body → wins; otherwise `sessions_worktree_default`, same rule for browser starts and for curl/sub-sessions.
 
 - Branch `session/<slug>-<YYYYMMDD-HHMMSS>` from the source repo's HEAD, dir `<repo-root>/../.worktrees/<repo-name>/<branch-with-dashes>`; agent cwd = same subfolder inside it. Only `git worktree add` runs against the source — never checkout/stash/reset/clean there.
 - Session row: `project_path` = worktree path (resume/reply untouched); `worktree_source_path`, `worktree_branch` recorded when the `session_id` SSE event passes (`withWorktreeStatus` in `session-worktree-registry.ts`).
@@ -413,12 +424,13 @@ When writing new code, follow these rules to keep Windows compatibility:
 - Remote nodes get the resolved `worktree` flag forwarded.
 - Cleanup: `GET /api/worktrees` (dry-run list with reasons), `POST /api/worktrees` (remove), button in Settings → Session Worktrees. Removes only clean worktrees whose branch has no commits outside other refs and with no active session / process cwd inside. No automatic TTL deletion.
 - Known limitation: `node_modules` / `.env` are not copied; ports are shared.
-- If a sub-session must work in the caller's own checkout (e.g. to see uncommitted files), pass `"worktree": false`.
+- Off by default: a start runs directly in the resolved project folder, so parallel sessions share one checkout. `"worktree": true` is the supported way to isolate a session — handing it a worktree path by hand does not isolate anything, it just redirects back to the project.
 
 ## Sessions Choreography
 
 The babysitter watches all sessions and auto-retries crashes and stalls. For explicit control — delegation, self-alarm, coordinator pattern — see the dedicated guides:
 
+- **[Spawn Guide](docs/spawn-guide.md)** — where a session lands, project folder rule, when to use `worktree`, the curl recipe
 - **[Delegation Guide](docs/delegation-guide.md)** — simple delegation, commit rules, alarm, Codex specifics, coordinator pattern overview
 - **[Coordinator Prompt Template](docs/coordinator-prompt-template.md)** — full template for running a multi-iteration plan with workers
 
@@ -429,10 +441,11 @@ curl -s "http://localhost:3000/api/sessions/my-id?path=$(pwd)"
 
 **Quick reference — spawn a sub-session:**
 ```bash
-curl -s -X POST "http://localhost:3000/api/sessions/start" \
+curl -s -N -X POST "http://localhost:3000/api/sessions/start" \
   -H "Content-Type: application/json" \
-  -d '{"path":"/abs/path","message":"task","reply_to_session_id":"YOUR_ID","agent":"opencode"}'
+  -d '{"path":"/abs/repo-root","message":"task","reply_to_session_id":"YOUR_ID","agent":"opencode"}'
 ```
+`path` = repo root (a worktree/scratch path is fine too — it resolves to `~/Code/<repo>`; see the [Spawn Guide](docs/spawn-guide.md)).
 
 **Rule: commit before passing work to another session.** Uncommitted changes are invisible across session boundaries.
 

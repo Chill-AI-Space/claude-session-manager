@@ -20,6 +20,36 @@ import { buildResumeShellCommand, buildStartShellCommand } from "./session-termi
 import { openInTerminal } from "./terminal-launcher";
 import { claudeProjectsDir } from "./utils";
 import { getLiveSessionFromPidMap } from "./session-pid-map";
+import { resolveProjectPath } from "./project-path";
+import { lookupOriginUrl } from "./origin-lookup";
+
+/**
+ * Apply the project-folder rule (src/lib/project-path.ts) to a relay start —
+ * the same resolution POST /api/sessions/start does: a worktree/scratch path
+ * lands in ~/Code/<repo> (created when missing), ordinary paths are untouched.
+ * Returns the resolved path, or the HTTP-shaped error the caller already uses.
+ */
+async function resolveRelayStartPath(
+  rawPath: string,
+  via: string,
+): Promise<string | { error: string; status: number }> {
+  const requested = path.resolve(rawPath);
+  if (!requested.startsWith(os.homedir())) {
+    return { error: "Path must be within home directory", status: 403 };
+  }
+  const project = await resolveProjectPath(requested, { findOriginUrl: lookupOriginUrl });
+  if (!project.path.startsWith(os.homedir())) {
+    return { error: "Path must be within home directory", status: 403 };
+  }
+  if (project.redirected) {
+    logAction(
+      "service",
+      "session_project_resolved",
+      JSON.stringify({ requested, resolved: project.path, created: project.created, note: project.note, via }),
+    );
+  }
+  return project.path;
+}
 
 /**
  * Find a session's project_path by scanning ~/.claude/projects for
@@ -224,10 +254,9 @@ class RelayClient {
         if (!cmd.projectPath || (!cmd.message && !cmd.image_base64)) {
           return { error: "projectPath and message (or image) required", status: 400 };
         }
-        const resolvedPath = path.resolve(cmd.projectPath);
-        if (!resolvedPath.startsWith(os.homedir())) {
-          return { error: "Path must be within home directory", status: 403 };
-        }
+        const startPath = await resolveRelayStartPath(cmd.projectPath, "relay_start");
+        if (typeof startPath !== "string") return startPath;
+        const resolvedPath = startPath;
         try {
           const stat = fs.statSync(resolvedPath);
           if (!stat.isDirectory()) {
@@ -295,10 +324,9 @@ class RelayClient {
         if (!cmd.projectPath || (!cmd.message && !cmd.image_base64)) {
           return { error: "projectPath and message (or image) required", status: 400 };
         }
-        const resolvedPath = path.resolve(cmd.projectPath);
-        if (!resolvedPath.startsWith(os.homedir())) {
-          return { error: "Path must be within home directory", status: 403 };
-        }
+        const startPath = await resolveRelayStartPath(cmd.projectPath, "relay_start_terminal");
+        if (typeof startPath !== "string") return startPath;
+        const resolvedPath = startPath;
         try {
           const stat = fs.statSync(resolvedPath);
           if (!stat.isDirectory()) {

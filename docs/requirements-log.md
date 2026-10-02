@@ -69,6 +69,11 @@ Running log of features/decisions for this project, with status. Update in place
 - [ограничение, не решаем] node_modules/.env не копируются, порты общие.
 - [отклонено] `claude -w` — только для Claude, не для codex/opencode/forge.
 
+## Папка проекта при спавне (project-path)
+
+- [реализовано] `resolveProjectPath()` (`src/lib/project-path.ts`) вызывается в `/api/sessions/start` перед запуском агента: worktree-путь (`…/.worktrees/<repo>/…` или linked worktree) → `~/Code/<repo>`, иначе владеющий чекаут; несуществующий путь → `~/Code/<basename>`; проекта нет нигде → создаётся `~/Code/<repo>` (`git clone <origin>`, если URL известен — из самого пути или из прошлых `sessions.project_path`, иначе `mkdir`). Лог `session_project_resolved`, note в первом SSE `status`. Никогда не бросает исключение — при сбое старт в исходном пути. Гайд: `docs/spawn-guide.md`.
+- [изменено] `sessions_worktree_default` действует одинаково для браузера и для curl-подсессий — убран хардкод «sub-sessions default to true» в `resolveWorktreeDecision`. Изоляция только по явному `"worktree": true`; накопленные `~/Code/.worktrees/*` чистятся вручную (Settings → Session Worktrees).
+
 ## Known issues / планируется
 
 - ~~**Сообщение теряется когда сессия занята**~~ — **реализовано** (commit `7dfdecc`): `pendingReplies` Map в orchestrator, доставка на `session:completed`. Ответ юзеру — 200 "Message queued" вместо 409.
