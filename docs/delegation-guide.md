@@ -74,7 +74,7 @@ CHILD_ID=$(curl -s -N -X POST "http://localhost:3000/api/sessions/start" \
     "message": "Fix the auth bug in login.ts. Commit the fix. Report DONE or FAILED.",
     "reply_to_session_id": "YOUR_SESSION_ID",
     "delegation_task": "fix auth bug",
-    "agent": "codex"
+    "agent": "opencode"
   }' | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id":"\([^"]*\)".*/\1/')
 
 [ -z "$CHILD_ID" ] && echo "ERROR: spawn failed" || echo "OK: $CHILD_ID"
@@ -131,17 +131,17 @@ For plans with many iterations where one session needs to orchestrate the whole 
 
 Short version:
 - Coordinator = long-lived Claude session with alarm, holds the plan
-- Workers = stateless sessions (Claude or Codex), do one iteration, report DONE/FAILED, die
+- Workers = stateless sessions (opencode or Claude), do one iteration, report DONE/FAILED, die
 - Coordinator wakes on each report, launches next worker, goes back to sleep
 
 ```
 Coordinator (alarm set) → spawns Worker → Worker reports DONE/FAILED → Coordinator wakes → next Worker → ...
 ```
 
-**Codex as worker, Claude as reviewer** — per-iteration pattern:
-1. Spawn Codex worker: implement the task
+**opencode as worker, Claude as reviewer** — per-iteration pattern:
+1. Spawn opencode worker: implement the task
 2. Wait for DONE
-3. Spawn Claude reviewer: review Codex output, report `DONE: verdict OK` or `DONE: verdict NEEDS_FIX`
+3. Spawn Claude reviewer: review opencode output, report `DONE: verdict OK` or `DONE: verdict NEEDS_FIX`
 4. Coordinator decides: next iteration or fix pass
 
 ---
@@ -260,7 +260,7 @@ Find your session ID:
 
 Available tools:
   Spawn sub-session:  POST http://localhost:3000/api/sessions/start
-    body: {"path":"REPO_ROOT","message":"...","agent":"codex"|"claude","reply_to_session_id":"YOUR_ID"}
+    body: {"path":"REPO_ROOT","message":"...","agent":"opencode"|"claude","reply_to_session_id":"YOUR_ID"}
     ALWAYS use -N flag and capture session_id
   Set alarm:          POST http://localhost:3000/api/sessions/YOUR_ID/alarm
   Cancel alarm:       DELETE http://localhost:3000/api/sessions/YOUR_ID/alarm
@@ -272,4 +272,4 @@ Full delegation guide: /Users/vova/Documents/GitHub/claude-session-manager/docs/
 
 If spawning with `reply_to_session_id`, Codex also gets a `[Delegation Contract]` with the callback URLs.
 
-When Codex spawns sub-sessions: use `agent: "codex"` for code, `agent: "claude"` for review.
+When spawning sub-sessions: use `agent: "opencode"` for code, `agent: "claude"` for review.
