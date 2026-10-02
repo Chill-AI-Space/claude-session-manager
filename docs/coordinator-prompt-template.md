@@ -56,11 +56,11 @@ cat /abs/path/to/PLAN.md
 
 ---
 
-### ШАГ 2 — Запускай воркеров по схеме: Codex пишет → Claude ревьюит
+### ШАГ 2 — Запускай воркеров по схеме: opencode пишет → Claude ревьюит
 
 **Каждая итерация состоит из двух последовательных шагов.** Сам код не пиши.
 
-#### Шаг 2.1 — Codex-воркер (пишет код)
+#### Шаг 2.1 — opencode-воркер (пишет код)
 
 > **`path` = корень целевого репозитория** — всегда, без исключений.
 > Создать сессию в отдельной папке (`~/investigation/`) вместо репо → воркер не видит код, не может коммитить, не может запускать тесты.
@@ -68,35 +68,35 @@ cat /abs/path/to/PLAN.md
 **Всегда читай SSE-ответ и сохраняй `session_id`.** Без `-N` curl буферизует стрим и ты не получишь ID — не узнаешь создалась ли сессия.
 
 ```bash
-CODEX_ID=$(curl -s -N -X POST "http://localhost:3000/api/sessions/start" \
+OPENCODE_ID=$(curl -s -N -X POST "http://localhost:3000/api/sessions/start" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "/abs/path/to/project",
     "message": "Context: <что сделано до>. Your task: <конкретная задача — что именно реализовать>. Constraints: <ограничения, например: не трогай prod, не деплой>. Report DONE: <что сделал, какие файлы изменил> or FAILED: <причина>.",
     "reply_to_session_id": "YOUR_SESSION_ID",
     "delegation_task": "iteration N: implement <описание>",
-    "agent": "codex"
+    "agent": "opencode"
   }' | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id":"\([^"]*\)".*/\1/')
 
-[ -z "$CODEX_ID" ] && echo "ERROR: spawn failed — retry before continuing" || echo "OK: codex $CODEX_ID"
+[ -z "$OPENCODE_ID" ] && echo "ERROR: spawn failed — retry before continuing" || echo "OK: opencode $OPENCODE_ID"
 ```
 
-Если `CODEX_ID` пустой — сессия не создалась, повтори спавн. Не переходи дальше пока нет ID.
+Если `OPENCODE_ID` пустой — сессия не создалась, повтори спавн. Не переходи дальше пока нет ID.
 
-**Жди ответа Codex.** Когда Codex ответит DONE — переходи к шагу 2.2.
+**Жди ответа opencode.** Когда opencode ответит DONE — переходи к шагу 2.2.
 
-Если Codex ответил FAILED — запиши в PLAN.md, реши: retry или skip, двигайся дальше.
+Если opencode ответил FAILED — запиши в PLAN.md, реши: retry или skip, двигайся дальше.
 
 #### Шаг 2.2 — Claude-воркер (ревьюит)
 
-Запускай только после DONE от Codex. Передавай в message полный ответ Codex.
+Запускай только после DONE от opencode. Передавай в message полный ответ opencode.
 
 ```bash
 REVIEWER_ID=$(curl -s -N -X POST "http://localhost:3000/api/sessions/start" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "/abs/path/to/project",
-    "message": "Context: Codex just implemented iteration N. Codex report: <полный текст DONE-ответа от Codex>. Your task: review the changes. Check: correctness, edge cases, regressions, code quality. Do NOT write code — only review. Report DONE: <findings, verdict: OK or NEEDS_FIX + what to fix> or FAILED: <critical blocker>.",
+    "message": "Context: opencode just implemented iteration N. opencode report: <полный текст DONE-ответа от opencode>. Your task: review the changes. Check: correctness, edge cases, regressions, code quality. Do NOT write code — only review. Report DONE: <findings, verdict: OK or NEEDS_FIX + what to fix> or FAILED: <critical blocker>.",
     "reply_to_session_id": "YOUR_SESSION_ID",
     "delegation_task": "iteration N: review",
     "agent": "claude"
@@ -107,7 +107,7 @@ REVIEWER_ID=$(curl -s -N -X POST "http://localhost:3000/api/sessions/start" \
 
 **Жди ответа ревьюера.** Когда ревьюер ответит:
 - `DONE: verdict OK` → итерация закрыта, переходи к следующей
-- `DONE: verdict NEEDS_FIX` → запусти новый Codex-воркер с описанием правок
+- `DONE: verdict NEEDS_FIX` → запусти новый opencode-воркер с описанием правок
 - `FAILED` → запиши в PLAN.md, реши: retry или skip
 
 ---
@@ -143,9 +143,9 @@ curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
 ### Правила
 
 - **Не пиши код сам** — только делегируй
-- **Codex пишет, Claude ревьюит** — никогда не наоборот, никогда не один агент делает оба шага
+- **opencode пишет, Claude ревьюит** — никогда не наоборот, никогда не один агент делает оба шага
 - **Ревьюер не пишет код** — только анализирует и выносит вердикт (OK / NEEDS_FIX)
-- **`agent` всегда указывай явно** — `"codex"` для написания кода, `"claude"` для ревью/исследования. Без `agent` по умолчанию `"claude"` — это НЕ то что нужно для имплементации
+- **`agent` всегда указывай явно** — `"opencode"` для написания кода, `"claude"` для ревью/исследования. Без `agent` по умолчанию `"opencode"` — это НЕ то что нужно для ревью
 - **`path` = корень репо** — всегда. Работаешь с одним репозиторием → `path` только этот репо. Создать воркера в другой папке = воркер слепой: нет кода, нет гита, нет тестов
 - **Alarm обновляй после каждого шага** с актуальным состоянием (implement или review, итерация N)
 - **Каждому воркеру передавай полный контекст** — у него нет памяти предыдущих сессий
@@ -179,7 +179,7 @@ curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
 Ты координатор. Итерация N из M.
 Текущий шаг: [implement / review].
 Последнее от воркера: <одна строка summary>.
-Следующее действие: запустить [Codex на task X / Claude-ревьюер с результатом Codex].
+Следующее действие: запустить [opencode на task X / Claude-ревьюер с результатом opencode].
 Папка проекта: /abs/path/to/project.
 Ограничения: <если есть>.
 ```
@@ -193,4 +193,4 @@ curl -s -X DELETE "http://localhost:3000/api/sessions/YOUR_SESSION_ID/alarm"
 - `reply_to_session_id` = воркер разбудит тебя сам когда закончит
 - Бабиситтер не трогает тебя пока ты ждёшь (text-only last message = no auto-resume)
 - Если воркер умрёт без ответа — бабиситтер пинганёт его 3 раза, потом пришлёт тебе FAILED автоматически
-- Два агента на каждую итерацию = Codex не пропустит своих ошибок мимо ревью
+- Два агента на каждую итерацию = opencode не пропустит своих ошибок мимо ревью
