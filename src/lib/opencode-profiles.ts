@@ -27,14 +27,14 @@ const BASE_CONFIG_PATH = path.join(OPENCODE_CONFIG_DIR, "base.json");
 const MERGED_CONFIG_PATH = path.join(OPENCODE_CONFIG_DIR, "opencode.json");
 const CURRENT_PROFILE_PATH = path.join(OPENCODE_CONFIG_DIR, ".current-profile");
 
-// This is only a same-render fallback used before the live profile list
-// loads (see useOpencodeProfiles) — the real source of truth is
-// ~/.config/opencode/.current-profile (getCurrentOpencodeProfile below).
-// It WILL drift if profiles/ is reorganized by hand — that's what just
-// broke session creation ("Unknown OpenCode profile: max" after `max.json`
-// got archived and .current-profile moved to "deepseek-openrouter").
-// Check `ls ~/.config/opencode/profiles` before trusting this literal.
-export const DEFAULT_OPENCODE_PROFILE = "deepseek-openrouter";
+// Fallback when ~/.config/opencode/.current-profile is missing or points at
+// a profile that no longer exists (see getCurrentOpencodeProfile below) — and
+// the same-render default for the profile dropdown before the live list
+// loads (see useOpencodeProfiles). `master` is the owner's default profile
+// (2026-10-02 tier-ladder rework): build on the free ladder, other roles
+// with mimo. Check `ls ~/.config/opencode/profiles` before trusting this
+// literal — it WILL drift if profiles/ is reorganized by hand.
+export const DEFAULT_OPENCODE_PROFILE = "master";
 
 export interface OpencodeProfile {
   id: string;
@@ -47,33 +47,25 @@ export interface OpencodeProfile {
 // entry here still shows up (labeled with its own file name), so adding a
 // new profiles/<id>.json file doesn't require a code change.
 const PROFILE_DISPLAY_NAMES: Record<string, { name: string; description: string }> = {
-  max: {
-    name: "Max (default)",
-    description: "OpenCode Go — grok-4.7 for everything, single best model available for now",
+  master: {
+    name: "Master",
+    description: "Дефолт: build на ladder/build, остальные роли — соседние ступени лестницы",
   },
-  quality: {
-    name: "Quality",
-    description: "DeepSeek V4 Flash (paid) as main worker, GigaChat Ultra for planning",
-  },
-  value: {
-    name: "Value",
-    description: "Free-tier DeepSeek V4 Flash, paid endpoint only as fallback",
+  phd: {
+    name: "PhD",
+    description: "build на верхней ступени лестницы (ladder/build advanced)",
   },
   free: {
     name: "Free",
-    description: "Free-tier models only (Nemotron) — never falls back to a paid model",
+    description: "build на нижней бесплатной ступени лестницы (ladder/free)",
   },
-  mimo: {
-    name: "Mimo",
-    description: "A/B test: Xiaomi MiMo V2.5 as the main coding model",
+  "ladder-research": {
+    name: "Ladder Research",
+    description: "Ресёрч-лестница Hermes (Go-first)",
   },
   "russian-recruiter": {
     name: "Russian Recruiter",
     description: "GigaChat Pro/Ultra/Max — for interviews, transcripts and reports in Russian",
-  },
-  "lavish-luna": {
-    name: "Lavish Luna",
-    description: "OpenCode Zen models (GPT-5.6 Luna, Kimi K3, GLM, Qwen)",
   },
 };
 
@@ -109,9 +101,9 @@ export function listOpencodeProfiles(): OpencodeProfile[] {
 /**
  * Reads the currently active profile id from ~/.config/opencode/.current-profile.
  * Verifies the file it names actually still exists (profiles get renamed/archived
- * by hand) — falls back to DEFAULT_OPENCODE_PROFILE, and if even that's gone,
- * to whatever profile genuinely exists on disk, rather than pointing callers at
- * a dead profile id.
+ * by hand) — falls back to DEFAULT_OPENCODE_PROFILE (master), and if even
+ * that's gone, to whatever profile genuinely exists on disk, rather than
+ * pointing callers at a dead profile id.
  */
 export function getCurrentOpencodeProfile(): string {
   let candidate = DEFAULT_OPENCODE_PROFILE;
@@ -123,6 +115,14 @@ export function getCurrentOpencodeProfile(): string {
   }
 
   if (fs.existsSync(path.join(PROFILES_DIR, `${candidate}.json`))) return candidate;
+
+  // .current-profile points at a profile that no longer exists (e.g. an
+  // archived one) — fall back to the default (master), NOT to whatever
+  // profile happens to sort first: the default is the owner's chosen
+  // starting point, not an accident of alphabetical order.
+  if (fs.existsSync(path.join(PROFILES_DIR, `${DEFAULT_OPENCODE_PROFILE}.json`))) {
+    return DEFAULT_OPENCODE_PROFILE;
+  }
 
   const anyExisting = listOpencodeProfiles()[0]?.id;
   return anyExisting ?? candidate;

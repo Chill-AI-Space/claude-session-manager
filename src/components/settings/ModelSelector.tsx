@@ -146,7 +146,7 @@ export function getDefaultModelForAgent(agent: AgentType, claudeModel?: string):
     // and can't be imported from this client component. Keep these two
     // in sync by hand; drift here breaks session creation outright
     // ("Unknown OpenCode profile: <stale name>").
-    return "deepseek-openrouter";
+    return "master";
   }
 
   return claudeModel || "claude-opus-5-5";

@@ -25,6 +25,7 @@ import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useComputeNode } from "@/hooks/useComputeNode";
 import { AgentToggleButton, type AgentType } from "@/components/AgentToggleButton";
+import { FALLBACK_AGENT, isAgentType } from "@/lib/agents";
 
 
 const CTX_MAX = 200_000;
@@ -244,7 +245,8 @@ export default function SessionDetailPage({
 
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
-  const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("claude");
+  const [newSessionAgent, setNewSessionAgent] = useState<AgentType>(FALLBACK_AGENT);
+  const newSessionAgentSynced = useRef(false);
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
   const [includeSummary, setIncludeSummary] = useState(false);
   const [startingNewSession, setStartingNewSession] = useState(false);
@@ -261,6 +263,16 @@ export default function SessionDetailPage({
   const opencodeProfiles = useOpencodeProfiles();
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
   const compute = useComputeNode();
+
+  // The "new session" composer starts on whatever default_agent says, same as
+  // the empty-state composer. Syncs once, so a manual pick survives.
+  useEffect(() => {
+    if (newSessionAgentSynced.current) return;
+    const def = settings?.default_agent;
+    if (!isAgentType(def)) return;
+    newSessionAgentSynced.current = true;
+    setNewSessionAgent(def);
+  }, [settings?.default_agent]);
 
   useEffect(() => {
     setNewSessionModel(getDefaultModelForAgent(newSessionAgent, settings?.claude_model));
