@@ -249,13 +249,14 @@ Redirects are logged as `session_project_resolved` and reported in the first SSE
 
 Two sessions started on the same repo path would share one working tree — one's checkout breaks the other, foreign uncommitted changes land in commits. So a new session can get its **own git worktree**:
 
-- `POST /api/sessions/start` accepts `"worktree": true|false`. Without it: the `sessions_worktree_default` setting decides (Settings → Session Worktrees, default **off**) — the same rule for browser starts and for sub-sessions (curl/API).
+- `POST /api/sessions/start` accepts `"worktree": true|false`. Without it the two callers differ: **sub-sessions (curl/API — no `Sec-Fetch-*` headers) get a worktree by default**, because they run unattended and in parallel and a shared working tree is how they switch branches under each other and lose uncommitted work; **browser starts follow the `sessions_worktree_default` setting** (Settings → Session Worktrees, default **off**) — an interactive session belongs in the project folder `~/Code/<repo>`, not in a throwaway worktree.
 - If `path` is inside a git repo (root or subfolder) and isn't already a linked worktree, the Session Manager runs `git worktree add -b session/<slug>-<YYYYMMDD-HHMMSS> ../.worktrees/<repo>/<branch> HEAD` and starts the agent there (same subfolder). Works for every agent (claude, codex, opencode, forge). The source checkout is never touched (no checkout/stash/reset/clean).
 - The session's `project_path` is the worktree (resume/reply/terminals work unchanged); `worktree_source_path` + `worktree_branch` columns keep the origin. The SSE stream starts with a `status` event `Worktree: <path> (branch <name>)`.
 - Not a git repo / creation failed → no error: logged (`session_worktree_skipped`) and the session starts in the original path, with the reason in a `status` event.
 - Remote nodes: the resolved `worktree` flag is forwarded; the VM applies the same logic.
 - **Cleanup is manual and conservative**: Settings → Session Worktrees → *Clean up* (or `GET /api/worktrees` to list, `POST /api/worktrees` to clean). A worktree is removed (with its `session/*` branch) only if it has no modified/untracked files, its branch has no commits missing from every remote and every other local branch, and no session/process is running in it. Otherwise it's kept and the reason is shown. No TTL-based deletion.
 - **Known limitations:** `node_modules`, `.env` and other ignored files are not copied into the worktree; ports are shared between parallel sessions.
+- The resolve order is load-bearing: `resolveSessionStart()` (`src/lib/session-start.ts`) runs `resolveProjectPath()` **before** creating the worktree. `resolveProjectPath()` maps any `…/.worktrees/<repo>/…` path back to `~/Code/<repo>`, so running it after creation would fold the fresh worktree straight back into the shared checkout. Pinned by `src/lib/__tests__/session-start.test.ts`.
 
 ## Architecture
 
@@ -294,7 +295,7 @@ Available at **Settings** (gear icon in sidebar):
 | **Auto-kill terminal** | off | Kill terminal session before sending a web reply |
 | **Auto-retry on crash** | on | Auto-send "continue" after 30s on crash |
 | **Auto-continue on stall** | off | Auto-send "continue" when idle 5+ min |
-| **Session worktrees** | off | Start new sessions in their own git worktree (browser and API alike; `"worktree": true|false` in the start body wins) |
+| **Session worktrees** | off (browser) / on (API) | Sub-sessions (curl/API) get their own git worktree by default; browser starts follow the toggle. Explicit `"worktree": true|false` in the start body wins |
 
 ## Project structure
 
