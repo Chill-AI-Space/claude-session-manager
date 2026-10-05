@@ -45,6 +45,7 @@ Running log of features/decisions for this project, with status. Update in place
 ## Default model → Opus 5.5
 
 - **[реализовано] Модель по умолчанию — Claude Opus 5.5** (`claude-opus-5-5`) для веб-запуска сессий. Меняется `SETTING_DEFAULTS.claude_model` (`src/lib/db.ts`), fallback в `buildCliArgs` (`src/lib/orchestrator.ts`), пресеты в `ModelSelector.tsx`. Документация: `docs/default-model-and-5-5-migration.md`.
+- **[реализовано] Список моделей Codex не хардкодится — берётся из `~/.codex/models_cache.json`** (`src/lib/codex-models.ts` → `GET /api/codex/models` → `useAgentModels()`). Хардкод содержал `gpt-5.4`/`gpt-4o`, которых у аккаунта уже нет, и не содержал текущих GPT-6.x. Фильтрует `visibility: "list"` (прячет `gpt-reserve`, `codex-auto-review`), сортирует по `priority`, дефолт — `models[0]`. Статический fallback на случай отсутствия кэша. Дефолт и пресеты теперь резолвятся на рендере (`effectiveModel = picked || default`), а не в effect — раньше codex-дефолт был бы затёрт, когда `/api/codex/models` ещё не ответил. Тесты: `src/lib/__tests__/codex-models.test.ts`.
 
 ## Надёжность запуска сессий
 

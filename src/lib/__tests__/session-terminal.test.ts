@@ -13,6 +13,15 @@ vi.mock("../db", () => ({
   getSetting: (k: string) => settings[k] ?? "",
 }));
 
+// The OpenCode profile module reads/writes ~/.config/opencode — mock it so
+// these tests never touch the developer's live profile config.
+const applyOpencodeProfile = vi.fn();
+const getCurrentOpencodeProfile = vi.fn(() => "master");
+vi.mock("../opencode-profiles", () => ({
+  applyOpencodeProfile: (profileId: string) => applyOpencodeProfile(profileId),
+  getCurrentOpencodeProfile: () => getCurrentOpencodeProfile(),
+}));
+
 function extractPromptFile(cmd: string, varName = "PROMPT"): string {
   const match = cmd.match(new RegExp(`${varName}_FILE='([^']+)'`));
   if (!match) throw new Error(`${varName}_FILE not found in command: ${cmd}`);
@@ -95,5 +104,30 @@ describe("OpenCode permission auto-approval (--auto)", () => {
     expect(claudeCmd).toContain("--dangerously-skip-permissions");
     expect(claudeCmd).not.toContain("--auto");
     fs.unlinkSync(extractPromptFile(claudeCmd));
+  });
+});
+
+describe("OpenCode profile selection", () => {
+  it("applies the explicit profile id when one is passed", () => {
+    applyOpencodeProfile.mockClear();
+    const cmd = buildOpencodeStartShellCommand("/tmp/proj", "do the thing", "phd");
+    expect(applyOpencodeProfile).toHaveBeenCalledWith("phd");
+    fs.unlinkSync(extractPromptFile(cmd));
+  });
+
+  it("applies the last selected profile (getCurrentOpencodeProfile) when no id is passed", () => {
+    applyOpencodeProfile.mockClear();
+    getCurrentOpencodeProfile.mockReturnValue("phd");
+    const cmd = buildOpencodeStartShellCommand("/tmp/proj", "do the thing");
+    expect(applyOpencodeProfile).toHaveBeenCalledWith("phd");
+    fs.unlinkSync(extractPromptFile(cmd));
+  });
+
+  it("falls back to master when no id is passed and no profile was ever selected", () => {
+    applyOpencodeProfile.mockClear();
+    getCurrentOpencodeProfile.mockReturnValue("master");
+    const cmd = buildOpencodeStartShellCommand("/tmp/proj", "do the thing");
+    expect(applyOpencodeProfile).toHaveBeenCalledWith("master");
+    fs.unlinkSync(extractPromptFile(cmd));
   });
 });

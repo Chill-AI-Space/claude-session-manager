@@ -1,8 +1,9 @@
 "use client";
 
 import { Hammer } from "lucide-react";
+import type { AgentType } from "@/lib/agents";
 
-export type AgentType = "claude" | "forge" | "codex" | "opencode";
+export type { AgentType } from "@/lib/agents";
 
 export const AGENT_CYCLE: Record<AgentType, AgentType> = {
   claude: "opencode",

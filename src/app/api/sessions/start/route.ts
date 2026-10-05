@@ -10,13 +10,9 @@ import { prepareSessionWorktree, resolveWorktreeDecision } from "@/lib/session-w
 import { resolveProjectPath } from "@/lib/project-path";
 import { lookupOriginUrl } from "@/lib/origin-lookup";
 import { withWorktreeStatus } from "@/lib/session-worktree-registry";
+import { FALLBACK_AGENT, isAgentType } from "@/lib/agents";
 
 export const dynamic = "force-dynamic";
-
-type Agent = "claude" | "codex" | "forge" | "opencode";
-function isAgent(v: unknown): v is Agent {
-  return v === "claude" || v === "codex" || v === "forge" || v === "opencode";
-}
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -39,14 +35,10 @@ export async function POST(request: NextRequest) {
   }
 
   const defaultAgentSetting = getSetting("default_agent");
-  const defaultAgent = isAgent(defaultAgentSetting) ? defaultAgentSetting : "opencode";
+  const defaultAgent = isAgentType(defaultAgentSetting) ? defaultAgentSetting : FALLBACK_AGENT;
 
   let normalizedAgent =
-    agent === undefined
-      ? defaultAgent
-      : agent === "claude" || agent === "codex" || agent === "forge" || agent === "opencode"
-        ? agent
-        : null;
+    agent === undefined ? defaultAgent : isAgentType(agent) ? agent : null;
 
   if (normalizedAgent === null) {
     return Response.json({ error: `invalid agent: ${String(agent)}` }, { status: 400 });
@@ -59,7 +51,7 @@ export async function POST(request: NextRequest) {
   let model = requestedModel;
   const override = getSetting("subsession_agent_override");
   const fromBrowser = request.headers.has("sec-fetch-site");
-  if (!fromBrowser && isAgent(override) && override !== normalizedAgent) {
+  if (!fromBrowser && isAgentType(override) && override !== normalizedAgent) {
     logAction("service", "subsession_agent_override", JSON.stringify({ requested: normalizedAgent, forced: override, path: projectPath }));
     normalizedAgent = override;
     model = undefined; // model ids are agent-specific (e.g. a codex model on claude would fail)
@@ -163,11 +155,12 @@ export async function POST(request: NextRequest) {
     const { openInTerminal } = await import("@/lib/terminal-launcher");
     const { listOpencodeSessions } = await import("@/lib/opencode-db");
     const { getDb } = await import("@/lib/db");
-    // `model` here is actually an OpenCode profile id (e.g. "quality", "value")
-    // — see OpencodeProfileSelector / src/lib/opencode-profiles.ts. Building
-    // the shell command applies that profile to ~/.config/opencode/opencode.json,
-    // which throws on an unknown profile id, so it needs its own try/catch
-    // rather than crashing the whole request.
+    // `model` here is actually an OpenCode profile id (e.g. "master",
+    // "phd", "free") — see OpencodeProfileSelector /
+    // src/lib/opencode-profiles.ts. Building the shell command applies that
+    // profile to ~/.config/opencode/opencode.json (or the last selected one
+    // when no id was passed), which throws on an unknown profile id, so it
+    // needs its own try/catch rather than crashing the whole request.
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();

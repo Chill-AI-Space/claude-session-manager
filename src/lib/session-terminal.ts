@@ -3,7 +3,7 @@ import { getClaudePath } from "@/lib/claude-bin";
 import { getForgePath } from "@/lib/forge-bin";
 import { getCodexPath } from "@/lib/codex-bin";
 import { getOpencodePath } from "@/lib/opencode-bin";
-import { applyOpencodeProfile } from "@/lib/opencode-profiles";
+import { applyOpencodeProfile, getCurrentOpencodeProfile } from "@/lib/opencode-profiles";
 import { buildPromptLoader, shellQuote, writeTempPromptFile } from "@/lib/prompt-file";
 import { SessionRow } from "@/lib/types";
 
@@ -34,10 +34,16 @@ function opencodeAutoFlag(): string {
  * follow-ups, matching how Claude/Codex sessions behave here.
  *
  * OpenCode has no single "model" flag equivalent to Claude's — this setup
- * switches between named profiles (Quality, Value, Free, ...), each of which
- * sets models for several OpenCode roles at once (see src/lib/opencode-profiles.ts).
- * `profileId` is applied to ~/.config/opencode/opencode.json right before launch,
- * the same way the `oc <profile>` shell function does, so the TUI picks it up.
+ * switches between named profiles (Master, PhD, Free, ...),
+ * each of which sets models for several OpenCode roles at once (see
+ * src/lib/opencode-profiles.ts). `profileId` is applied to
+ * ~/.config/opencode/opencode.json right before launch, the same way the
+ * `oc <profile>` shell function does, so the TUI picks it up. Without an
+ * explicit `profileId` the last selected profile is applied
+ * (getCurrentOpencodeProfile — remembered in .current-profile on every
+ * applyOpencodeProfile, falling back to DEFAULT_OPENCODE_PROFILE = master),
+ * so a session started with no dropdown choice still lands on the profile
+ * the user picked last (or master on a fresh machine).
  *
  * The prompt is loaded from a temp file — long/multi-line prompts must never be
  * embedded in the command string, because iTerm2's AppleScript `write text`
@@ -45,7 +51,7 @@ function opencodeAutoFlag(): string {
  */
 export function buildOpencodeStartShellCommand(projectPath: string, message: string, profileId?: string): string {
   const bin = getOpencodePath();
-  if (profileId) applyOpencodeProfile(profileId);
+  applyOpencodeProfile(profileId ?? getCurrentOpencodeProfile());
   const promptPath = writeTempPromptFile(message, "csm-opencode-prompt");
   return `cd ${shellQuote(projectPath)} && ${buildPromptLoader(promptPath)} && ${shellQuote(bin)}${opencodeAutoFlag()} --prompt "$PROMPT"`;
 }

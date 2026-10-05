@@ -58,6 +58,23 @@ claude --model "claude-opus-5-5" -p "ok" --max-turns 1
 
 Неизвестная модель даёт `[claude-code:unrecognized_model]` — CLI упадёт с ошибкой, сессия не стартует.
 
+## Модели Codex — не хардкодятся
+
+У Codex свой набор моделей, и он меняется быстрее, чем список в коде. Актуальные слаги лежат в кэше самого CLI:
+
+```bash
+python3 -c "
+import json
+for m in json.load(open('$HOME/.codex/models_cache.json'))['models']:
+    if m.get('visibility') == 'list':
+        print(m['slug'], '|', m['display_name'], '|', m['description'])
+"
+```
+
+Session Manager читает этот файл (`src/lib/codex-models.ts` → `GET /api/codex/models` → `useAgentModels()`), поэтому новые модели появляются в селекте сами. Хардкод `gpt-5.4`/`gpt-4o` удалён — они больше не входят в список аккаунта и падают с unknown-model.
+
+Если нужно поправить руками: каталог берётся из `$CODEX_HOME`, иначе `~/.codex`. Файл перезаписывается самим Codex — ручные правки в нём не переживут обновление кэша.
+
 ## Аналитика/стоимость
 
 Стоимость в аналитике считается по `MODEL_PRICES` в `src/app/api/analytics/route.ts` и `src/app/claude-sessions/analytics/page.tsx`. Если модели нет в мапе — берётся `DEFAULT_PRICE`. Для точных цифр по Opus 5.5 можно добавить запись, но не обязательно.

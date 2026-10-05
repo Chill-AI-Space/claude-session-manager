@@ -12,8 +12,8 @@ interface OpencodeProfileSelectorProps {
 /**
  * Model-profile picker for OpenCode sessions, shown in place of the Claude
  * model dropdown. OpenCode has no notion of a single "model" the way Claude
- * does — this setup switches between named profiles (Quality, Value, Free,
- * Mimo, Russian Recruiter, Lavish Luna, ...) read from
+ * does — this setup switches between named profiles (Master, PhD, Free,
+ * Ladder Research, Russian Recruiter, ...) read from
  * ~/.config/opencode/profiles, each of which sets models for several
  * OpenCode roles (build/plan/explore/general/review) at once. See
  * src/lib/opencode-profiles.ts for how a chosen profile is applied.

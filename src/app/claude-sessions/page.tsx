@@ -7,13 +7,15 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { FolderOpen, Send, Loader2, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud, Mic, Square } from "lucide-react";
 import { AgentToggleButton, type AgentType } from "@/components/AgentToggleButton";
-import { ModelSelector, getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
+import { FALLBACK_AGENT, isAgentType } from "@/lib/agents";
+import { ModelSelector } from "@/components/settings/ModelSelector";
 import { OpencodeProfileSelector } from "@/components/settings/OpencodeProfileSelector";
 import { useSettings } from "@/lib/settings";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { useSessionStart } from "@/hooks/useSessionStart";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useComputeNode } from "@/hooks/useComputeNode";
+import { useAgentModels } from "@/hooks/useCodexModels";
 
 // The "+ New" button in the sidebar links here with a fresh `?new=<ts>` query
 // each time so this remounts (and resets its draft state) even when you're
@@ -49,14 +51,15 @@ function SessionsEmptyState() {
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
-  const [selectedAgent, setSelectedAgent] = useState<AgentType>("claude");
+  const [selectedAgent, setSelectedAgent] = useState<AgentType>(FALLBACK_AGENT);
   const agentSyncedFromSettings = useRef(false);
   const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
   const compute = useComputeNode();
   const autodetect = useAutodetect();
   const session = useSessionStart();
   const { settings } = useSettings();
-  const effectiveSelectedModel = selectedModel || getDefaultModelForAgent(selectedAgent, settings.claude_model);
+  const { presets: modelPresets, defaultModel: agentDefaultModel } = useAgentModels(selectedAgent, settings.claude_model);
+  const effectiveSelectedModel = selectedModel || agentDefaultModel;
 
   const insertAtCursor = (text: string) => {
     const textarea = textareaRef.current;
@@ -82,15 +85,15 @@ function SessionsEmptyState() {
   }, []);
 
   // Sync the agent picker to the configured default once settings load —
-  // this composer used to hardcode "codex" regardless of the default_agent
-  // setting. Only applies once, so it never overrides a manual pick.
+  // this composer used to hardcode a literal agent regardless of what
+  // default_agent said, so picking "opencode" in Settings still started
+  // Claude. Only applies once, so it never overrides a manual pick.
   useEffect(() => {
     if (agentSyncedFromSettings.current) return;
     const def = settings.default_agent;
-    if (def === "claude" || def === "codex" || def === "forge") {
-      agentSyncedFromSettings.current = true;
-      setSelectedAgent(def);
-    }
+    if (!isAgentType(def)) return;
+    agentSyncedFromSettings.current = true;
+    setSelectedAgent(def);
   }, [settings.default_agent]);
 
   const startRecording = async () => {
@@ -276,7 +279,7 @@ function SessionsEmptyState() {
                   currentModel={effectiveSelectedModel}
                   onUpdate={(_, model) => setSelectedModel(model)}
                   label="Model"
-                  presets={getModelPresetsForAgent(selectedAgent)}
+                  presets={modelPresets}
                 />
               )}
             </div>

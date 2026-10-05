@@ -11,7 +11,7 @@ export interface OpencodeProfile {
 /** Fetches the OpenCode model profiles available on this machine (~/.config/opencode/profiles). */
 export function useOpencodeProfiles() {
   const [profiles, setProfiles] = useState<OpencodeProfile[]>([]);
-  const [currentProfile, setCurrentProfile] = useState("value");
+  const [currentProfile, setCurrentProfile] = useState("master");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
