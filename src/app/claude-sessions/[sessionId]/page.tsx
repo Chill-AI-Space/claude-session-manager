@@ -17,9 +17,9 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import Link from "next/link";
 import { FolderBrowserDialog } from "@/components/FolderBrowserDialog";
-import { getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { useOpencodeProfiles } from "@/hooks/useOpencodeProfiles";
+import { useAgentModels } from "@/hooks/useCodexModels";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
@@ -261,6 +261,11 @@ export default function SessionDetailPage({
   const newDragCounterRef = useRef(0);
   const newAutodetect = useAutodetect();
   const opencodeProfiles = useOpencodeProfiles();
+  const newSessionModels = useAgentModels(newSessionAgent, settings?.claude_model);
+  const effectiveNewSessionModel =
+    newSessionAgent === "opencode"
+      ? newSessionModel || opencodeProfiles.currentProfile
+      : newSessionModel || newSessionModels.defaultModel;
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
   const compute = useComputeNode();
 
@@ -274,9 +279,10 @@ export default function SessionDetailPage({
     setNewSessionAgent(def);
   }, [settings?.default_agent]);
 
-  useEffect(() => {
-    setNewSessionModel(getDefaultModelForAgent(newSessionAgent, settings?.claude_model));
-  }, [newSessionAgent, settings?.claude_model]);
+  // The model is left unset (newSessionModel === "") until the user picks one,
+  // so the agent's default resolves at render time via effectiveNewSessionModel
+  // — the codex default only becomes known once /api/codex/models responds, and
+  // re-running an effect on it would clobber a manual pick.
 
   // Issue submission
   const [issueCategory, setIssueCategory] = useState<string | null>(null);
@@ -1295,7 +1301,7 @@ export default function SessionDetailPage({
           message: fullMessage,
           previous_session_id: sessionId,
           agent: newSessionAgent,
-          ...(newSessionModel && { model: newSessionModel }),
+          ...(effectiveNewSessionModel && { model: effectiveNewSessionModel }),
         }),
       });
 
@@ -2570,12 +2576,11 @@ export default function SessionDetailPage({
                     agent={newSessionAgent}
                     onCycle={(next) => {
                       setNewSessionAgent(next);
-                      setNewSessionModel(getDefaultModelForAgent(next, settings?.claude_model));
                     }}
                     size="md"
                   />
                   <select
-                    value={newSessionModel}
+                    value={effectiveNewSessionModel}
                     onChange={(e) => setNewSessionModel(e.target.value)}
                     className="text-[11px] px-2 py-1 rounded-md border border-border bg-card text-muted-foreground hover:border-violet-500/30 cursor-pointer max-w-[180px]"
                     title={newSessionAgent === "opencode" ? "Model profile for new session" : "Model for new session"}
@@ -2584,7 +2589,7 @@ export default function SessionDetailPage({
                       ? opencodeProfiles.profiles.map((profile) => (
                           <option key={profile.id} value={profile.id}>{profile.name}</option>
                         ))
-                      : getModelPresetsForAgent(newSessionAgent).map((preset) => (
+                      : newSessionModels.presets.map((preset) => (
                           <option key={preset.id} value={preset.model}>{preset.name}</option>
                         ))}
                   </select>

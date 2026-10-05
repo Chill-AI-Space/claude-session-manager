@@ -55,28 +55,6 @@ export const MODEL_PRESETS: ModelPreset[] = [
     category: "fast",
     description: "Fastest Claude model",
   },
-  // OpenAI / Codex models
-  {
-    id: "gpt-5.5",
-    name: "GPT-5.5",
-    model: "gpt-5.5",
-    category: "quality",
-    description: "OpenAI GPT-5.5 (Codex default)",
-  },
-  {
-    id: "gpt-5.4",
-    name: "GPT-5.4",
-    model: "gpt-5.4",
-    category: "quality",
-    description: "OpenAI GPT-5.4",
-  },
-  {
-    id: "gpt-4o",
-    name: "GPT-4o",
-    model: "gpt-4o",
-    category: "balanced",
-    description: "OpenAI GPT-4o",
-  },
   {
     id: "gemini-2.5-flash",
     name: "Gemini 2.5 Flash",
@@ -115,7 +93,11 @@ export function getModelPresetsForAgent(agent: AgentType): ModelPreset[] {
   }
 
   if (agent === "codex") {
-    return MODEL_PRESETS.filter((preset) => preset.model.startsWith("gpt"));
+    // Deliberately empty: Codex model ids come from ~/.codex/models_cache.json
+    // (Sol / Astra / Luna / Terra), not from this hardcoded table, so use
+    // `useModelPresetsForAgent()` / `useCodexModels()` instead — they read the
+    // live cache over /api/codex/models. See src/lib/codex-models.ts.
+    return [];
   }
 
   if (agent === "opencode") {
@@ -137,7 +119,12 @@ export function getDefaultModelForAgent(agent: AgentType, claudeModel?: string):
   }
 
   if (agent === "codex") {
-    return "gpt-5.5";
+    // Matches DEFAULT_CODEX_MODEL in src/lib/codex-models.ts — duplicated as
+    // a literal for the same reason as the opencode profile below (that module
+    // reads the filesystem, so it can't be imported from a client component).
+    // This is only the pre-fetch placeholder: once /api/codex/models responds,
+    // `useCodexModels().defaultModel` replaces it with the live top choice.
+    return "gpt-6.1-sol";
   }
 
   if (agent === "opencode") {

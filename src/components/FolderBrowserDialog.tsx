@@ -13,7 +13,8 @@ import { QuasarIcon } from "@/components/QuasarIcon";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AgentToggleButton, type AgentType } from "@/components/AgentToggleButton";
-import { ModelSelector, getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
+import { ModelSelector } from "@/components/settings/ModelSelector";
+import { useAgentModels } from "@/hooks/useCodexModels";
 import { useSettings } from "@/lib/settings";
 
 interface FolderEntry {
@@ -61,6 +62,11 @@ export function FolderBrowserDialog({
   const { settings } = useSettings();
   const [webAgent, setWebAgent] = useState<AgentType>("codex");
   const [webModel, setWebModel] = useState<string | undefined>(undefined);
+  // webModel is deliberately undefined until the user picks one — the agent's
+  // own default is resolved at render time instead, since the codex default only
+  // becomes known once /api/codex/models responds.
+  const webModels = useAgentModels(webAgent, settings.claude_model);
+  const effectiveWebModel = webModel || webModels.defaultModel;
 
   useEffect(() => {
     if (open) {
@@ -74,7 +80,7 @@ export function FolderBrowserDialog({
       setCreatingFolder(false);
       setNewFolderName("");
       setWebAgent("codex");
-      setWebModel(getDefaultModelForAgent("codex", settings.claude_model));
+      setWebModel(undefined);
       fetch("/api/browse")
         .then((res) => res.json())
         .then((data) => {
@@ -93,7 +99,7 @@ export function FolderBrowserDialog({
           setTimeout(() => inputRef.current?.focus(), 50);
         });
     }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open]);
 
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -187,7 +193,7 @@ export function FolderBrowserDialog({
   const handleWebStart = (path: string) => {
     setWebStartPath(path);
     setWebMessage("");
-    setWebModel(getDefaultModelForAgent(webAgent, settings.claude_model));
+    setWebModel(undefined);
     setTimeout(() => webInputRef.current?.focus(), 50);
   };
 
@@ -209,7 +215,7 @@ export function FolderBrowserDialog({
           path: webStartPath,
           message: webMessage.trim(),
           agent: webAgent,
-          model: webModel,
+          model: effectiveWebModel,
         }),
       });
 
@@ -442,16 +448,16 @@ export function FolderBrowserDialog({
                       agent={webAgent}
                       onCycle={(next) => {
                         setWebAgent(next);
-                        setWebModel(getDefaultModelForAgent(next, settings.claude_model));
+                        setWebModel(undefined);
                       }}
                     />
                   </div>
                   <ModelSelector
                     settingKey="claude_model"
-                    currentModel={webModel || ""}
+                    currentModel={effectiveWebModel}
                     onUpdate={(_, model) => setWebModel(model)}
                     label="Model"
-                    presets={getModelPresetsForAgent(webAgent)}
+                    presets={webModels.presets}
                   />
                   <div className="flex gap-2 items-end">
                     <textarea

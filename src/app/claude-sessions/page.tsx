@@ -8,13 +8,14 @@ import Link from "next/link";
 import { FolderOpen, Send, Loader2, FolderPlus, ShieldOff, Paperclip, Monitor, Cloud, Mic, Square } from "lucide-react";
 import { AgentToggleButton, type AgentType } from "@/components/AgentToggleButton";
 import { FALLBACK_AGENT, isAgentType } from "@/lib/agents";
-import { ModelSelector, getDefaultModelForAgent, getModelPresetsForAgent } from "@/components/settings/ModelSelector";
+import { ModelSelector } from "@/components/settings/ModelSelector";
 import { OpencodeProfileSelector } from "@/components/settings/OpencodeProfileSelector";
 import { useSettings } from "@/lib/settings";
 import { useAutodetect } from "@/hooks/useAutodetect";
 import { useSessionStart } from "@/hooks/useSessionStart";
 import { useSettingToggle } from "@/hooks/useSettingToggle";
 import { useComputeNode } from "@/hooks/useComputeNode";
+import { useAgentModels } from "@/hooks/useCodexModels";
 
 // The "+ New" button in the sidebar links here with a fresh `?new=<ts>` query
 // each time so this remounts (and resets its draft state) even when you're
@@ -57,7 +58,8 @@ function SessionsEmptyState() {
   const autodetect = useAutodetect();
   const session = useSessionStart();
   const { settings } = useSettings();
-  const effectiveSelectedModel = selectedModel || getDefaultModelForAgent(selectedAgent, settings.claude_model);
+  const { presets: modelPresets, defaultModel: agentDefaultModel } = useAgentModels(selectedAgent, settings.claude_model);
+  const effectiveSelectedModel = selectedModel || agentDefaultModel;
 
   const insertAtCursor = (text: string) => {
     const textarea = textareaRef.current;
@@ -277,7 +279,7 @@ function SessionsEmptyState() {
                   currentModel={effectiveSelectedModel}
                   onUpdate={(_, model) => setSelectedModel(model)}
                   label="Model"
-                  presets={getModelPresetsForAgent(selectedAgent)}
+                  presets={modelPresets}
                 />
               )}
             </div>
