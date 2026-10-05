@@ -349,7 +349,7 @@ Task types: `start`, `resume`, `crash_retry`, `stall_continue`, `incomplete_exit
 | `orchestrator_stall_continue_delay_ms` | `10000` | Delay before auto-continue on stall |
 | `orchestrator_max_retries` | `3` | Max crash retries per session before marking as failed |
 | `subsession_agent_override` | `""` | Force the agent for sessions spawned via curl/API (not from the browser UI): `claude`/`opencode`/`codex`/`forge`, empty = off. Steers spawning away from an agent whose quota is running out. |
-| `sessions_worktree_default` | `"false"` | Start new sessions in their own git worktree. Applies to browser starts and sub-sessions (curl/API) alike; explicit `worktree` in the start body wins. See "Session worktrees" below. |
+| `sessions_worktree_default` | `"false"` | Start **browser** sessions in their own git worktree. Sub-sessions (curl/API) get a worktree regardless of this setting; explicit `worktree` in the start body wins for both. See "Session worktrees" below. |
 
 ### How scanner integrates (Session Babysitter)
 
@@ -416,7 +416,7 @@ Redirects are logged as `session_project_resolved` and reported in the first SSE
 
 ## Session worktrees (`src/lib/session-worktree.ts`)
 
-`POST /api/sessions/start` can run the new session in its own `git worktree` so parallel sessions on one repo don't share a working tree — opt-in, off by default. Decision (`resolveWorktreeDecision`): explicit `worktree` in body → wins; otherwise `sessions_worktree_default`, same rule for browser starts and for curl/sub-sessions.
+`POST /api/sessions/start` can run the new session in its own `git worktree` so parallel sessions on one repo don't share a working tree. Decision (`resolveWorktreeDecision`): explicit `worktree` in body → wins; otherwise sub-sessions (curl/API — no `Sec-Fetch-*` headers) default to **on**, browser starts follow `sessions_worktree_default` (default off). The split is deliberate: an interactive browser session belongs in the project folder `~/Code/<repo>`, while unattended parallel sub-sessions are exactly the ones that trample a shared working tree (incident 2026-10-04, ai-agent-runner).
 
 - Branch `session/<slug>-<YYYYMMDD-HHMMSS>` from the source repo's HEAD, dir `<repo-root>/../.worktrees/<repo-name>/<branch-with-dashes>`; agent cwd = same subfolder inside it. Only `git worktree add` runs against the source — never checkout/stash/reset/clean there.
 - Session row: `project_path` = worktree path (resume/reply untouched); `worktree_source_path`, `worktree_branch` recorded when the `session_id` SSE event passes (`withWorktreeStatus` in `session-worktree-registry.ts`).
@@ -424,7 +424,8 @@ Redirects are logged as `session_project_resolved` and reported in the first SSE
 - Remote nodes get the resolved `worktree` flag forwarded.
 - Cleanup: `GET /api/worktrees` (dry-run list with reasons), `POST /api/worktrees` (remove), button in Settings → Session Worktrees. Removes only clean worktrees whose branch has no commits outside other refs and with no active session / process cwd inside. No automatic TTL deletion.
 - Known limitation: `node_modules` / `.env` are not copied; ports are shared.
-- Off by default: a start runs directly in the resolved project folder, so parallel sessions share one checkout. `"worktree": true` is the supported way to isolate a session — handing it a worktree path by hand does not isolate anything, it just redirects back to the project.
+- Off by default for browser starts: they run directly in the resolved project folder. Sub-sessions (curl/API) default to a worktree. `"worktree": true|false` is the supported way to override either — handing the API a worktree path by hand does not isolate anything, it just redirects back to the project.
+- Resolve order is load-bearing: `resolveSessionStart()` (`src/lib/session-start.ts`) calls `resolveProjectPath()` **before** `prepareSessionWorktree()`. `resolveProjectPath()` maps any `…/.worktrees/<repo>/…` path back to `~/Code/<repo>`, so calling it after creation would fold the fresh worktree back into the shared checkout. Pinned by `src/lib/__tests__/session-start.test.ts`.
 
 ## Sessions Choreography
 

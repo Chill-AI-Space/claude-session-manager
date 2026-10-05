@@ -6,8 +6,8 @@ import { getOrchestrator } from "@/lib/orchestrator";
 import { getSetting, logAction } from "@/lib/db";
 import { getComputeNode, resolveNode, proxySSE } from "@/lib/remote-compute";
 import { SSE_HEADERS } from "@/lib/claude-runner";
-import { prepareSessionWorktree, resolveWorktreeDecision } from "@/lib/session-worktree";
-import { resolveProjectPath } from "@/lib/project-path";
+import { resolveWorktreeDecision } from "@/lib/session-worktree";
+import { resolveSessionStart } from "@/lib/session-start";
 import { lookupOriginUrl } from "@/lib/origin-lookup";
 import { withWorktreeStatus } from "@/lib/session-worktree-registry";
 import { FALLBACK_AGENT, isAgentType } from "@/lib/agents";
@@ -57,10 +57,13 @@ export async function POST(request: NextRequest) {
     model = undefined; // model ids are agent-specific (e.g. a codex model on claude would fail)
   }
 
-  // Per-session git worktree: explicit body value wins, otherwise the
-  // sessions_worktree_default setting — same rule for browser and curl starts.
+  // Per-session git worktree: explicit body value wins; otherwise browser
+  // starts follow the sessions_worktree_default setting while sub-sessions
+  // (curl/API — no Sec-Fetch-* headers) default to a worktree, so parallel
+  // spawned sessions stop sharing one working tree.
   const useWorktree = resolveWorktreeDecision({
     explicit: worktree,
+    fromBrowser,
     settingDefault: getSetting("sessions_worktree_default"),
   });
 
@@ -100,16 +103,20 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Path must be within home directory" }, { status: 403 });
   }
 
-  // Project folder: a session/linked worktree path maps back to the project
-  // that owns it (or that project folder is created in ~/Code when missing) —
-  // see src/lib/project-path.ts. Ordinary paths are returned untouched.
-  const project = await resolveProjectPath(requestedPath, { findOriginUrl: lookupOriginUrl });
-  const startPath = project.path;
+  // Project folder first, then the worktree — the order matters, see
+  // src/lib/session-start.ts. A caller-supplied worktree/scratch path maps back
+  // to the project that owns it (or that project folder is created in ~/Code
+  // when missing); ordinary paths are returned untouched.
+  const start = await resolveSessionStart(requestedPath, message.trim(), {
+    useWorktree,
+    findOriginUrl: lookupOriginUrl,
+  });
+  const startPath = start.project.path;
   if (!startPath.startsWith(os.homedir())) {
     return Response.json({ error: "Path must be within home directory" }, { status: 403 });
   }
-  if (project.redirected) {
-    logAction("service", "session_project_resolved", JSON.stringify({ requested: requestedPath, resolved: startPath, created: project.created, note: project.note, agent: normalizedAgent }));
+  if (start.project.redirected) {
+    logAction("service", "session_project_resolved", JSON.stringify({ requested: requestedPath, resolved: startPath, created: start.project.created, note: start.project.note, agent: normalizedAgent }));
   }
 
   try {
@@ -121,24 +128,23 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Path does not exist" }, { status: 404 });
   }
 
-  // Everything below runs the agent in `resolvedProjectPath` — the worktree when one
-  // was created, so the session's project_path (and resume/reply/terminals) point there.
-  let resolvedProjectPath = startPath;
+  // Everything below runs the agent in `start.cwd` — the worktree when one was
+  // created, so the session's project_path (and resume/reply/terminals) point there.
+  let resolvedProjectPath = start.cwd;
   let worktreeStatus: string | null = null;
   let worktreeRecord: { sourcePath: string; branch: string } | undefined;
-  if (useWorktree) {
-    const wt = await prepareSessionWorktree(startPath, message.trim());
-    if (wt.kind === "worktree") {
-      resolvedProjectPath = wt.cwd;
-      worktreeRecord = { sourcePath: wt.sourcePath, branch: wt.branch };
-      worktreeStatus = `Worktree: ${wt.cwd} (branch ${wt.branch})`;
-      logAction("service", "session_worktree_created", JSON.stringify({ source: startPath, worktree: wt.dir, branch: wt.branch, agent: normalizedAgent }));
+  if (start.worktree) {
+    if (start.worktree.kind === "worktree") {
+      resolvedProjectPath = start.worktree.cwd;
+      worktreeRecord = { sourcePath: start.worktree.sourcePath, branch: start.worktree.branch };
+      worktreeStatus = `Worktree: ${start.worktree.cwd} (branch ${start.worktree.branch})`;
+      logAction("service", "session_worktree_created", JSON.stringify({ source: startPath, worktree: start.worktree.dir, branch: start.worktree.branch, agent: normalizedAgent }));
     } else {
-      worktreeStatus = `Worktree skipped (${wt.reason}) — running in ${startPath}`;
-      logAction("service", "session_worktree_skipped", JSON.stringify({ path: startPath, reason: wt.reason, agent: normalizedAgent }));
+      worktreeStatus = `Worktree skipped (${start.worktree.reason}) — running in ${startPath}`;
+      logAction("service", "session_worktree_skipped", JSON.stringify({ path: startPath, reason: start.worktree.reason, agent: normalizedAgent }));
     }
   }
-  const startupStatus = [project.note, worktreeStatus].filter(Boolean).join(" · ") || null;
+  const startupStatus = [start.project.note, worktreeStatus].filter(Boolean).join(" · ") || null;
   const respond = (stream: ReadableStream) =>
     new Response(
       startupStatus ? withWorktreeStatus(stream, startupStatus, worktreeRecord) : stream,

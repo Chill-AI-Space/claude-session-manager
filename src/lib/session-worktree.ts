@@ -33,19 +33,29 @@ async function git(cwd: string, args: string[]): Promise<string> {
 // ── Decision ────────────────────────────────────────────────────────────────
 
 /**
- * Explicit `worktree` in the request body always wins; otherwise the
- * `sessions_worktree_default` setting decides — for browser starts and for
- * sub-sessions (curl/API) alike. Default is off: sessions run in the project
- * folder itself (see `project-path.ts` for worktree → project redirection).
+ * Explicit `worktree` in the request body always wins. Otherwise the two
+ * callers differ:
+ *
+ * - Browser UI starts follow `sessions_worktree_default` (default off) — an
+ *   interactive session belongs in the project folder `~/Code/<repo>`, not in
+ *   a throwaway worktree (see `project-path.ts` for worktree → project
+ *   redirection).
+ * - Sub-sessions (curl/API — no `Sec-Fetch-*` headers) default to **on**. They
+ *   are spawned unattended and in parallel, and sharing one working tree is how
+ *   they end up switching branches under each other and losing uncommitted work
+ *   (incident 2026-10-04, ai-agent-runner). An explicit `worktree: false` still
+ *   opts out.
  */
 export function resolveWorktreeDecision(opts: {
   explicit: unknown;
+  fromBrowser: boolean;
   settingDefault: string | undefined;
 }): boolean {
   if (typeof opts.explicit === "boolean") return opts.explicit;
   if (opts.explicit === "true") return true;
   if (opts.explicit === "false") return false;
-  return opts.settingDefault === "true";
+  if (opts.fromBrowser) return opts.settingDefault === "true";
+  return true;
 }
 
 // ── Git detection ───────────────────────────────────────────────────────────
