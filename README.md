@@ -23,9 +23,8 @@ Works on **macOS, Linux, and Windows**.
 
 **Rule: deploy = `npm run deploy:live`. Never restart a live instance by hand** (`launchctl`, `systemctl`, `pkill`, `npm run build` over a running server) — every Claude session the server spawned would silently die.
 
-- **Merged to `main` → CI deploys automatically** (soft restart, live sessions are resumed). **Currently disabled** — the deploy job is gated on the repo variable `DEPLOY_ENABLED=true`, which is not set, so runs report `deploy: skipping` and merging changes nothing until you deploy. Setup + security model: [docs/deploy-live-ci-cd-setup.md](docs/deploy-live-ci-cd-setup.md).
-- **Until it's enabled, the full loop is: branch → PR → CI green → merge → `npm run deploy:live`.**
-- Manual / local instance: `npm run deploy:live` (`node scripts/deploy-live.js --dry-run` just lists live sessions).
+- **Merged to `main` does NOT deploy anything.** The `deploy` job in `.github/workflows/ci.yml` SSHes into a *remote* Linux server and restarts a systemd unit. This project has no such server, the `production` environment was never created, and none of the `DEPLOY_*` secrets exist — so every run reports `deploy: skipping`. The live instance is a launchd agent on the owner's Mac, not that server. (Design + security model, if you ever set it up: [docs/deploy-live-ci-cd-setup.md](docs/deploy-live-ci-cd-setup.md).)
+- **The full loop is: branch → PR → CI green → merge → `npm run deploy:live`.** The last step is not optional.
 - What it does: snapshots live sessions → build → restart → resumes the ones the restart killed ("server was redeployed, session restored, continue") → smoke test.
 - The smoke test can flake on "Session detail has messages" right after a restart, while the session index is still rebuilding — re-run `bash scripts/smoke-test.sh` before treating it as a real failure.
 - The sidebar **Update** button and `scripts/update.sh` use the same script.

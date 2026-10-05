@@ -1,7 +1,15 @@
 # Live deploy via CI/CD — setup and security model
 
-Merging to `main` deploys to the live server automatically, with the soft restart from `scripts/deploy-live.js`
-(snapshot live sessions → build → restart → resume the ones that died → smoke test). Nobody needs to remember the command.
+> **Status: NOT set up for this project, and not used.** None of the steps below have been done: there is no remote
+> server, the `production` environment does not exist, and none of the `DEPLOY_*` secrets are set — so the `deploy` job
+> always reports `deploy: skipping`. This document is the design + the one-time setup, kept for whoever wants it later.
+> It is not a checklist pending completion.
+>
+> The live instance is a **launchd agent on the owner's Mac**, which this workflow cannot deploy to (it SSHes to a remote
+> Linux box and calls `systemctl restart`). Until the whole setup below is done, deploys are manual: `npm run deploy:live`.
+
+Merging to `main` would deploy to a remote server automatically, with the soft restart from `scripts/deploy-live.js`
+(snapshot live sessions → build → restart → resume the ones that died → smoke test). Nobody would need to remember the command.
 
 ```
 PR opened  ──► CI: tsc + tests + build (fork PRs too; no secrets, read-only token)
