@@ -295,6 +295,16 @@ Available at **Settings** (gear icon in sidebar):
 | **Auto-retry on crash** | on | Auto-send "continue" after 30s on crash |
 | **Auto-continue on stall** | off | Auto-send "continue" when idle 5+ min |
 | **Session worktrees** | off | Start new sessions in their own git worktree (browser and API alike; `"worktree": true|false` in the start body wins) |
+| **Model for new sessions** | `claude-opus-5-5` | Model for Claude sessions. The composer dropdown switches per agent — see below |
+
+### Model lists per agent
+
+The dropdown follows whichever agent is selected, and each agent has its own way of naming models:
+
+- **Claude** — static list in `src/components/settings/ModelSelector.tsx`. Default `claude-opus-5-5`.
+- **Codex** — read from `~/.codex/models_cache.json` (the cache the Codex CLI maintains), so new OpenAI models show up without a code change. Entries the CLI keeps hidden (`gpt-reserve`, `codex-auto-review`) are filtered out. If Codex has no cache yet, a static list is used instead. Details: [docs/default-model-and-5-5-migration.md](docs/default-model-and-5-5-migration.md).
+- **OpenCode** — named profiles from `~/.config/opencode/profiles`, not model IDs (OpenCode's `-m` expects `provider/model`).
+- **Forge** — static Gemini list.
 
 ## Project structure
 
