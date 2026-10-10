@@ -245,6 +245,7 @@ export default function SessionDetailPage({
 
   // New session mode
   const [replyMode, setReplyMode] = useState<"reply" | "new" | "issue">("reply");
+  const [opencodeBuild, setOpencodeBuild] = useState<string | undefined>();
   const [newSessionAgent, setNewSessionAgent] = useState<AgentType>(FALLBACK_AGENT);
   const newSessionAgentSynced = useRef(false);
   const [newSessionPath, setNewSessionPath] = useState<string | null>(null);
@@ -1300,7 +1301,7 @@ export default function SessionDetailPage({
           path: newSessionPath,
           message: fullMessage,
           previous_session_id: sessionId,
-          agent: newSessionAgent,
+          agent: newSessionAgent, opencodeBuild: newSessionAgent === "opencode" ? opencodeBuild : undefined,
           ...(effectiveNewSessionModel && { model: effectiveNewSessionModel }),
         }),
       });
@@ -2574,6 +2575,8 @@ export default function SessionDetailPage({
                   </button>
                   <AgentToggleButton
                     agent={newSessionAgent}
+                buildId={opencodeBuild}
+                onBuildChange={setOpencodeBuild}
                     onCycle={(next) => {
                       setNewSessionAgent(next);
                     }}

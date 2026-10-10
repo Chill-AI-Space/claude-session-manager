@@ -1,4 +1,6 @@
 import fs from "fs";
+import os from "os";
+import path from "path";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildOpencodeStartShellCommand, buildResumeShellCommand, buildStartShellCommand } from "../session-terminal";
@@ -39,6 +41,28 @@ const opencodeSession = {
 } as Parameters<typeof buildResumeShellCommand>[0];
 
 describe("session-terminal prompt handling", () => {
+  it("starts and resumes a registered upstream binary without the fork auto flag", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "csm-build-test-"));
+    const binary = path.join(dir, "opencode-classic");
+    fs.writeFileSync(binary, "", { mode: 0o755 });
+    settings.opencode_builds = JSON.stringify([{ id: "classic", name: "Classic", kind: "upstream", binary }]);
+    try {
+      const start = buildOpencodeStartShellCommand("/tmp/proj", "hello", "master", "classic");
+      const resume = buildResumeShellCommand({ ...opencodeSession, opencode_build_id: "classic" }, "again");
+      expect(start).toContain(binary);
+      expect(resume).toContain(binary);
+      expect(start).not.toContain(" --auto");
+      expect(resume).not.toContain(" --auto");
+      expect(resume).toContain(" --session 'ses_abc123'");
+      fs.unlinkSync(extractPromptFile(start));
+      fs.unlinkSync(extractPromptFile(resume));
+    } finally {
+      delete settings.opencode_builds;
+      fs.unlinkSync(binary);
+      fs.rmdirSync(dir);
+    }
+  });
+
   it("loads the OpenCode start prompt from a temp file (never embeds a long message)", () => {
     const cmd = buildOpencodeStartShellCommand("/tmp/my project", LONG_MESSAGE);
 

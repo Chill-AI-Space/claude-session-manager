@@ -26,6 +26,7 @@ export interface SessionRow {
   summary?: string | null;
   learnings?: string | null;
   agent_type?: string | null;
+  opencode_build_id?: string | null;
   previous_session_id?: string | null;
 }
 
@@ -62,6 +63,7 @@ export interface SessionListItem {
   last_message_role?: string | null;
   has_result?: boolean;
   agent_type?: string | null;
+  opencode_build_id?: string | null;
   // Remote executor fields (set when session comes from a remote node)
   _remote?: boolean;
   _nodeId?: string;

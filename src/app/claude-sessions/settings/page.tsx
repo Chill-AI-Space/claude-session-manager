@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { OpencodeBuildSettings } from "@/components/settings/OpencodeBuildSettings";
 import { ModelSelector } from "@/components/settings/ModelSelector";
 import { Loader2, AlertCircle, X, Search, ArrowLeft, Package, ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
@@ -101,6 +102,7 @@ export default function SettingsPage() {
     "deep-search": "deep search vector pre-filter gemini google ai api key",
     "folder-browser": "folder browser start path browse",
     "appearance": "appearance font size scale theme",
+    "opencode-builds": "opencode builds versions snapshots fork stable upstream branch pr сборки ветки",
     "ai-model": "ai model forge claude gemini gpt anthropic openai",
     "maintenance": "maintenance title generate regenerate ai titles",
   };
@@ -171,6 +173,8 @@ export default function SettingsPage() {
 
         {/* ── System Setup ── */}
         {sectionVisible("system-setup") && <SystemHealthSettings healthChecks={healthChecks} />}
+
+        {sectionVisible("opencode-builds") && <OpencodeBuildSettings value={settings.opencode_builds || "[]"} />}
 
         {/* ── AI Model ── */}
         {sectionVisible("ai-model") && (

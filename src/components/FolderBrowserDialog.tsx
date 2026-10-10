@@ -60,6 +60,7 @@ export function FolderBrowserDialog({
   const [webStarting, setWebStarting] = useState(false);
   const webInputRef = useRef<HTMLTextAreaElement>(null);
   const { settings } = useSettings();
+  const [opencodeBuild, setOpencodeBuild] = useState<string | undefined>();
   const [webAgent, setWebAgent] = useState<AgentType>("codex");
   const [webModel, setWebModel] = useState<string | undefined>(undefined);
   // webModel is deliberately undefined until the user picks one — the agent's
@@ -214,7 +215,7 @@ export function FolderBrowserDialog({
         body: JSON.stringify({
           path: webStartPath,
           message: webMessage.trim(),
-          agent: webAgent,
+          agent: webAgent, opencodeBuild: webAgent === "opencode" ? opencodeBuild : undefined,
           model: effectiveWebModel,
         }),
       });
@@ -446,6 +447,8 @@ export function FolderBrowserDialog({
                   <div className="flex items-center gap-2">
                     <AgentToggleButton
                       agent={webAgent}
+                buildId={opencodeBuild}
+                onBuildChange={setOpencodeBuild}
                       onCycle={(next) => {
                         setWebAgent(next);
                         setWebModel(undefined);

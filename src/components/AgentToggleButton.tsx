@@ -1,6 +1,6 @@
 "use client";
 
-import { Hammer } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { AgentType } from "@/lib/agents";
 
 export type { AgentType } from "@/lib/agents";
@@ -22,45 +22,40 @@ export const DEFAULT_MODEL: Record<AgentType, string> = {
 interface AgentToggleButtonProps {
   agent: AgentType;
   onCycle: (next: AgentType) => void;
+  buildId?: string;
+  onBuildChange?: (id: string | undefined) => void;
   size?: "sm" | "md";
 }
 
-export function AgentToggleButton({ agent, onCycle, size = "sm" }: AgentToggleButtonProps) {
-  const next = AGENT_CYCLE[agent];
-  const titles: Record<AgentType, string> = {
-    claude: "Using Claude — click to switch to Opencode",
-    opencode: "Using Opencode — opens in terminal, click to switch to Forge",
-    forge: "Using Forge — click to switch to Codex",
-    codex: "Using Codex — opens in terminal, click to switch to Claude",
-  };
-
-  const px = size === "md" ? "px-2 py-0.5" : "px-1.5 py-0.5";
-
+export function AgentToggleButton({ agent, onCycle, buildId, onBuildChange, size = "sm" }: AgentToggleButtonProps) {
+  const [builds, setBuilds] = useState<Array<{ id: string; name: string; kind: string; available: boolean; builtAt?: string; pullRequest?: string; description?: string }>>([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    fetch("/api/opencode/builds").then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      setBuilds(data.builds);
+    }).catch((e) => setError(String(e)));
+  }, []);
   return (
-    <button
-      onClick={() => onCycle(next)}
-      className={`flex items-center gap-1 text-[11px] font-medium transition-colors ${px} rounded border ${
-        agent === "forge"
-          ? "text-orange-400 border-orange-400/40 bg-orange-500/10 hover:bg-orange-500/20"
-          : agent === "codex"
-            ? "text-violet-400 border-violet-400/40 bg-violet-500/10 hover:bg-violet-500/20"
-            : agent === "opencode"
-              ? "text-emerald-400 border-emerald-400/40 bg-emerald-500/10 hover:bg-emerald-500/20"
-              : "text-muted-foreground/50 border-border hover:text-foreground hover:bg-muted/50"
-      }`}
-      title={titles[agent]}
-      type="button"
+    <select
+      aria-label="Agent and OpenCode build"
+      title={error || "Choose agent or OpenCode build"}
+      value={agent === "opencode" && buildId ? `build:${buildId}` : agent}
+      onChange={(e) => {
+        const value = e.target.value;
+        onBuildChange?.(value.startsWith("build:") ? value.slice(6) : undefined);
+        onCycle(value.startsWith("build:") ? "opencode" : value as AgentType);
+      }}
+      className={`text-[11px] font-medium rounded border border-border bg-card text-foreground max-w-[260px] ${size === "md" ? "px-2 py-1" : "px-1.5 py-0.5"}`}
     >
-      {agent === "forge" ? (
-        <Hammer className="h-3 w-3" />
-      ) : agent === "codex" ? (
-        <span className="text-[10px] font-bold leading-none">{"{ }"}</span>
-      ) : agent === "opencode" ? (
-        <span className="text-[10px] font-bold leading-none">OC</span>
-      ) : (
-        <span className="text-[10px] font-bold leading-none">C</span>
-      )}
-      <span>{agent}</span>
-    </button>
+      <option value="codex">Codex</option>
+      <option value="claude">Claude</option>
+      {onBuildChange && builds.filter((b) => b.kind === "upstream").map((b) => <option key={b.id} value={`build:${b.id}`} disabled={!b.available}>{b.name}{!b.available ? " (unavailable)" : ""}</option>)}
+      {onBuildChange && builds.filter((b) => b.kind !== "upstream").map((b) => <option key={b.id} value={`build:${b.id}`} disabled={!b.available} title={b.description}>{b.name}{b.pullRequest ? ` · ${b.pullRequest}` : ""}{b.builtAt ? ` · ${b.builtAt.slice(0, 10)}` : ""}{!b.available ? " (unavailable)" : ""}</option>)}
+      <option value="opencode">OpenCode (installed)</option>
+      <option value="forge">Forge</option>
+      {error && <option disabled>Build catalog unavailable</option>}
+    </select>
   );
 }

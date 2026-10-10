@@ -2,7 +2,7 @@ import { getSetting } from "@/lib/db";
 import { getClaudePath } from "@/lib/claude-bin";
 import { getForgePath } from "@/lib/forge-bin";
 import { getCodexPath } from "@/lib/codex-bin";
-import { getOpencodePath } from "@/lib/opencode-bin";
+import { resolveOpencodeBuild } from "@/lib/opencode-builds";
 import { applyOpencodeProfile, getCurrentOpencodeProfile } from "@/lib/opencode-profiles";
 import { buildPromptLoader, shellQuote, writeTempPromptFile } from "@/lib/prompt-file";
 import { SessionRow } from "@/lib/types";
@@ -49,11 +49,11 @@ function opencodeAutoFlag(): string {
  * embedded in the command string, because iTerm2's AppleScript `write text`
  * truncates around 1024 chars (see prompt-file.ts).
  */
-export function buildOpencodeStartShellCommand(projectPath: string, message: string, profileId?: string): string {
-  const bin = getOpencodePath();
+export function buildOpencodeStartShellCommand(projectPath: string, message: string, profileId?: string, buildId?: string): string {
+  const { binary: bin, autoFlag } = resolveOpencodeBuild(buildId);
   applyOpencodeProfile(profileId ?? getCurrentOpencodeProfile());
   const promptPath = writeTempPromptFile(message, "csm-opencode-prompt");
-  return `cd ${shellQuote(projectPath)} && ${buildPromptLoader(promptPath)} && ${shellQuote(bin)}${opencodeAutoFlag()} --prompt "$PROMPT"`;
+  return `cd ${shellQuote(projectPath)} && ${buildPromptLoader(promptPath)} && ${shellQuote(bin)}${autoFlag ? opencodeAutoFlag() : ""} --prompt "$PROMPT"`;
 }
 
 /** Interactive `claude "<prompt>"` in a fresh terminal — a brand new session, not a resume. */
@@ -92,13 +92,13 @@ export function buildResumeShellCommand(session: SessionRow, message?: string): 
   const promptLoader = wantsPrompt ? ` && ${buildPromptLoader(writeTempPromptFile(message!, "csm-reply-prompt"))}` : "";
 
   if (isOpencode) {
-    const bin = getOpencodePath();
+    const { binary: bin, autoFlag } = resolveOpencodeBuild(session.opencode_build_id);
     // Root command's --session, not `run -s` — same reasoning as the start
     // command above: this needs to reopen the interactive TUI attached to
     // that session, not run one more one-shot exchange and exit. --prompt
     // is accepted alongside --session (both root flags), so a reply can
     // resume the session AND send the new message in one shot.
-    return `cd ${shellQuote(cwd)}${promptLoader} && ${shellQuote(bin)}${opencodeAutoFlag()} --session ${shellQuote(session.session_id)}${promptFlag}`;
+    return `cd ${shellQuote(cwd)}${promptLoader} && ${shellQuote(bin)}${autoFlag ? opencodeAutoFlag() : ""} --session ${shellQuote(session.session_id)}${promptFlag}`;
   }
 
   if (isCodex) {
