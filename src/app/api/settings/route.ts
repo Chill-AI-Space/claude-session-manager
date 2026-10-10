@@ -1,3 +1,4 @@
+import { parseOpencodeBuilds } from "@/lib/opencode-builds";
 import { NextRequest } from "next/server";
 import { getAllSettings, setSetting, logAction } from "@/lib/db";
 
@@ -25,6 +26,12 @@ function maskValue(key: string, value: string): string {
 
 export async function PUT(request: NextRequest) {
   const body = await request.json();
+  if (body.opencode_builds !== undefined) {
+    try {
+      if (typeof body.opencode_builds !== "string") throw new Error("opencode_builds must be a string");
+      parseOpencodeBuilds(body.opencode_builds);
+    } catch (error) { return Response.json({ error: String(error) }, { status: 400 }); }
+  }
   for (const [key, value] of Object.entries(body)) {
     if (typeof value === "string") {
       setSetting(key, value);

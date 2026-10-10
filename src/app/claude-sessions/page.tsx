@@ -51,6 +51,7 @@ function SessionsEmptyState() {
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const skipPerms = useSettingToggle("dangerously_skip_permissions");
+  const [opencodeBuild, setOpencodeBuild] = useState<string | undefined>();
   const [selectedAgent, setSelectedAgent] = useState<AgentType>(FALLBACK_AGENT);
   const agentSyncedFromSettings = useRef(false);
   const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
@@ -199,7 +200,7 @@ function SessionsEmptyState() {
   };
 
   const doStart = (path: string) => {
-    session.start(path, message, { agent: selectedAgent, model: effectiveSelectedModel });
+    session.start(path, message, { agent: selectedAgent, opencodeBuild: selectedAgent === "opencode" ? opencodeBuild : undefined, model: effectiveSelectedModel });
   };
 
   // Smart start: if folder known → start; else autodetect → start; else open picker
@@ -345,6 +346,8 @@ function SessionsEmptyState() {
               </button>
               <AgentToggleButton
                 agent={selectedAgent}
+                buildId={opencodeBuild}
+                onBuildChange={setOpencodeBuild}
                 onCycle={(next) => {
                   setSelectedAgent(next);
                   setSelectedModel(undefined);

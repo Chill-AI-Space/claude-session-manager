@@ -10,13 +10,14 @@ import { prepareSessionWorktree, resolveWorktreeDecision } from "@/lib/session-w
 import { resolveProjectPath } from "@/lib/project-path";
 import { lookupOriginUrl } from "@/lib/origin-lookup";
 import { withWorktreeStatus } from "@/lib/session-worktree-registry";
+import { resolveOpencodeBuild } from "@/lib/opencode-builds";
 import { FALLBACK_AGENT, isAgentType } from "@/lib/agents";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { path: projectPath, message, correlationId, verbose, model: requestedModel, agent, previous_session_id, on_complete_url, reply_to_session_id, delegation_task, worktree } = body as {
+  const { path: projectPath, message, correlationId, verbose, model: requestedModel, agent, previous_session_id, on_complete_url, reply_to_session_id, delegation_task, worktree, opencodeBuild } = body as {
     path: string;
     message: string;
     correlationId?: string;
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
     reply_to_session_id?: string;
     delegation_task?: string;
     worktree?: boolean;
+    opencodeBuild?: string;
   };
 
   if (!projectPath || !message?.trim()) {
@@ -57,6 +59,10 @@ export async function POST(request: NextRequest) {
     model = undefined; // model ids are agent-specific (e.g. a codex model on claude would fail)
   }
 
+  if (opencodeBuild !== undefined && (typeof opencodeBuild !== "string" || normalizedAgent !== "opencode")) {
+    return Response.json({ error: "opencodeBuild requires agent opencode and a build id" }, { status: 400 });
+  }
+
   // Per-session git worktree: explicit body value wins, otherwise the
   // sessions_worktree_default setting — same rule for browser and curl starts.
   const useWorktree = resolveWorktreeDecision({
@@ -79,6 +85,7 @@ export async function POST(request: NextRequest) {
         verbose: verbose ?? false,
         agent: normalizedAgent ?? undefined,
         model,
+        opencodeBuild,
         // Pass the resolved decision — the proxied request has no Sec-Fetch-* headers,
         // so the remote side would otherwise treat every start as a sub-session.
         worktree: useWorktree,
@@ -88,6 +95,11 @@ export async function POST(request: NextRequest) {
       const msg = err instanceof Error ? err.message : String(err);
       return Response.json({ error: `Remote start failed: ${msg}` }, { status: 502 });
     }
+  }
+
+  if (normalizedAgent === "opencode") {
+    try { resolveOpencodeBuild(opencodeBuild); }
+    catch (error) { return Response.json({ error: String(error) }, { status: 400 }); }
   }
 
   // Local execution
@@ -171,7 +183,7 @@ export async function POST(request: NextRequest) {
           // Snapshot existing OpenCode session ids for this exact directory before
           // launch, so we can tell which one is new (same pattern as the Codex branch).
           const existingIds = new Set(listOpencodeSessions(resolvedProjectPath).map((s) => s.id));
-          const shellCmd = buildOpencodeStartShellCommand(resolvedProjectPath, message.trim(), model);
+          const shellCmd = buildOpencodeStartShellCommand(resolvedProjectPath, message.trim(), model, opencodeBuild);
           const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedProjectPath });
           send({ type: "status", text: `Opencode opened in ${terminal}` });
 
@@ -220,6 +232,7 @@ export async function POST(request: NextRequest) {
                 file_mtime: newSession.time_updated,
                 last_scanned_at: now,
               });
+              getDb().prepare("UPDATE sessions SET opencode_build_id = ? WHERE session_id = ?").run(opencodeBuild || null, sessionId);
               send({ type: "session_id", session_id: sessionId });
               break;
             }

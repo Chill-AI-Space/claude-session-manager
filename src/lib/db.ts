@@ -262,6 +262,9 @@ function initTables(db: Database.Database) {
   if (!colNames.has("worktree_source_path")) {
     db.exec("ALTER TABLE sessions ADD COLUMN worktree_source_path TEXT");
   }
+  if (!colNames.has("opencode_build_id")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN opencode_build_id TEXT");
+  }
   if (!colNames.has("worktree_branch")) {
     db.exec("ALTER TABLE sessions ADD COLUMN worktree_branch TEXT");
   }
@@ -524,6 +527,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   telegram_chat_id: "",
   // Agent selection — which AI agent to use for new sessions
   default_agent: "opencode",
+  opencode_builds: "[]",
   // Forces the agent for sessions spawned programmatically (curl from other sessions,
   // orchestrator callers) — requests from the browser UI are not affected.
   // "" = off (honour the requested agent); "claude" | "codex" | "forge" | "opencode" = force.

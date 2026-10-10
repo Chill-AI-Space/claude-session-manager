@@ -298,6 +298,10 @@ Available at **Settings** (gear icon in sidebar):
 | **Session worktrees** | off | Start new sessions in their own git worktree (browser and API alike; `"worktree": true|false` in the start body wins) |
 | **Model for new sessions** | `claude-opus-5-5` | Model for Claude sessions. The composer dropdown switches per agent — see below |
 
+### Named OpenCode builds
+
+The agent dropdown supports registered upstream, stable fork and historical OpenCode builds. Add completed binaries in **Settings → OpenCode builds**; sessions remember their selected build when reopened or replied to. See [how to add and manage builds](docs/opencode-builds.md) for the UI steps, naming conventions and API examples.
+
 ### Model lists per agent
 
 The dropdown follows whichever agent is selected, and each agent has its own way of naming models:
