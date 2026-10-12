@@ -5,6 +5,7 @@ import {
   assignOpencodeSessionIdsByCwd,
   extractCodexCdPath,
   isOpencodeCommand,
+  isOpencodeSessionCommand,
   type ActiveProcess,
 } from "../process-detector";
 
@@ -137,6 +138,21 @@ describe("isOpencodeCommand", () => {
   });
 });
 
+describe("isOpencodeSessionCommand", () => {
+  it("accepts TUI, run, and attached sessions", () => {
+    expect(isOpencodeSessionCommand("/Users/x/.opencode/bin/opencode --auto --prompt hello")).toBe(true);
+    expect(isOpencodeSessionCommand("opencode run -s ses_abc123 message")).toBe(true);
+    expect(isOpencodeSessionCommand("opencode --session ses_abc123")).toBe(true);
+  });
+
+  it("does not treat multi-session servers as a single live agent", () => {
+    expect(isOpencodeSessionCommand("opencode serve --pure --port 34128")).toBe(false);
+    expect(isOpencodeSessionCommand("opencode web --port 4096")).toBe(false);
+    expect(isOpencodeSessionCommand("opencode acp")).toBe(false);
+    expect(isOpencodeSessionCommand("opencode mcp")).toBe(false);
+  });
+});
+
 describe("assignOpencodeSessionIdsByCwd", () => {
   const opencodeProc = (overrides: Partial<ActiveProcess> = {}): ActiveProcess => ({
     pid: 501,
@@ -146,6 +162,16 @@ describe("assignOpencodeSessionIdsByCwd", () => {
     command: "/Users/x/.opencode/bin/opencode --auto --prompt Привет мир",
     elapsedSecs: 40,
     ...overrides,
+  });
+
+  it("does not assign a server process to a nearby user session", () => {
+    const processes = [opencodeProc({ command: "/Users/x/.opencode/bin/opencode serve --pure --port 34128" })];
+    assignOpencodeSessionIdsByCwd(
+      processes,
+      [{ id: "user-session", directory: "/tmp/repo", time_created: 100, time_updated: 200 }],
+      new Set(),
+    );
+    expect(processes[0].sessionId).toBeNull();
   });
 
   it("binds a fresh --prompt process to the session with the same first prompt", () => {

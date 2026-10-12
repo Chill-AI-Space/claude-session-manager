@@ -105,6 +105,13 @@ export function isOpencodeCommand(command: string): boolean {
   return first !== "" && path.basename(first) === "opencode";
 }
 
+/** A CLI process tied to one user session, unlike a multi-session server. */
+export function isOpencodeSessionCommand(command: string): boolean {
+  if (!isOpencodeCommand(command)) return false;
+  const tail = command.trim().replace(/^\S+\s*/, "");
+  return !/^(serve|web|acp|mcp)(\s|$)/.test(tail);
+}
+
 /** `--session ses_…` (interactive attach/resume) or `run -s ses_…` (one-shot). */
 const OPENCODE_SESSION_RE = /(?:--session|-s)\s+(ses_[0-9A-Za-z]+)/;
 
@@ -145,7 +152,8 @@ function extractOpencodeInitialPrompt(command: string): string | null {
  * the grep before opencode was added to it).
  */
 function isAgentProcessLine(command: string): boolean {
-  return isOpencodeCommand(command) || /(^|[\/\s])(claude|codex)(\s|$)/.test(command);
+  if (isOpencodeCommand(command)) return isOpencodeSessionCommand(command);
+  return /(^|[\/\s])(claude|codex)(\s|$)/.test(command);
 }
 
 /** Session id for a detected process — claude/codex resume UUIDs vs OpenCode `ses_` ids. */
@@ -438,7 +446,7 @@ export function assignOpencodeSessionIdsByCwd(
 
   const unresolvedGroups = new Map<string, OpencodeProcessGroup>();
   for (const proc of processes) {
-    if (proc.sessionId || !proc.cwd || !isOpencodeCommand(proc.command)) continue;
+    if (proc.sessionId || !proc.cwd || !isOpencodeSessionCommand(proc.command)) continue;
     const cwd = normalizePath(proc.cwd);
     const tty = proc.tty ?? null;
     const prompt = extractOpencodeInitialPrompt(proc.command);
