@@ -22,10 +22,25 @@ export async function POST(
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   const { sessionId } = await params;
-  let body: { message?: string; check_after_ms?: number; mode?: string } = {};
+  let body: { message?: string; check_after_ms?: number; mode?: string; snooze_ms?: number } = {};
   try {
     body = await request.json();
   } catch { /* empty body is fine */ }
+
+  // Snooze: push the next wake to now + snooze_ms, keeping message/mode as-is.
+  // The intended caller is the woken session itself ("give me more time"),
+  // which shouldn't have to echo its whole alarm message back.
+  if (body.snooze_ms !== undefined) {
+    if (typeof body.snooze_ms !== "number" || body.snooze_ms < 1000) {
+      return Response.json({ error: "snooze_ms must be a number >= 1000" }, { status: 400 });
+    }
+    const existing = getSessionAlarm(sessionId);
+    if (!existing) {
+      return Response.json({ error: "no active alarm to snooze" }, { status: 404 });
+    }
+    setSessionAlarm(sessionId, existing.message, body.snooze_ms, existing.mode);
+    return Response.json({ ok: true, alarm: getSessionAlarm(sessionId) });
+  }
 
   const message = body.message || DEFAULT_MESSAGE;
   const checkAfterMs = body.check_after_ms ?? DEFAULT_CHECK_AFTER_MS;

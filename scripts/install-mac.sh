@@ -5,7 +5,7 @@
 
 set -e
 
-LABEL="com.claude-session-manager"
+LABEL="com.vova.claude-sessions"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$HOME/Library/Logs"

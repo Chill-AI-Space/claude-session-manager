@@ -6,6 +6,7 @@ import type { CodexThreadRow } from "./codex-db";
 import { listCodexThreads } from "./codex-db";
 import { listIndexableOpencodeSessions, getOpencodeFirstUserMessage } from "./opencode-db";
 import { findLiveSessionProcesses } from "./session-liveness";
+import { rememberSessionTty } from "./session-tty";
 
 const isWin = process.platform === "win32";
 
@@ -209,6 +210,33 @@ function findCodexExecutableTokenIndex(tokens: string[]): number {
     if (base === "codex") return i;
   }
   return -1;
+}
+
+/**
+ * The project directory a codex process was launched for, from its `-C/--cd`
+ * argument — NOT its OS working directory. `codex -C /repo` started from `~`
+ * keeps cwd=$HOME, and the OS-cwd-based session binding would then never match
+ * the thread (thread.cwd is the -C path), leaving the session looking dead
+ * next to a live process — which is how alarm resumes kept spawning clones.
+ */
+export function extractCodexCdPath(command: string): string | null {
+  if (!isCodexCommand(command)) return null;
+  const tokens = tokenizeCommand(command);
+  const execIdx = findCodexExecutableTokenIndex(tokens);
+  if (execIdx < 0) return null;
+  for (let i = execIdx + 1; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t === "--") break;
+    if (t === "-C" || t === "--cd") {
+      const v = tokens[i + 1];
+      return v && !v.startsWith("-") ? v : null;
+    }
+    if (t.startsWith("--cd=")) {
+      const v = t.slice("--cd=".length);
+      return v || null;
+    }
+  }
+  return null;
 }
 
 function extractCodexInitialPrompt(command: string): string | null {
@@ -474,6 +502,14 @@ export function assignOpencodeSessionIdsByCwd(
 
 /** Assign session IDs, deduplicate — pure logic, no I/O */
 function finalizeProcesses(processes: ActiveProcess[]): ActiveProcess[] {
+  // codex -C <dir> launched from elsewhere keeps cwd=$HOME — re-anchor it to
+  // the project the process actually runs, so by-cwd thread binding works.
+  for (const proc of processes) {
+    const cd = extractCodexCdPath(proc.command);
+    if (cd) {
+      proc.cwd = path.isAbsolute(cd) ? path.normalize(cd) : path.resolve(proc.cwd ?? process.cwd(), cd);
+    }
+  }
   const claimed = new Set<string>(
     processes.filter((p) => p.sessionId).map((p) => p.sessionId!)
   );
@@ -483,7 +519,9 @@ function finalizeProcesses(processes: ActiveProcess[]): ActiveProcess[] {
   });
   for (const proc of processes) {
     if (proc.sessionId || !proc.cwd) continue;
-    if (isOpencodeCommand(proc.command)) continue; // OpenCode never owns a Claude JSONL session
+    // OpenCode never owns a Claude JSONL session; codex either (it would bind
+    // a codex process to whatever Claude session last wrote in that folder).
+    if (isOpencodeCommand(proc.command) || isCodexCommand(proc.command)) continue;
     const projectDir = pathToProjectDir(proc.cwd);
     proc.sessionId = findMostRecentSession(projectDir, claimed);
     if (proc.sessionId) claimed.add(proc.sessionId);
@@ -491,6 +529,9 @@ function finalizeProcesses(processes: ActiveProcess[]): ActiveProcess[] {
   const bySessionId = new Map<string, ActiveProcess>();
   for (const proc of processes) {
     if (!proc.sessionId) continue;
+    // Remember which window the session lives in, so a later babysitter/alarm
+    // resume can continue it in the same terminal instead of a new one.
+    if (proc.tty) rememberSessionTty(proc.sessionId, proc.tty);
     const prev = bySessionId.get(proc.sessionId);
     if (!prev) { bySessionId.set(proc.sessionId, proc); continue; }
     const prevElapsed = prev.elapsedSecs ?? Number.MAX_SAFE_INTEGER;
@@ -569,6 +610,36 @@ export function detectActiveClaudeSessions(): ActiveProcess[] {
     scheduleAsyncRefresh(); // refresh in background, return stale now
   }
   return cachedResult.processes;
+}
+
+/**
+ * True once an async refresh has landed. Right after a (re)start — and after
+ * killSessionProcesses(), which nulls the cache — detectActiveClaudeSessions()
+ * returns [] for every session: a bare "not found" until then must not be read
+ * as "the session is dead" (callers like the alarm check would otherwise
+ * resume live sessions on the first tick after a restart).
+ */
+export function isSessionCacheWarm(): boolean {
+  return cachedResult !== null;
+}
+
+/**
+ * Synchronous, cache-independent liveness check: a fresh `ps` + `lsof` pass
+ * through the same binding logic the async detector uses. Used right before
+ * spawning a resume, where a stale/mis-bound cache verdict ("dead") forks a
+ * session that actually has a live process — observed when a resume clone
+ * claims the session id first (its command carries `resume <id>`), the
+ * original `-C dir` process gets bound to a different thread, and once the
+ * clone dies the session looks dead next to the still-running original.
+ * Falls back to the cached answer when ps/lsof itself fails.
+ */
+export function hasLiveProcessFresh(sessionId: string): boolean {
+  try {
+    const raw = detectUnix();
+    return finalizeProcesses(raw).some((p) => p.sessionId === sessionId);
+  } catch {
+    return isSessionActive(sessionId);
+  }
 }
 
 /** Windows: use wmic to find claude.exe processes and their command lines */

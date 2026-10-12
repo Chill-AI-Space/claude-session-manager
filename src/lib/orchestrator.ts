@@ -17,9 +17,12 @@ import { getDb, getSetting, logAction, isBabysitterDisabled } from "./db";
 import { getClaudePath } from "./claude-bin";
 import { getCleanEnv, claudeProjectsDir } from "./utils";
 import { createSSEStream, sseResponse } from "./claude-runner";
-import { killSessionProcesses, isSessionActive } from "./process-detector";
+import { killSessionProcesses, isSessionActive, detectActiveClaudeSessions, hasLiveProcessFresh } from "./process-detector";
+import { getLiveSessionFromPidMap } from "./session-pid-map";
 import { findLiveSessionProcesses, killSessionAndWait } from "./session-liveness";
-import { openInTerminal } from "./terminal-launcher";
+import { openInTerminal, wrapLongCommand } from "./terminal-launcher";
+import { getTTY, sendTextToTerminalTTY, sendTextToTerminalTTYVerified } from "./macos-terminal-control";
+import { getSessionTty, isTtyReadyForCommand, waitForSessionProcess } from "./session-tty";
 import { scanSessions } from "./scanner";
 import { generateTitleBatch } from "./title-generator";
 import * as dlog from "./debug-logger";
@@ -261,6 +264,7 @@ export function buildSessionContextPrompt(sessionId?: string): string | undefine
     lines.push(`Self-alarm: POST ${base}/api/sessions/${sessionId}/alarm  body: {"message":"<what to do when resumed>","check_after_ms":180000}`);
     lines.push(`  — If you set an alarm and then die/stall, babysitter will resume you with your message after check_after_ms.`);
     lines.push(`  — While alarm is active, babysitter skips normal crash/stall handling for your session.`);
+    lines.push(`  — Snooze next wake: POST ${base}/api/sessions/${sessionId}/alarm  body: {"snooze_ms":1800000}`);
     lines.push(`  — Cancel: DELETE ${base}/api/sessions/${sessionId}/alarm`);
   } else {
     lines.push(`Callback URL pattern: POST ${base}/api/sessions/{SESSION_ID}/reply  body: {"message":"..."}`);
@@ -1303,6 +1307,184 @@ class SessionOrchestrator extends EventEmitter {
       this.transition(conversationId, "completed");
       try { await scanSessions("incremental"); } catch { /* non-critical */ }
     });
+  }
+
+  // ── Public API: agent-aware background resume (babysitter / alarms) ───────
+
+  /**
+   * Resume a session in the background by its agent type. Used by the alarm /
+   * babysitter path where there is no SSE consumer. Dispatches to the right
+   * engine:
+   *  - claude   → headless `claude --resume` via the task queue
+   *  - codex    → reopen the interactive Codex TUI in a terminal with the message
+   *  - opencode → reopen the interactive OpenCode TUI in a terminal with the message
+   *  - forge    → forge headless resume
+   *
+   * Returns true when a resume was dispatched.
+   */
+  resumeSessionBackground(sessionId: string, message: string): boolean {
+    const db = getDb();
+    const row = db
+      .prepare("SELECT project_path, agent_type FROM sessions WHERE session_id = ?")
+      .get(sessionId) as { project_path: string; agent_type?: string | null } | undefined;
+    if (!row) return false;
+    const agentType = row.agent_type ?? "claude";
+
+    if (agentType === "forge") {
+      const meta = db
+        .prepare("SELECT model FROM sessions WHERE session_id = ?")
+        .get(sessionId) as { model?: string | null } | undefined;
+      this.resumeForgeBackground(sessionId, message, row.project_path, meta?.model || undefined);
+      return true;
+    }
+
+    // Codex and OpenCode are TUIs — they can't be driven over the Claude SSE
+    // runner, so we resume them in a terminal with the message as the initial
+    // prompt (same approach as the /reply route). `checkExpiredAlarms` already
+    // skips sessions whose process is still alive, so no claim guard is needed
+    // here — the live-process check is the dedup.
+    //
+    // Two-step delivery, like a retry: first try to type the resume command
+    // into the SAME window the session used to live in (TTY remembered by the
+    // process detector, validated fresh); if the window is gone, busy, or the
+    // agent doesn't actually start there — fall back to a new window.
+    if (agentType === "codex" || agentType === "opencode") {
+      const { buildCodexResumeShellCommand } = require("./codex-command") as typeof import("./codex-command");
+      const { getCodexPath } = require("./codex-bin") as typeof import("./codex-bin");
+      const shellCmd = agentType === "codex"
+        ? buildCodexResumeShellCommand({
+            projectPath: row.project_path,
+            bin: getCodexPath(),
+            sessionId,
+            message,
+            skipPermissions: getSetting("dangerously_skip_permissions") === "true",
+          })
+        : (() => {
+            const { buildResumeShellCommand } = require("./session-terminal") as typeof import("./session-terminal");
+            const full = db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId) as SessionRow;
+            return buildResumeShellCommand(full, message);
+          })();
+
+      // No "running" state is set: it would sit here for hours (nothing watches
+      // a terminal child) and the orchestrator-state guard would mute this
+      // alarm until stale-state cleanup runs. Dedup is the alive check in
+      // checkExpiredAlarms + the rearm interval, not a phase.
+      const rerouteToPokeIfLive = (why: string): boolean => {
+        // Fresh ps verdict — never trust the cache when about to spawn: a
+        // stale "dead" next to a live process is exactly how clones multiply.
+        if (!hasLiveProcessFresh(sessionId)) return false;
+        logAction("service", "bg_resume_rerouted_live", `${agentType} — ${why}`, sessionId);
+        this.pokeLiveSession(sessionId, message);
+        return true;
+      };
+      void (async () => {
+        // Yield first: the fresh ps+lsof pass below is synchronous and must
+        // not hold up the scanner tick that fired the alarm.
+        await new Promise((r) => setImmediate(r));
+        if (rerouteToPokeIfLive("live process found at dispatch")) return;
+
+        const reason = await this.trySameWindowResume(sessionId, agentType, shellCmd);
+        if (reason === null) {
+          logAction("service", "bg_resume_same_window", agentType, sessionId);
+          return;
+        }
+        if (reason !== "no cached tty") {
+          logAction("service", "bg_resume_same_window_skipped", `${agentType} ${reason}`, sessionId);
+        }
+        // The typed command (or another resume) may have started a process
+        // while we were trying — one last check before opening a second window.
+        if (rerouteToPokeIfLive("live process appeared before opening a window")) return;
+        try {
+          await openInTerminal(shellCmd);
+          logAction("service", "bg_resume_terminal_opened", agentType, sessionId);
+        } catch (err) {
+          logAction("service", "bg_resume_terminal_failed", String(err), sessionId);
+        }
+      })();
+      return true;
+    }
+
+    // Claude — headless resume through the queue.
+    this.enqueue({ sessionId, type: "resume", message, priority: "high" });
+    return true;
+  }
+
+  /**
+   * Type the resume command into the window the session used to live in.
+   * Returns null on success, or a short reason why it didn't work — the
+   * caller then falls back to opening a fresh window.
+   */
+  private async trySameWindowResume(sessionId: string, agentType: string, shellCmd: string): Promise<string | null> {
+    await new Promise((r) => setImmediate(r)); // don't hold up the caller's tick
+
+    const tty = getSessionTty(sessionId);
+    if (!tty) return "no cached tty";
+    if (!isTtyReadyForCommand(tty)) return `tty:${tty} not ready (window gone or agent attached)`;
+
+    const sent = sendTextToTerminalTTY({ tty, text: wrapLongCommand(shellCmd) });
+    if (!sent.ok) return `tty:${tty} send failed: ${sent.reason ?? sent.error ?? "unknown"}`;
+
+    // The command was typed — but typed is not started. Confirm the agent
+    // actually launched there before declaring the same window reused.
+    if (!(await waitForSessionProcess(sessionId, agentType))) {
+      return `tty:${tty} typed but ${agentType} did not start`;
+    }
+    return null;
+  }
+
+  /**
+   * Deliver a message into a LIVE session's own terminal — no resume, no
+   * second process (a resume next to a live process would fork the transcript).
+   * Used by the alarm when the session is alive but has been silent for
+   * check_after_ms. Dispatches the send asynchronously (the AppleScript path
+   * is synchronous and must not block the scanner tick); result is logged.
+   *
+   * Returns false only when there is provably nothing to type into (no live
+   * process / no TTY) — the caller keeps the alarm armed and retries later.
+   */
+  pokeLiveSession(sessionId: string, message: string): boolean {
+    const row = getDb()
+      .prepare("SELECT agent_type, jsonl_path FROM sessions WHERE session_id = ?")
+      .get(sessionId) as { agent_type?: string | null; jsonl_path: string } | undefined;
+    if (!row) return false;
+    const agentType = row.agent_type ?? "claude";
+
+    // A queued stall nudge would deliver a second, different message — we poke instead.
+    this.queue.cancel(`stall_continue:${sessionId}`);
+
+    // Authoritative PID map for Claude (Stop hook), generic detector for the rest.
+    let pid: number | null = agentType === "claude" ? getLiveSessionFromPidMap(sessionId)?.pid ?? null : null;
+    if (pid == null) {
+      pid = detectActiveClaudeSessions().find((p) => p.sessionId === sessionId)?.pid ?? null;
+    }
+    if (pid == null) {
+      logAction("service", "alarm_poke_no_live_process", agentType, sessionId);
+      return false;
+    }
+    const tty = getTTY(pid);
+    if (!tty) {
+      logAction("service", "alarm_poke_no_tty", `${agentType} pid:${pid} (headless — nothing typed into)`, sessionId);
+      return false;
+    }
+
+    // Verified against the transcript when one exists (claude/codex rollout);
+    // OpenCode has no on-disk transcript for this session — trust the send.
+    const transcriptPath = agentType === "opencode" ? undefined : row.jsonl_path;
+    setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await sendTextToTerminalTTYVerified({ tty, text: message, transcriptPath });
+          if (res.ok) {
+            logAction("service", "alarm_poke_delivered", `${agentType} ${res.terminal ?? ""} tty:${tty}`, sessionId);
+          } else {
+            logAction("service", "alarm_poke_failed", `${agentType} tty:${tty} ${res.reason ?? res.error ?? "unknown"}`, sessionId);
+          }
+        } catch (err) {
+          logAction("service", "alarm_poke_failed", `${agentType} tty:${tty} ${String(err)}`, sessionId);
+        }
+      })();
+    }, 0);
+    return true;
   }
 
   // ── Public API: stop ──────────────────────────────────────────────────────

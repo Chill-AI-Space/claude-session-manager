@@ -3,7 +3,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { extractCodexRolloutIndex, extractCodexSearchText, readCodexMessagesPaginated } from "../codex-db";
-import { shouldSkipSessionIncremental } from "../scanner";
+import { buildAlarmWakeHint, shouldSkipSessionIncremental } from "../scanner";
 
 const tempPaths: string[] = [];
 
@@ -126,6 +126,33 @@ describe("extractCodexRolloutIndex", () => {
       },
     });
   });
+
+  // has_result tracks the CURRENT turn (same contract as the Claude scanner).
+  // Without the reset, one completed turn kept the flag true forever and the
+  // session showed as inactive in the sidebar while actually working.
+  it("clears hasResult when a new turn starts after a completed one", () => {
+    const tempPath = writeTempRollout([
+      { type: "event_msg", payload: { type: "task_started" } },
+      { type: "event_msg", payload: { type: "agent_message", message: "done" } },
+      { type: "event_msg", payload: { type: "task_complete" } },
+      { type: "event_msg", payload: { type: "user_message", message: "next task" } },
+      { type: "event_msg", payload: { type: "task_started" } },
+      { type: "event_msg", payload: { type: "agent_message", message: "working on it" } },
+    ]);
+
+    expect(extractCodexRolloutIndex(tempPath).hasResult).toBe(false);
+  });
+
+  it("sets hasResult again once the new turn completes", () => {
+    const tempPath = writeTempRollout([
+      { type: "event_msg", payload: { type: "user_message", message: "next task" } },
+      { type: "event_msg", payload: { type: "task_started" } },
+      { type: "event_msg", payload: { type: "agent_message", message: "finished" } },
+      { type: "event_msg", payload: { type: "task_complete" } },
+    ]);
+
+    expect(extractCodexRolloutIndex(tempPath).hasResult).toBe(true);
+  });
 });
 
 describe("readCodexMessagesPaginated", () => {
@@ -186,5 +213,17 @@ describe("readCodexMessagesPaginated", () => {
     const all = JSON.stringify(messages);
     expect(all).not.toContain("skills_instructions");
     expect(all).not.toContain("recommended_plugins");
+  });
+});
+
+describe("buildAlarmWakeHint", () => {
+  it("tells the woken session how to snooze and how to cancel its own tick", () => {
+    const hint = buildAlarmWakeHint("ses_test123");
+    expect(hint).toContain("/api/sessions/ses_test123/alarm");
+    expect(hint).toContain('"snooze_ms"');
+    expect(hint).toContain("DELETE");
+    expect(hint).toContain("clear=true");
+    // compact enough to survive a terminal paste (~1024 char write limit)
+    expect(hint.length).toBeLessThan(500);
   });
 });

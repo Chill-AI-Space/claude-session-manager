@@ -706,35 +706,72 @@ function detectStalledDelegations(db: ReturnType<typeof getDb>): void {
 }
 
 /**
- * Fire expired session self-alarms.
- * When a session sets an alarm, it means: "if I'm inactive for check_after_ms, resume me."
- * Fires only when: time elapsed AND session process is dead AND orchestrator is idle for it.
+ * Instructions appended to every alarm wake so the woken session can manage
+ * its own tick without guessing: push the next wake out (task needs more
+ * time) or cancel the alarm entirely (task no longer relevant). Kept compact
+ * — the poke path pastes this into a terminal (~1024 char write limit).
  */
-function checkExpiredAlarms(db: ReturnType<typeof getDb>): void {
-  const { isSessionActive } = require("./process-detector");
+export function buildAlarmWakeHint(sessionId: string): string {
+  const base = "http://localhost:3000";
+  return [
+    "",
+    "",
+    "[Alarm] You were woken by your own self-alarm.",
+    `Snooze next wake (e.g. 30 min): curl -s -X POST "${base}/api/sessions/${sessionId}/alarm" -H "Content-Type: application/json" -d '{"snooze_ms":1800000}'`,
+    `Cancel the alarm (task done or irrelevant): curl -s -X DELETE "${base}/api/sessions/${sessionId}/alarm?clear=true"`,
+  ].join("\n");
+}
+
+/**
+ * Fire expired session self-alarms.
+ * When a session sets an alarm, it means: "if I'm silent for check_after_ms,
+ * get my message back to work." Two delivery paths:
+ *   - process dead  → resume it (spawn a fresh process with the message);
+ *   - process alive → poke the live terminal (type the message in; a resume
+ *     beside a live process would fork the transcript). Alive + working never
+ *     expires — activity bumps file_mtime — so a poke only ever lands on a
+ *     session that has genuinely gone quiet.
+ * Either way the alarm is re-armed (persistent) so it keeps ticking.
+ */
+export function checkExpiredAlarms(db: ReturnType<typeof getDb>): void {
+  const { isSessionActive, isSessionCacheWarm, detectActiveClaudeSessions } = require("./process-detector");
   const orch = getOrchestrator();
+
+  // Cold detector cache right after a (re)start: every session looks dead
+  // (detectActiveClaudeSessions returns [] until the first async refresh
+  // lands), which would resume live sessions on the first tick — seen in
+  // production as phantom wakes right after a deploy. Skip THIS tick, but
+  // kick the refresh — otherwise nothing warms the cache when no UI/API
+  // consumer is around (overnight restart) and alarms would never fire.
+  if (!isSessionCacheWarm()) {
+    const dlog = require("./debug-logger");
+    dlog.info("scanner", "alarm check skipped — process detector cache is cold (warming)");
+    detectActiveClaudeSessions(); // schedules the async rebuild
+    return;
+  }
+
   const alarms = getExpiredAlarms();
 
   for (const alarm of alarms) {
-    // Session still alive — don't interrupt it, alarm stays active
-    if (isSessionActive(alarm.session_id)) continue;
-
-    // Orchestrator already handling this session
+    // Orchestrator already handling this session — don't double-deliver
     const state = orch.status(alarm.session_id);
     if (state && !["idle", "completed", "failed"].includes(state.phase)) continue;
 
-    logAction("service", "alarm_fired", `[${alarm.mode}] ${alarm.message.slice(0, 100)}`, alarm.session_id);
-    orch.enqueue({
-      sessionId: alarm.session_id,
-      type: "resume",
-      message: alarm.message,
-      priority: "high",
-    });
+    const alive = isSessionActive(alarm.session_id);
+    const wakeMessage = alarm.message + buildAlarmWakeHint(alarm.session_id);
+    if (alive) {
+      logAction("service", "alarm_fired_live", `[${alarm.mode}] ${alarm.message.slice(0, 100)}`, alarm.session_id);
+      orch.pokeLiveSession(alarm.session_id, wakeMessage);
+    } else {
+      logAction("service", "alarm_fired", `[${alarm.mode}] ${alarm.message.slice(0, 100)}`, alarm.session_id);
+      orch.resumeSessionBackground(alarm.session_id, wakeMessage);
+    }
     if (alarm.mode === "once") {
       // One-shot: consume the alarm
       clearSessionAlarm(alarm.session_id);
     } else {
-      // Persistent: re-arm the clock so it won't fire again until session goes idle for check_after_ms
+      // Persistent: re-arm the clock so it won't fire again until the session
+      // goes silent for check_after_ms again.
       rearmPersistentAlarm(alarm.session_id);
     }
   }

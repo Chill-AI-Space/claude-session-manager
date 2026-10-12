@@ -1,32 +1,68 @@
 /**
- * Read-only accessor for OpenCode's own SQLite database at
- * ~/.local/share/opencode/opencode.db.
+ * Read-only accessor for OpenCode's own SQLite databases at
+ * ~/.local/share/opencode/*.db.
  *
- * OpenCode sessions are invisible to Session Manager unless we read this
- * DB — unlike Claude (JSONL files we scan) and Codex (its own SQLite, see
- * codex-db.ts), nothing here previously discovered OpenCode sessions at
- * all, so `agent: "opencode"` starts from the UI never got a session_id
- * back and never appeared in the sidebar. Never writes to OpenCode's DB.
+ * OpenCode creates multiple databases per profile/instance.
+ * This module now discovers all *.db files and exposes a way
+ * to iterate sessions across all of them.
  */
+
 import Database from "better-sqlite3";
 import os from "os";
 import path from "path";
 import fs from "fs";
 import type { ContentBlock, ParsedMessage } from "./types";
 
-const OPENCODE_DB_PATH = path.join(os.homedir(), ".local", "share", "opencode", "opencode.db");
+const OPENCODE_DIR = path.join(os.homedir(), ".local", "share", "opencode");
 
 let _opencodeDb: Database.Database | null = null;
 
+/** All open DB connections, keyed by path. Opened read-only, kept for process lifetime. */
+const _dbsByPath = new Map<string, Database.Database | null>();
+
+function openDb(dbPath: string): Database.Database | null {
+  if (_dbsByPath.has(dbPath)) return _dbsByPath.get(dbPath)!;
+  let db: Database.Database | null = null;
+  try {
+    if (fs.existsSync(dbPath)) {
+      db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    }
+  } catch {
+    db = null;
+  }
+  _dbsByPath.set(dbPath, db);
+  return db;
+}
+
 function getOpencodeDb(): Database.Database | null {
   if (_opencodeDb) return _opencodeDb;
+  _opencodeDb = openDb(path.join(OPENCODE_DIR, "opencode.db"));
+  return _opencodeDb;
+}
+
+function listOpencodeDbPaths(): string[] {
   try {
-    if (!fs.existsSync(OPENCODE_DB_PATH)) return null;
-    _opencodeDb = new Database(OPENCODE_DB_PATH, { readonly: true, fileMustExist: true });
-    return _opencodeDb;
+    return fs.readdirSync(OPENCODE_DIR)
+      .filter((f) => f.endsWith(".db"))
+      .map((f) => path.join(OPENCODE_DIR, f));
   } catch {
-    return null;
+    return [];
   }
+}
+
+/** Find which DB file contains a given session ID. Opens each DB read-only briefly. */
+function findDbWithSession(sessionId: string): Database.Database | null {
+  for (const dbPath of listOpencodeDbPaths()) {
+    const db = openDb(dbPath);
+    if (!db) continue;
+    try {
+      const row = db.prepare(`SELECT 1 FROM session WHERE id = ? LIMIT 1`).get(sessionId);
+      if (row) return db;
+    } catch {
+      // ignore, try next
+    }
+  }
+  return null;
 }
 
 export interface OpencodeSessionRow {
@@ -37,28 +73,26 @@ export interface OpencodeSessionRow {
   time_updated: number; // epoch ms
 }
 
-/** Lists OpenCode sessions, newest first. Empty if the DB is missing or unreadable. */
+/** Lists OpenCode sessions, newest first, across ALL databases. Empty if none unreadable. */
 export function listOpencodeSessions(directory?: string): OpencodeSessionRow[] {
-  const db = getOpencodeDb();
-  if (!db) return [];
-  try {
-    if (directory) {
-      return db
-        .prepare(
-          `SELECT id, directory, title, time_created, time_updated
-           FROM session WHERE directory = ? ORDER BY time_created DESC`
-        )
-        .all(directory) as OpencodeSessionRow[];
+  const seen = new Map<string, OpencodeSessionRow>();
+  for (const dbPath of listOpencodeDbPaths()) {
+    const db = openDb(dbPath);
+    if (!db) continue;
+    try {
+      const stmt = directory
+        ? db.prepare(`SELECT id, directory, title, time_created, time_updated FROM session WHERE directory = ?`)
+        : db.prepare(`SELECT id, directory, title, time_created, time_updated FROM session`);
+      const rows = (directory ? stmt.all(directory) : stmt.all()) as OpencodeSessionRow[];
+      for (const row of rows) {
+        const existing = seen.get(row.id);
+        if (!existing || row.time_updated > existing.time_updated) seen.set(row.id, row);
+      }
+    } catch {
+      // unreadable DB — skip
     }
-    return db
-      .prepare(
-        `SELECT id, directory, title, time_created, time_updated
-         FROM session ORDER BY time_created DESC`
-      )
-      .all() as OpencodeSessionRow[];
-  } catch {
-    return [];
   }
+  return Array.from(seen.values()).sort((a, b) => b.time_created - a.time_created);
 }
 
 /** Session row as the background scanner needs it — top-level sessions only. */
@@ -77,23 +111,43 @@ export interface OpencodeIndexRow {
 /**
  * Lists sessions worth indexing into our `sessions` table: top-level only
  * (`parent_id IS NULL` — subagent children are not sidebar sessions) and not
- * archived (`time_archived IS NULL`). Empty if the DB is missing/unreadable.
+ * archived (`time_archived IS NULL`). Scans ALL OpenCode databases and
+ * deduplicates by session ID (keeps most recent).
  */
 export function listIndexableOpencodeSessions(): OpencodeIndexRow[] {
-  const db = getOpencodeDb();
-  if (!db) return [];
-  try {
-    return db
-      .prepare(
-        `SELECT id, directory, title, time_created, time_updated, model, tokens_input, tokens_output
-         FROM session
-         WHERE parent_id IS NULL AND time_archived IS NULL
-         ORDER BY time_updated DESC`
-      )
-      .all() as OpencodeIndexRow[];
-  } catch {
-    return [];
+  const dbPaths = listOpencodeDbPaths();
+  if (dbPaths.length === 0) return [];
+
+  const seen = new Map<string, OpencodeIndexRow>();
+
+  for (const dbPath of dbPaths) {
+    let db: Database.Database | null = null;
+    try {
+      db = new Database(dbPath, { readonly: true, fileMustExist: true });
+      const rows = db
+        .prepare(
+          `SELECT id, directory, title, time_created, time_updated, model, tokens_input, tokens_output
+           FROM session
+           WHERE parent_id IS NULL AND time_archived IS NULL
+           ORDER BY time_updated DESC`
+        )
+        .all() as OpencodeIndexRow[];
+
+      for (const row of rows) {
+        const existing = seen.get(row.id);
+        if (!existing || row.time_updated > existing.time_updated) {
+          seen.set(row.id, row);
+        }
+      }
+    } catch {
+      continue;
+    } finally {
+      try { db?.close(); } catch {}
+    }
   }
+
+  // Sort by time_updated descending
+  return Array.from(seen.values()).sort((a, b) => b.time_updated - a.time_updated);
 }
 
 /** `{"id":"mimo-v2.6-flash","providerID":"opencode-go"}` → `opencode-go/mimo-v2.6-flash`. */
@@ -133,7 +187,7 @@ function parsePartText(raw: string): string | null {
  * so a scan of every session can't walk OpenCode's multi-GB DB.
  */
 export function getOpencodeSessionIndexText(sessionId: string): OpencodeSessionIndexText | null {
-  const db = getOpencodeDb();
+  const db = findDbWithSession(sessionId) ?? getOpencodeDb();
   if (!db) return null;
 
   try {
@@ -202,7 +256,7 @@ export function getOpencodeSessionIndexText(sessionId: string): OpencodeSessionI
 
 /** Single session row by id, or null if the DB is missing or the id doesn't exist. */
 export function getOpencodeSession(sessionId: string): OpencodeSessionRow | null {
-  const db = getOpencodeDb();
+  const db = findDbWithSession(sessionId) ?? getOpencodeDb();
   if (!db) return null;
   try {
     return (
@@ -240,7 +294,7 @@ interface OpencodePartData {
  * file/patch/compaction parts are skipped for now.
  */
 export function readOpencodeMessages(sessionId: string): ParsedMessage[] {
-  const db = getOpencodeDb();
+  const db = findDbWithSession(sessionId) ?? getOpencodeDb();
   if (!db) return [];
   try {
     const messageRows = db
@@ -343,7 +397,7 @@ const firstUserMessageCache = new Map<string, string>();
 export function getOpencodeFirstUserMessage(sessionId: string): string | null {
   const cached = firstUserMessageCache.get(sessionId);
   if (cached !== undefined) return cached;
-  const db = getOpencodeDb();
+  const db = findDbWithSession(sessionId) ?? getOpencodeDb();
   if (!db) return null;
   try {
     const rows = db

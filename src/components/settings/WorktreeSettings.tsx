@@ -51,10 +51,11 @@ export function WorktreeSettings({ settings, onUpdate }: SettingsComponentProps)
             When the folder is a git repo, the session gets a separate checkout in{" "}
             <code className="font-mono bg-muted px-1 rounded">../.worktrees/&lt;repo&gt;/</code> on a new{" "}
             <code className="font-mono bg-muted px-1 rounded">session/…</code> branch, so parallel sessions
-            don&apos;t trample each other&apos;s files. Applies to sessions started here; sub-sessions spawned
-            via the API always get a worktree unless they pass{" "}
-            <code className="font-mono bg-muted px-1 rounded">&quot;worktree&quot;: false</code>.
-            node_modules and .env are not copied into the worktree.
+            don&apos;t trample each other&apos;s files. Applies to every start — browser and API
+            sub-sessions alike — unless the request passes an explicit{" "}
+            <code className="font-mono bg-muted px-1 rounded">&quot;worktree&quot;: true|false</code>,
+            which wins over this setting. node_modules and .env are not copied into the worktree, so a
+            session there installs dependencies itself.
           </div>
         </div>
       </label>

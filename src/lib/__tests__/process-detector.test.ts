@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignCodexSessionIdsByCwd,
   assignOpencodeSessionIdsByCwd,
+  extractCodexCdPath,
   isOpencodeCommand,
   type ActiveProcess,
 } from "../process-detector";
@@ -250,5 +251,24 @@ describe("assignOpencodeSessionIdsByCwd", () => {
     );
 
     expect(processes[0].sessionId).toBeNull();
+  });
+});
+
+describe("extractCodexCdPath", () => {
+  it("reads the project path from -C regardless of the OS cwd", () => {
+    expect(
+      extractCodexCdPath("codex -C /Users/vova/code/trained-agent-architecture --dangerously-bypass-approvals-and-sandbox")
+    ).toBe("/Users/vova/code/trained-agent-architecture");
+  });
+
+  it("supports --cd and --cd= forms, including under a node wrapper", () => {
+    expect(extractCodexCdPath("node /opt/homebrew/bin/codex --cd /repo/x -p hi")).toBe("/repo/x");
+    expect(extractCodexCdPath("codex --cd=/repo/y exec task")).toBe("/repo/y");
+  });
+
+  it("returns null without -C, for non-codex commands, or when the flag has no value", () => {
+    expect(extractCodexCdPath("codex --dangerously-bypass-approvals-and-sandbox")).toBeNull();
+    expect(extractCodexCdPath("claude --resume abc")).toBeNull();
+    expect(extractCodexCdPath("codex -C --model gpt")).toBeNull();
   });
 });

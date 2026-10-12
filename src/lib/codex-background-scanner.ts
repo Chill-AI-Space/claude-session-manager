@@ -7,6 +7,7 @@
  */
 import { getDb } from "./db";
 import { scanCodexSessions } from "./codex-scanner";
+import { checkExpiredAlarms } from "./scanner";
 import * as dlog from "./debug-logger";
 
 const SCAN_INTERVAL_MS = 30 * 1000; // 30 seconds
@@ -59,6 +60,11 @@ async function doScan() {
     if (scanned > 0) {
       dlog.info("codex-bg-scanner", `indexed ${scanned} new/updated Codex sessions`);
     }
+
+    // Fire expired self-alarms (any agent) on this tick. The alarm check lives
+    // inside scanSessions(), which only runs on a Claude scan — so without this
+    // a Codex/OpenCode session's alarm never fires when no UI scan is happening.
+    checkExpiredAlarms(db);
   } catch (err) {
     dlog.info("codex-bg-scanner", `scan error: ${err instanceof Error ? err.message : String(err)}`);
   }
