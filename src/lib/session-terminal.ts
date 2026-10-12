@@ -3,7 +3,7 @@ import { getClaudePath } from "@/lib/claude-bin";
 import { getForgePath } from "@/lib/forge-bin";
 import { getCodexPath } from "@/lib/codex-bin";
 import { resolveOpencodeBuild } from "@/lib/opencode-builds";
-import { applyOpencodeProfile, getCurrentOpencodeProfile } from "@/lib/opencode-profiles";
+import { applyOpencodeProfile, getCurrentOpencodeProfile, hasOpencodeProfile } from "@/lib/opencode-profiles";
 import { buildPromptLoader, shellQuote, writeTempPromptFile } from "@/lib/prompt-file";
 import { SessionRow } from "@/lib/types";
 
@@ -34,16 +34,15 @@ function opencodeAutoFlag(): string {
  * follow-ups, matching how Claude/Codex sessions behave here.
  *
  * OpenCode has no single "model" flag equivalent to Claude's — this setup
- * switches between named profiles (Master, PhD, Free, ...),
+ * switches between named profiles (Standard, Free, Fast),
  * each of which sets models for several OpenCode roles at once (see
- * src/lib/opencode-profiles.ts). `profileId` is applied to
- * ~/.config/opencode/opencode.json right before launch, the same way the
- * `oc <profile>` shell function does, so the TUI picks it up. Without an
+ * src/lib/opencode-profiles.ts). Each launch loads a private profile config
+ * so concurrent sessions cannot overwrite one another's model choice. Without an
  * explicit `profileId` the last selected profile is applied
  * (getCurrentOpencodeProfile — remembered in .current-profile on every
- * applyOpencodeProfile, falling back to DEFAULT_OPENCODE_PROFILE = master),
+ * applyOpencodeProfile, falling back to DEFAULT_OPENCODE_PROFILE = standard),
  * so a session started with no dropdown choice still lands on the profile
- * the user picked last (or master on a fresh machine).
+ * the user picked last (or standard on a fresh machine).
  *
  * The prompt is loaded from a temp file — long/multi-line prompts must never be
  * embedded in the command string, because iTerm2's AppleScript `write text`
@@ -51,9 +50,9 @@ function opencodeAutoFlag(): string {
  */
 export function buildOpencodeStartShellCommand(projectPath: string, message: string, profileId?: string, buildId?: string): string {
   const { binary: bin, autoFlag } = resolveOpencodeBuild(buildId);
-  applyOpencodeProfile(profileId ?? getCurrentOpencodeProfile());
+  const configPath = applyOpencodeProfile(profileId ?? getCurrentOpencodeProfile());
   const promptPath = writeTempPromptFile(message, "csm-opencode-prompt");
-  return `cd ${shellQuote(projectPath)} && ${buildPromptLoader(promptPath)} && ${shellQuote(bin)}${autoFlag ? opencodeAutoFlag() : ""} --prompt "$PROMPT"`;
+  return `cd ${shellQuote(projectPath)} && ${buildPromptLoader(promptPath)} && OPENCODE_CONFIG_CONTENT="$(cat ${shellQuote(configPath)})" ${shellQuote(bin)}${autoFlag ? opencodeAutoFlag() : ""} --prompt "$PROMPT"`;
 }
 
 /** Interactive `claude "<prompt>"` in a fresh terminal — a brand new session, not a resume. */
@@ -93,12 +92,16 @@ export function buildResumeShellCommand(session: SessionRow, message?: string): 
 
   if (isOpencode) {
     const { binary: bin, autoFlag } = resolveOpencodeBuild(session.opencode_build_id);
+    const configPath = session.model && hasOpencodeProfile(session.model)
+      ? applyOpencodeProfile(session.model, false)
+      : null;
+    const configEnv = configPath ? `OPENCODE_CONFIG_CONTENT="$(cat ${shellQuote(configPath)})" ` : "";
     // Root command's --session, not `run -s` — same reasoning as the start
     // command above: this needs to reopen the interactive TUI attached to
     // that session, not run one more one-shot exchange and exit. --prompt
     // is accepted alongside --session (both root flags), so a reply can
     // resume the session AND send the new message in one shot.
-    return `cd ${shellQuote(cwd)}${promptLoader} && ${shellQuote(bin)}${autoFlag ? opencodeAutoFlag() : ""} --session ${shellQuote(session.session_id)}${promptFlag}`;
+    return `cd ${shellQuote(cwd)}${promptLoader} && ${configEnv}${shellQuote(bin)}${autoFlag ? opencodeAutoFlag() : ""} --session ${shellQuote(session.session_id)}${promptFlag}`;
   }
 
   if (isCodex) {

@@ -24,17 +24,12 @@ import path from "path";
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), ".config", "opencode");
 const PROFILES_DIR = path.join(OPENCODE_CONFIG_DIR, "profiles");
 const BASE_CONFIG_PATH = path.join(OPENCODE_CONFIG_DIR, "base.json");
-const MERGED_CONFIG_PATH = path.join(OPENCODE_CONFIG_DIR, "opencode.json");
 const CURRENT_PROFILE_PATH = path.join(OPENCODE_CONFIG_DIR, ".current-profile");
 
-// Fallback when ~/.config/opencode/.current-profile is missing or points at
-// a profile that no longer exists (see getCurrentOpencodeProfile below) — and
-// the same-render default for the profile dropdown before the live list
-// loads (see useOpencodeProfiles). `master` is the owner's default profile
-// (2026-10-02 tier-ladder rework): build on the free ladder, other roles
-// with mimo. Check `ls ~/.config/opencode/profiles` before trusting this
-// literal — it WILL drift if profiles/ is reorganized by hand.
-export const DEFAULT_OPENCODE_PROFILE = "master";
+// Public Ladder modes. Legacy profile files remain usable by existing sessions
+// and explicit callers, but are not offered for new sessions.
+const PUBLIC_OPENCODE_PROFILES = ["standard", "free", "fast"] as const;
+export const DEFAULT_OPENCODE_PROFILE = "standard";
 
 export interface OpencodeProfile {
   id: string;
@@ -42,68 +37,34 @@ export interface OpencodeProfile {
   description?: string;
 }
 
-// Friendly labels for the profiles this setup ships with, matching the
-// descriptions in the `oc()` shell function. A profile file without an
-// entry here still shows up (labeled with its own file name), so adding a
-// new profiles/<id>.json file doesn't require a code change.
-const PROFILE_DISPLAY_NAMES: Record<string, { name: string; description: string }> = {
-  master: {
-    name: "Master",
-    description: "Дефолт: build на ladder/build, остальные роли — соседние ступени лестницы",
+const PROFILE_DISPLAY_NAMES: Record<(typeof PUBLIC_OPENCODE_PROFILES)[number], { name: string; description: string }> = {
+  standard: {
+    name: "Standard",
+    description: "Экономный режим с платным резервом после бесплатных моделей",
   },
-  phd: {
-    name: "PhD",
-    description: "build на верхней ступени лестницы (ladder/build advanced)",
+  fast: {
+    name: "Fast",
+    description: "Быстрый платный старт, кэш и платный резерв",
   },
   free: {
     name: "Free",
-    description: "build на нижней бесплатной ступени лестницы (ladder/free)",
-  },
-  "ladder-research": {
-    name: "Ladder Research",
-    description: "Ресёрч-лестница Hermes (Go-first)",
-  },
-  "russian-recruiter": {
-    name: "Russian Recruiter",
-    description: "GigaChat Pro/Ultra/Max — for interviews, transcripts and reports in Russian",
+    description: "Только бесплатные модели, без платного резерва",
   },
 };
 
-function titleCaseFromId(id: string): string {
-  return id
-    .split(/[-_]/)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
-/** Lists profiles found in ~/.config/opencode/profiles. Empty if OpenCode isn't set up this way. */
+/** Lists the three public modes when their profile files are installed. */
 export function listOpencodeProfiles(): OpencodeProfile[] {
-  let files: string[] = [];
-  try {
-    files = fs.readdirSync(PROFILES_DIR).filter((f) => f.endsWith(".json"));
-  } catch {
-    return [];
-  }
-
-  return files
-    .map((file) => {
-      const id = file.replace(/\.json$/, "");
-      const known = PROFILE_DISPLAY_NAMES[id];
-      return {
-        id,
-        name: known?.name ?? titleCaseFromId(id),
-        description: known?.description,
-      };
+  return PUBLIC_OPENCODE_PROFILES
+    .filter((id) => fs.existsSync(path.join(PROFILES_DIR, `${id}.json`)))
+    .map((id) => {
+      return { id, ...PROFILE_DISPLAY_NAMES[id] };
     })
-    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
  * Reads the currently active profile id from ~/.config/opencode/.current-profile.
- * Verifies the file it names actually still exists (profiles get renamed/archived
- * by hand) — falls back to DEFAULT_OPENCODE_PROFILE (master), and if even
- * that's gone, to whatever profile genuinely exists on disk, rather than
- * pointing callers at a dead profile id.
+ * Returns a public mode if installed. A legacy current profile remains on disk
+ * for explicit use, but new sessions default to standard.
  */
 export function getCurrentOpencodeProfile(): string {
   let candidate = DEFAULT_OPENCODE_PROFILE;
@@ -114,18 +75,18 @@ export function getCurrentOpencodeProfile(): string {
     // No .current-profile file yet — use the default.
   }
 
-  if (fs.existsSync(path.join(PROFILES_DIR, `${candidate}.json`))) return candidate;
+  if (
+    PUBLIC_OPENCODE_PROFILES.some((id) => id === candidate) &&
+    fs.existsSync(path.join(PROFILES_DIR, `${candidate}.json`))
+  ) return candidate;
 
-  // .current-profile points at a profile that no longer exists (e.g. an
-  // archived one) — fall back to the default (master), NOT to whatever
-  // profile happens to sort first: the default is the owner's chosen
-  // starting point, not an accident of alphabetical order.
+  // Unknown and legacy selections never become a different paid mode by
+  // alphabetical accident.
   if (fs.existsSync(path.join(PROFILES_DIR, `${DEFAULT_OPENCODE_PROFILE}.json`))) {
     return DEFAULT_OPENCODE_PROFILE;
   }
 
-  const anyExisting = listOpencodeProfiles()[0]?.id;
-  return anyExisting ?? candidate;
+  return DEFAULT_OPENCODE_PROFILE;
 }
 
 /**
@@ -148,36 +109,15 @@ function deepMergeJson(base: unknown, override: unknown): unknown {
   return override;
 }
 
-/**
- * Applies an OpenCode profile the same way `oc <profile>` does in the shell:
- * merge base.json with profiles/<profileId>.json into opencode.json, and
- * record the active profile. Call this right before starting an `opencode`
- * process from the UI so it picks up the chosen profile's models —
- * including the per-role (build/plan/explore/general/review) model
- * overrides, which an `opencode run -m` flag alone cannot express.
- */
-export function applyOpencodeProfile(profileId: string): void {
-  let resolvedProfileId = profileId;
-  let profilePath = path.join(PROFILES_DIR, `${profileId}.json`);
+/** Validates a profile id before using it as a filename. */
+export function hasOpencodeProfile(profileId: string): boolean {
+  return /^[a-z0-9][a-z0-9_-]*$/.test(profileId) && fs.existsSync(path.join(PROFILES_DIR, `${profileId}.json`));
+}
 
-  // Profiles get renamed/archived by hand from time to time (see the
-  // DEFAULT_OPENCODE_PROFILE comment above) — a stale client (an old tab,
-  // a cached dropdown value) can still request a profile id that no longer
-  // exists. Throwing here used to abort session creation entirely with no
-  // terminal ever opening and no session_id ever coming back — from the UI
-  // this looked like "nothing happened", not an error. Fall back to
-  // whichever profile is actually live instead of hard-failing, and only
-  // throw if THAT is also missing (a genuinely broken setup).
-  if (!fs.existsSync(profilePath)) {
-    const fallbackId = getCurrentOpencodeProfile();
-    const fallbackPath = path.join(PROFILES_DIR, `${fallbackId}.json`);
-    if (!fs.existsSync(fallbackPath)) {
-      throw new Error(`Unknown OpenCode profile: ${profileId} (fallback "${fallbackId}" also missing)`);
-    }
-    console.warn(`[opencode-profiles] Unknown profile "${profileId}" requested — falling back to current "${fallbackId}"`);
-    resolvedProfileId = fallbackId;
-    profilePath = fallbackPath;
-  }
+/** Writes one private config file for a single OpenCode process. */
+export function applyOpencodeProfile(profileId: string, remember = true): string {
+  if (!hasOpencodeProfile(profileId)) throw new Error(`Unknown OpenCode profile: ${profileId}`);
+  const profilePath = path.join(PROFILES_DIR, `${profileId}.json`);
 
   const profileConfig = JSON.parse(fs.readFileSync(profilePath, "utf-8"));
 
@@ -189,8 +129,14 @@ export function applyOpencodeProfile(profileId: string): void {
   }
 
   const mergedConfig = allowAttachmentDirectory(deepMergeJson(baseConfig, profileConfig));
-  fs.writeFileSync(MERGED_CONFIG_PATH, JSON.stringify(mergedConfig, null, 2));
-  fs.writeFileSync(CURRENT_PROFILE_PATH, resolvedProfileId);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "csm-opencode-config-"));
+  fs.chmodSync(directory, 0o700);
+  const configPath = path.join(directory, "opencode.json");
+  fs.writeFileSync(configPath, JSON.stringify(mergedConfig), { mode: 0o600 });
+  if (remember && PUBLIC_OPENCODE_PROFILES.some((id) => id === profileId)) {
+    fs.writeFileSync(CURRENT_PROFILE_PATH, profileId);
+  }
+  return configPath;
 }
 
 /**
