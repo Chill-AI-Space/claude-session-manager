@@ -17,11 +17,16 @@ vi.mock("../db", () => ({
 
 // The OpenCode profile module reads/writes ~/.config/opencode — mock it so
 // these tests never touch the developer's live profile config.
-const applyOpencodeProfile = vi.fn();
-const getCurrentOpencodeProfile = vi.fn(() => "master");
+const applyOpencodeProfile = vi.fn((profileId: string, remember?: boolean) => {
+  void profileId;
+  void remember;
+  return "/tmp/csm-profile-config.json";
+});
+const getCurrentOpencodeProfile = vi.fn(() => "standard");
 vi.mock("../opencode-profiles", () => ({
-  applyOpencodeProfile: (profileId: string) => applyOpencodeProfile(profileId),
+  applyOpencodeProfile: (profileId: string, remember?: boolean) => applyOpencodeProfile(profileId, remember),
   getCurrentOpencodeProfile: () => getCurrentOpencodeProfile(),
+  hasOpencodeProfile: (profileId: string) => ["standard", "free", "fast", "master", "phd"].includes(profileId),
 }));
 
 function extractPromptFile(cmd: string, varName = "PROMPT"): string {
@@ -68,6 +73,7 @@ describe("session-terminal prompt handling", () => {
 
     expect(cmd).not.toContain(LONG_MESSAGE);
     expect(cmd).toContain('--prompt "$PROMPT"');
+    expect(cmd).toContain('OPENCODE_CONFIG_CONTENT="$(cat');
     expect(cmd.length).toBeLessThan(500);
 
     const promptPath = extractPromptFile(cmd);
@@ -135,7 +141,7 @@ describe("OpenCode profile selection", () => {
   it("applies the explicit profile id when one is passed", () => {
     applyOpencodeProfile.mockClear();
     const cmd = buildOpencodeStartShellCommand("/tmp/proj", "do the thing", "phd");
-    expect(applyOpencodeProfile).toHaveBeenCalledWith("phd");
+    expect(applyOpencodeProfile).toHaveBeenCalledWith("phd", undefined);
     fs.unlinkSync(extractPromptFile(cmd));
   });
 
@@ -143,15 +149,22 @@ describe("OpenCode profile selection", () => {
     applyOpencodeProfile.mockClear();
     getCurrentOpencodeProfile.mockReturnValue("phd");
     const cmd = buildOpencodeStartShellCommand("/tmp/proj", "do the thing");
-    expect(applyOpencodeProfile).toHaveBeenCalledWith("phd");
+    expect(applyOpencodeProfile).toHaveBeenCalledWith("phd", undefined);
     fs.unlinkSync(extractPromptFile(cmd));
   });
 
-  it("falls back to master when no id is passed and no profile was ever selected", () => {
+  it("falls back to standard when no id is passed and no profile was ever selected", () => {
     applyOpencodeProfile.mockClear();
-    getCurrentOpencodeProfile.mockReturnValue("master");
+    getCurrentOpencodeProfile.mockReturnValue("standard");
     const cmd = buildOpencodeStartShellCommand("/tmp/proj", "do the thing");
-    expect(applyOpencodeProfile).toHaveBeenCalledWith("master");
+    expect(applyOpencodeProfile).toHaveBeenCalledWith("standard", undefined);
     fs.unlinkSync(extractPromptFile(cmd));
+  });
+
+  it("reopens a selected profile without changing the default for another session", () => {
+    applyOpencodeProfile.mockClear();
+    const cmd = buildResumeShellCommand({ ...opencodeSession, model: "fast" });
+    expect(applyOpencodeProfile).toHaveBeenCalledWith("fast", false);
+    expect(cmd).toContain('OPENCODE_CONFIG_CONTENT="$(cat');
   });
 });

@@ -167,12 +167,9 @@ export async function POST(request: NextRequest) {
     const { openInTerminal } = await import("@/lib/terminal-launcher");
     const { listOpencodeSessions } = await import("@/lib/opencode-db");
     const { getDb } = await import("@/lib/db");
-    // `model` here is actually an OpenCode profile id (e.g. "master",
-    // "phd", "free") — see OpencodeProfileSelector /
-    // src/lib/opencode-profiles.ts. Building the shell command applies that
-    // profile to ~/.config/opencode/opencode.json (or the last selected one
-    // when no id was passed), which throws on an unknown profile id, so it
-    // needs its own try/catch rather than crashing the whole request.
+    // `model` is an OpenCode profile id. Persist the resolved id so resume
+    // rebuilds the same per-process config rather than using another session's
+    // global selection.
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
@@ -183,7 +180,9 @@ export async function POST(request: NextRequest) {
           // Snapshot existing OpenCode session ids for this exact directory before
           // launch, so we can tell which one is new (same pattern as the Codex branch).
           const existingIds = new Set(listOpencodeSessions(resolvedProjectPath).map((s) => s.id));
-          const shellCmd = buildOpencodeStartShellCommand(resolvedProjectPath, message.trim(), model, opencodeBuild);
+          const { getCurrentOpencodeProfile } = await import("@/lib/opencode-profiles");
+          const profileId = model || getCurrentOpencodeProfile();
+          const shellCmd = buildOpencodeStartShellCommand(resolvedProjectPath, message.trim(), profileId, opencodeBuild);
           const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedProjectPath });
           send({ type: "status", text: `Opencode opened in ${terminal}` });
 
@@ -224,7 +223,7 @@ export async function POST(request: NextRequest) {
                 jsonl_path: `opencode://${sessionId}`,
                 project_dir: projectDir,
                 project_path: resolvedProjectPath,
-                model: model || null,
+                model: profileId,
                 first_prompt: message.trim().slice(0, 1000),
                 last_message: message.trim().slice(-1000),
                 created_at: createdAt,

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // opencode-profiles.ts resolves ~/.config/opencode at module load time, so the
 // homedir mock and the sandbox dir must exist before the module is imported.
@@ -25,8 +25,17 @@ import { applyOpencodeProfile, getCurrentOpencodeProfile, listOpencodeProfiles }
 const CONFIG_DIR = path.join(tmpRoot, ".config", "opencode");
 const PROFILES_DIR = path.join(CONFIG_DIR, "profiles");
 const CURRENT_PROFILE_PATH = path.join(CONFIG_DIR, ".current-profile");
+const generatedConfigs: string[] = [];
 
 const LIVE_PROFILES: Record<string, unknown> = {
+  standard: {
+    model: "ladder/standard",
+    agent: { build: { model: "ladder/standard" } },
+  },
+  fast: {
+    model: "ladder/fast",
+    agent: { build: { model: "ladder/fast" } },
+  },
   master: {
     model: "ladder/build",
     agent: {
@@ -83,33 +92,35 @@ beforeEach(() => {
   for (const [id, config] of Object.entries(LIVE_PROFILES)) {
     writeProfile(id, config);
   }
-  setCurrentProfile("master");
+  setCurrentProfile("standard");
 });
 
 afterAll(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
+afterEach(() => {
+  for (const configPath of generatedConfigs.splice(0)) fs.rmSync(path.dirname(configPath), { recursive: true, force: true });
+});
+
+function apply(id: string, remember = true) {
+  const configPath = applyOpencodeProfile(id, remember);
+  generatedConfigs.push(configPath);
+  return configPath;
+}
+
 describe("listOpencodeProfiles", () => {
-  it("lists exactly the live profiles with display names and descriptions", () => {
+  it("lists exactly the three public modes while preserving legacy files", () => {
     const profiles = listOpencodeProfiles();
 
-    expect(profiles.map((p) => p.id)).toEqual([
-      "free",
-      "ladder-research",
-      "master",
-      "phd",
-      "russian-recruiter",
-    ]);
-    expect(profiles.find((p) => p.id === "master")).toEqual({
-      id: "master",
-      name: "Master",
-      description: "Дефолт: build на ladder/build, остальные роли — соседние ступени лестницы",
+    expect(profiles.map((p) => p.id)).toEqual(["standard", "free", "fast"]);
+    expect(profiles.find((p) => p.id === "standard")).toEqual({
+      id: "standard",
+      name: "Standard",
+      description: "Экономный режим с платным резервом после бесплатных моделей",
     });
-    expect(profiles.find((p) => p.id === "phd")?.name).toBe("PhD");
     expect(profiles.find((p) => p.id === "free")?.name).toBe("Free");
-    expect(profiles.find((p) => p.id === "ladder-research")?.name).toBe("Ladder Research");
-    expect(profiles.find((p) => p.id === "russian-recruiter")?.name).toBe("Russian Recruiter");
+    expect(profiles.find((p) => p.id === "fast")?.name).toBe("Fast");
   });
 
   it("does not list archived profiles (moved to profiles/_archive)", () => {
@@ -124,33 +135,46 @@ describe("listOpencodeProfiles", () => {
 
 describe("getCurrentOpencodeProfile", () => {
   it("returns the profile recorded in .current-profile", () => {
-    setCurrentProfile("phd");
-    expect(getCurrentOpencodeProfile()).toBe("phd");
+    setCurrentProfile("fast");
+    expect(getCurrentOpencodeProfile()).toBe("fast");
   });
 
-  it("falls back to master when .current-profile points at a non-existent profile", () => {
+  it("falls back to standard when .current-profile points at a non-existent profile", () => {
     setCurrentProfile("deepseek-go");
-    expect(getCurrentOpencodeProfile()).toBe("master");
+    expect(getCurrentOpencodeProfile()).toBe("standard");
   });
 
-  it("falls back to master when .current-profile is missing", () => {
+  it("falls back to standard when .current-profile is missing", () => {
     setCurrentProfile(null);
-    expect(getCurrentOpencodeProfile()).toBe("master");
+    expect(getCurrentOpencodeProfile()).toBe("standard");
   });
 
-  it("falls back to master when .current-profile is empty", () => {
+  it("falls back to standard when .current-profile is empty", () => {
     setCurrentProfile("");
-    expect(getCurrentOpencodeProfile()).toBe("master");
+    expect(getCurrentOpencodeProfile()).toBe("standard");
+  });
+
+  it("uses the public default for new sessions while legacy profiles remain explicit", () => {
+    setCurrentProfile("master");
+    expect(getCurrentOpencodeProfile()).toBe("standard");
+  });
+
+  it("does not switch to a different budget when standard is missing", () => {
+    fs.rmSync(path.join(PROFILES_DIR, "standard.json"));
+    setCurrentProfile("master");
+    expect(getCurrentOpencodeProfile()).toBe("standard");
   });
 });
 
 describe("applyOpencodeProfile", () => {
-  it("deep-merges base.json with the profile and records it as current", () => {
-    applyOpencodeProfile("phd");
+  it("deep-merges a legacy profile into a private config without changing the global file", () => {
+    const configPath = apply("phd");
 
-    expect(fs.readFileSync(CURRENT_PROFILE_PATH, "utf-8")).toBe("phd");
+    expect(fs.readFileSync(CURRENT_PROFILE_PATH, "utf-8")).toBe("standard");
+    expect(fs.existsSync(path.join(CONFIG_DIR, "opencode.json"))).toBe(false);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
 
-    const merged = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, "opencode.json"), "utf-8"));
+    const merged = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     // Profile override wins for build, base keys survive elsewhere.
     expect(merged.model).toBe("ladder/build advanced");
     expect(merged.theme).toBe("dark");
@@ -159,19 +183,23 @@ describe("applyOpencodeProfile", () => {
   });
 
   it("remembers the last selection: a later getCurrentOpencodeProfile returns it", () => {
-    applyOpencodeProfile("phd");
-    expect(getCurrentOpencodeProfile()).toBe("phd");
+    apply("fast");
+    expect(getCurrentOpencodeProfile()).toBe("fast");
 
-    applyOpencodeProfile("free");
+    apply("free");
     expect(getCurrentOpencodeProfile()).toBe("free");
   });
 
-  it("falls back to the current profile (master) for an unknown id instead of throwing", () => {
-    setCurrentProfile("master");
-    applyOpencodeProfile("deepseek-go");
+  it("rejects unknown ids rather than silently changing the budget", () => {
+    setCurrentProfile("standard");
+    expect(() => applyOpencodeProfile("deepseek-go")).toThrow("Unknown OpenCode profile");
+    expect(() => applyOpencodeProfile("../free")).toThrow("Unknown OpenCode profile");
+    expect(fs.readFileSync(CURRENT_PROFILE_PATH, "utf-8")).toBe("standard");
+  });
 
-    expect(fs.readFileSync(CURRENT_PROFILE_PATH, "utf-8")).toBe("master");
-    const merged = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, "opencode.json"), "utf-8"));
-    expect(merged.model).toBe("ladder/build");
+  it("resumes with the chosen profile without changing the default selection", () => {
+    const configPath = apply("fast", false);
+    expect(JSON.parse(fs.readFileSync(configPath, "utf-8")).model).toBe("ladder/fast");
+    expect(getCurrentOpencodeProfile()).toBe("standard");
   });
 });
