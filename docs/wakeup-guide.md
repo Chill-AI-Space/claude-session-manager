@@ -189,7 +189,7 @@ CHILD_ID=$(… | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id
 5. Завершение — `reply` родителю/себе с `DONE:`; при необходимости
    `DELETE /alarm?clear=true`, чтобы штатный babysitter снова работал.
 
-Готовый шаблон координатора (для Claude): 
+Готовый шаблон координатора (для Claude):
 [docs/coordinator-prompt-template.md](coordinator-prompt-template.md) —
 та же механика, только id там берётся из `[Session Manager Context]`.
 
@@ -207,7 +207,7 @@ CHILD_ID=$(… | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*"session_id
   незаметный фоновый процесс. Для опенкода `reply` всегда открывает новый
   терминал даже если сессия уже открыта — следи, чтобы не плодить
   дубликаты TUI.
-- Самопитание от дурацких петель: babysitter-стопор 
+- Самопитание от дурацких петель: babysitter-стопор
   (`detectBabysitterLoop`) прерывает серию неэффективных возобновлений
   (~4 резюма) — не закладывайся на бесконечные автопинги без прогресса.
 - Остановить чужую насильно: `POST /api/sessions/{id}/kill`.
