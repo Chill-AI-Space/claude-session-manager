@@ -123,6 +123,14 @@ function sessionsToResume(before, liveIds) {
   });
 }
 
+/** Only Claude sessions have an authoritative post-restart ID check here. */
+function classifySessionSurvival(before, liveIds) {
+  const claude = before.filter((s) => !s.agent || s.agent === "claude");
+  const unverified = before.filter((s) => s.agent && s.agent !== "claude");
+  const lost = sessionsToResume(claude, liveIds);
+  return { lost, survived: claude.length - lost.length, unverified };
+}
+
 function run(cmd, args, opts = {}) {
   log(`$ ${cmd} ${args.join(" ")}`);
   const r = spawnSync(cmd, args, { cwd: ROOT, stdio: "inherit", shell: process.platform === "win32", ...opts });
@@ -191,16 +199,15 @@ async function deploy() {
   await sleep(5000); // let process detection settle
   const after = new Set((await liveSessions()).map((s) => s.sessionId));
   for (const id of readLiveSessionIdsLocal()) after.add(id);
-  const lost = sessionsToResume(before, after);
-  log(`survived restart: ${before.length - lost.length}, died: ${lost.length}`);
+  const { lost, survived, unverified } = classifySessionSurvival(before, after);
+  log(`Claude sessions survived restart: ${survived}, died: ${lost.length}`);
+  if (unverified.length) {
+    log(`${unverified.length} non-Claude session(s): survival not verified by deploy; check their processes before resuming`);
+  }
   if (has("--no-resume")) {
     log("--no-resume: dead sessions NOT resumed: " + lost.map((s) => s.sessionId).join(", "));
   } else {
     for (const s of lost) {
-      if (s.agent !== "claude") {
-        log(`  ! ${s.sessionId.slice(0, 8)} is a ${s.agent} session — cannot auto-resume, resume it manually`);
-        continue;
-      }
       try {
         await api("/api/orchestrator", {
           method: "POST",
@@ -262,4 +269,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { liveSessionIdsLocal, sessionsToResume };
+module.exports = { liveSessionIdsLocal, sessionsToResume, classifySessionSurvival };
