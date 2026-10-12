@@ -5,6 +5,7 @@ import { SessionRow, SessionListItem } from "@/lib/types";
 import { fetchAllRemoteSessions } from "@/lib/remote-compute";
 import { ensureCodexBackgroundScanner } from "@/lib/codex-background-scanner";
 import { ensureOpencodeBackgroundScanner } from "@/lib/opencode-background-scanner";
+import { isSessionActiveForList } from "@/lib/session-activity";
 
 export const dynamic = "force-dynamic";
 
@@ -160,19 +161,7 @@ export async function GET(request: NextRequest) {
 
   const sessions: SessionListItem[] = rows.map((row) => {
     const agentType = (row as SessionRow & { agent_type?: string }).agent_type ?? "claude";
-    const fileAgeMs = Date.now() - row.file_mtime;
-    let isActive: boolean;
-    if (agentType === "codex") {
-      isActive = !row.has_result && fileAgeMs < 5 * 60 * 1000;
-    } else if (agentType === "forge") {
-      isActive = fileAgeMs < 5 * 60 * 1000;
-    } else if (agentType === "opencode") {
-      // OpenCode sessions are live if their process is detected (binding via
-      // --session/-s flags or cwd+prompt) or the session was updated recently.
-      isActive = activeIds.has(row.session_id) || fileAgeMs < 5 * 60 * 1000;
-    } else {
-      isActive = activeIds.has(row.session_id);
-    }
+    const isActive = isSessionActiveForList({ ...row, agent_type: agentType }, activeIds);
 
     return {
       session_id: row.session_id,
