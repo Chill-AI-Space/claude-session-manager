@@ -2,7 +2,7 @@ import { createRequire } from "module";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { liveSessionIdsLocal, sessionsToResume } = require("../../../scripts/deploy-live.js");
+const { liveSessionIdsLocal, sessionsToResume, classifySessionSurvival } = require("../../../scripts/deploy-live.js");
 
 const A = "51192f90-4a03-4c79-9f94-90320dc2496c";
 const B = "a0fe993d-0000-4000-8000-000000000000";
@@ -26,5 +26,17 @@ describe("deploy-live resume selection", () => {
   it("ignores dead registry pids and non-claude command lines", () => {
     const ps = `1 tail -f /x/${A}.jsonl\n2 /bin/zsh -c claude --resume ${A}\n`;
     expect([...liveSessionIdsLocal(ps, [{ pid: 9, sessionId: B }], () => false)]).toEqual([]);
+  });
+
+  it("does not report terminal agents dead when the server cache is cold", () => {
+    const before = [
+      { sessionId: A, agent: "codex" },
+      { sessionId: B, agent: "opencode" },
+      { sessionId: C, agent: "claude" },
+    ];
+    const result = classifySessionSurvival(before, new Set());
+    expect(result.lost.map((s: { sessionId: string }) => s.sessionId)).toEqual([C]);
+    expect(result.survived).toBe(0);
+    expect(result.unverified.map((s: { sessionId: string }) => s.sessionId)).toEqual([A, B]);
   });
 });
