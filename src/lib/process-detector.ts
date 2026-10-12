@@ -71,6 +71,8 @@ function refreshTcpAsync(pid: number): void {
 // out ALL its pids (e.g. an attached `opencode run -s …` next to its TUI).
 let cachedResult: { processes: ActiveProcess[]; raw: ActiveProcess[]; timestamp: number } | null = null;
 const CACHE_TTL_MS = 8000;
+const MAX_CACHE_STALE_MS = 60_000;
+let lastRefreshError: string | null = null;
 
 const CLAUDE_DIR = claudeProjectsDir();
 
@@ -544,12 +546,16 @@ function finalizeProcesses(processes: ActiveProcess[]): ActiveProcess[] {
 }
 
 /** Async version of detectUnix: runs ps + lsof via exec() so it never blocks the event loop */
-function detectUnixAsync(callback: (processes: ActiveProcess[]) => void): void {
+function detectUnixAsync(callback: (processes: ActiveProcess[], error?: Error) => void): void {
   exec(
     'ps axo pid=,etime=,tty=,command= | grep -E "(/| |^)(claude|codex|opencode)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
     { encoding: "utf-8", timeout: 3000 },
     (psErr, psOutput) => {
-      if (psErr || !psOutput?.trim()) { callback([]); return; }
+      if (psErr && String(psErr.code) !== "1") {
+        callback([], psErr);
+        return;
+      }
+      if (!psOutput?.trim()) { callback([]); return; }
       const processes: ActiveProcess[] = [];
       for (const line of psOutput.trim().split("\n")) {
         const match = line.trim().match(/^(\d+)\s+(\S+)\s+(\S+)\s+(.+)$/);
@@ -567,7 +573,11 @@ function detectUnixAsync(callback: (processes: ActiveProcess[]) => void): void {
         `${LSOF} -p ${pids.join(",")} -a -d cwd -Fpn 2>/dev/null || true`,
         { encoding: "utf-8", timeout: 3000 },
         (lsofErr, cwdOutput) => {
-          if (!lsofErr && cwdOutput) {
+          if (lsofErr || !cwdOutput?.trim()) {
+            callback(processes, lsofErr ?? new Error("lsof returned no cwd entries"));
+            return;
+          }
+          if (cwdOutput) {
             let currentPid = 0;
             for (const cwdLine of cwdOutput.split("\n")) {
               if (cwdLine.startsWith("p")) currentPid = parseInt(cwdLine.slice(1));
@@ -590,11 +600,15 @@ let asyncRefreshRunning = false;
 function scheduleAsyncRefresh(): void {
   if (asyncRefreshRunning || isWin) return;
   asyncRefreshRunning = true;
-  detectUnixAsync((rawProcesses) => {
+  detectUnixAsync((rawProcesses, error) => {
     try {
+      if (error) throw error;
       cachedResult = { processes: finalizeProcesses(rawProcesses), raw: rawProcesses, timestamp: Date.now() };
-    } catch {
-      cachedResult = { processes: [], raw: [], timestamp: Date.now() };
+      lastRefreshError = null;
+    } catch (error) {
+      // A transient ps/lsof/DB failure cannot prove that every live agent died.
+      // Keep the last confirmed snapshot, while its age still bounds trust.
+      lastRefreshError = String(error);
     }
     asyncRefreshRunning = false;
   });
@@ -609,7 +623,26 @@ export function detectActiveClaudeSessions(): ActiveProcess[] {
   if (Date.now() - cachedResult.timestamp >= CACHE_TTL_MS) {
     scheduleAsyncRefresh(); // refresh in background, return stale now
   }
-  return cachedResult.processes;
+  return Date.now() - cachedResult.timestamp <= MAX_CACHE_STALE_MS ? cachedResult.processes : [];
+}
+
+/** On-demand counters for diagnosing process cache and DB binding failures. */
+export function getProcessDetectionDiagnostics() {
+  const cache = cachedResult;
+  const raw = detectUnix();
+  const candidates = listIndexableOpencodeSessions();
+  const mapped = finalizeProcesses(raw.map((proc) => ({ ...proc })));
+  return {
+    cacheAgeMs: cache ? Date.now() - cache.timestamp : null,
+    lastRefreshError,
+    cachedRaw: cache?.raw.length ?? null,
+    cachedMapped: cache?.processes.length ?? null,
+    raw: raw.length,
+    rawOpencode: raw.filter((proc) => isOpencodeCommand(proc.command)).length,
+    candidates: candidates.length,
+    mapped: mapped.length,
+    mappedOpencode: mapped.filter((proc) => isOpencodeCommand(proc.command)).length,
+  };
 }
 
 /**
@@ -620,7 +653,7 @@ export function detectActiveClaudeSessions(): ActiveProcess[] {
  * resume live sessions on the first tick after a restart).
  */
 export function isSessionCacheWarm(): boolean {
-  return cachedResult !== null;
+  return cachedResult !== null && Date.now() - cachedResult.timestamp <= MAX_CACHE_STALE_MS;
 }
 
 /**
@@ -680,10 +713,16 @@ const RESUME_RE = /(?:--)?resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 /** Unix: use ps + lsof to find claude/codex processes and their CWDs */
 function detectUnix(): ActiveProcess[] {
-  const psOutput = execSync(
-    'ps axo pid=,etime=,tty=,command= | grep -E "(/| |^)(claude|codex|opencode)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
-    { encoding: "utf-8", timeout: 3000 }
-  ).trim();
+  let psOutput: string;
+  try {
+    psOutput = execSync(
+      'ps axo pid=,etime=,tty=,command= | grep -E "(/| |^)(claude|codex|opencode)( |$)" | grep -v grep | grep -v "claude-mermaid" | grep -v "claude-mcp" | grep -v "next dev"',
+      { encoding: "utf-8", timeout: 3000 }
+    ).trim();
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "status" in error && error.status === 1) return [];
+    throw error;
+  }
 
   if (!psOutput) return [];
 
@@ -732,6 +771,16 @@ export function isSessionActive(sessionId: string): boolean {
 }
 
 export function getActiveSessionIds(): Set<string> {
+  if (!cachedResult && !isWin) {
+    try {
+      const raw = detectUnix();
+      cachedResult = { processes: finalizeProcesses(raw), raw, timestamp: Date.now() };
+      lastRefreshError = null;
+    } catch (error) {
+      lastRefreshError = String(error);
+      scheduleAsyncRefresh();
+    }
+  }
   return new Set(
     detectActiveClaudeSessions()
       .map((p) => p.sessionId)
