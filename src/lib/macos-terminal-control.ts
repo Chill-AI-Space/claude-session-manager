@@ -156,9 +156,13 @@ if iTerm2Running then
                 -- bridge was observed routing write text to the currently
                 -- focused session after activate+select, not to the referenced
                 -- session object s — moving the write first avoids that.
+                -- Tested 2026-10-11 against a live codex TUI: neither the
+                -- LF from "newline YES" nor a CR appended to the payload is
+                -- treated as Enter by codex (the text sat in the input box);
+                -- a real Return keypress via System Events submits reliably,
+                -- for single- and multi-line payloads alike.
                 tell s to write text payloadText newline NO
                 delay 0.15
-                tell s to write text ""
                 -- Focus after writing (for user experience only)
                 try
                   activate
@@ -171,6 +175,19 @@ if iTerm2Running then
                 end try
                 try
                   select s
+                end try
+                delay 0.2
+                try
+                  tell application "System Events"
+                    if not (frontmost of application "iTerm") then tell application "iTerm" to activate
+                    delay 0.1
+                    key code 36
+                  end tell
+                on error
+                  -- No Accessibility/Automation consent for System Events in
+                  -- this context — fall back to the legacy newline submit
+                  -- (enough for claude/opencode TUIs; codex keeps the text).
+                  tell s to write text "" newline YES
                 end try
                 return "ok:iterm2"
               end if
@@ -242,6 +259,48 @@ return "not_found"
 }
 
 /**
+ * Press Return in the iTerm session bound to `tty` (focus + real keypress).
+ * Used to re-submit when a first Return got lost to a focus race — sends
+ * nothing anywhere if the TTY is not found.
+ */
+export function pressReturnInTty(tty: string): void {
+  const target = asAppleScriptString(tty);
+  const script = `
+set targetTTY to ${target}
+set tail to targetTTY
+if tail starts with "/dev/" then set tail to text 6 thru -1 of tail
+tell application "iTerm"
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        try
+          set ct to (tty of s as text)
+          if ct is targetTTY or ct is tail or ct is ("/dev/" & tail) then
+            activate
+            set index of w to 1
+            select t
+            select s
+            delay 0.2
+            tell application "System Events"
+              if not (frontmost of application "iTerm") then tell application "iTerm" to activate
+              delay 0.1
+              key code 36
+            end tell
+            return "pressed"
+          end if
+        end try
+      end repeat
+    end repeat
+  end repeat
+end tell
+return "not found"
+`.trim();
+  try {
+    runAppleScript(script);
+  } catch { /* best-effort retry */ }
+}
+
+/**
  * sendTextToTerminalTTY, but verified against ground truth: iTerm's own
  * `tty of s` matching has been observed, confirmed live, to sometimes bind
  * to the WRONG session while every AppleScript-internal check (including a
@@ -257,10 +316,12 @@ return "not_found"
 export async function sendTextToTerminalTTYVerified(args: {
   tty: string;
   text: string;
-  transcriptPath: string;
+  /** Omit when the session has no transcript file on disk (OpenCode) — the send is then trusted as-is. */
+  transcriptPath?: string;
 }): Promise<{ ok: boolean; error?: string; terminal?: "iTerm2" | "Terminal"; reason?: "not_found" | "applescript" | "busy" | "mismatch" }> {
   const result = sendTextToTerminalTTY({ tty: args.tty, text: args.text });
   if (!result.ok) return result;
+  if (!args.transcriptPath) return result; // nothing to verify against — trust the send
 
   const sizeBefore = (() => {
     try {
@@ -280,6 +341,23 @@ export async function sendTextToTerminalTTYVerified(args: {
       }
     } catch {
       // transcript may not exist yet on a brand-new session — keep polling
+    }
+  }
+
+  // iTerm occasionally loses the Return to a focus race (the user typing at
+  // the same moment): the text lands in the input box but never goes out.
+  // Transcript didn't grow — press Return once more on that same TTY and
+  // give it another verification window before deciding.
+  if (result.terminal === "iTerm2") {
+    pressReturnInTty(args.tty);
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      try {
+        const content = readFileSync(args.transcriptPath, "utf-8");
+        if (content.length > sizeBefore && content.includes(marker)) {
+          return result;
+        }
+      } catch { /* keep polling */ }
     }
   }
 

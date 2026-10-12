@@ -42,15 +42,22 @@ export function listCodexThreads(): CodexThreadRow[] {
   const db = getCodexDb();
   if (!db) return [];
   try {
-    return db
-      .prepare(
-        `SELECT id, rollout_path, cwd, title, model, model_provider,
-                created_at, updated_at, first_user_message, git_branch, tokens_used
-         FROM threads
-         WHERE archived = 0
-         ORDER BY updated_at DESC`
-      )
-      .all() as CodexThreadRow[];
+    // WAL mode requires reopening connection to see new writes from Codex process
+    // Use a fresh connection for each listing call to see latest threads
+    const freshDb = new Database(CODEX_DB_PATH, { readonly: true, fileMustExist: true });
+    try {
+      return freshDb
+        .prepare(
+          `SELECT id, rollout_path, cwd, title, model, model_provider,
+                  created_at, updated_at, first_user_message, git_branch, tokens_used
+           FROM threads
+           WHERE archived = 0
+           ORDER BY updated_at DESC`
+        )
+        .all() as CodexThreadRow[];
+    } finally {
+      freshDb.close();
+    }
   } catch {
     return [];
   }
@@ -247,13 +254,9 @@ export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
     return cached.messages;
   }
 
-  let raw: string;
-  try {
-    raw = fs.readFileSync(rolloutPath, "utf-8");
-  } catch {
-    return [];
-  }
-
+  // Streamed line-by-line: readFileSync on a rollout outgrows V8's max string
+  // length (~512M chars) and throws ERR_STRING_TOO_LONG — seen on a 560MB
+  // overnight session, which then showed 0 messages everywhere.
   const messages: ParsedMessage[] = [];
   let idx = 0;
   let turn: Turn | null = null;
@@ -273,7 +276,7 @@ export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
     turn = null;
   }
 
-  for (const line of raw.split(/\r?\n/)) {
+  for (const line of iterateLinesSync(rolloutPath)) {
     if (!line.trim()) continue;
     let d: CodexJsonlLine;
     try {
@@ -376,6 +379,21 @@ export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
   return messages;
 }
 
+/** Last `count` non-empty lines of a file, read from a tail chunk only —
+ * O(1MB) regardless of file size (full reads die past V8's string limit). */
+function readLastLines(path: string, count: number): string[] {
+  const fd = fs.openSync(path, "r");
+  try {
+    const size = fs.fstatSync(fd).size;
+    const toRead = Math.min(size, 1024 * 1024);
+    const buf = Buffer.alloc(toRead);
+    fs.readSync(fd, buf, 0, toRead, size - toRead);
+    return buf.toString("utf-8").split("\n").filter((l) => l.trim()).slice(-count);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 /**
  * Returns true if the Codex JSONL rollout file ends with a task_complete event.
  * Used to reliably detect when Codex has finished its task (process may still linger).
@@ -383,13 +401,9 @@ export function readCodexMessages(rolloutPath: string): ParsedMessage[] {
 export function codexSessionCompleted(rolloutPath: string): boolean {
   if (!rolloutPath || !fs.existsSync(rolloutPath)) return false;
   try {
-    const content = fs.readFileSync(rolloutPath, "utf-8");
-    const lines = content.split("\n").filter(l => l.trim());
-    // Scan last 10 lines for task_complete (it's usually one of the last events)
-    for (let i = Math.max(0, lines.length - 10); i < lines.length; i++) {
+    for (const line of readLastLines(rolloutPath, 10)) {
       try {
-        const ev = JSON.parse(lines[i]);
-        if (ev?.payload?.type === "task_complete") return true;
+        if (JSON.parse(line)?.payload?.type === "task_complete") return true;
       } catch { /* skip malformed */ }
     }
   } catch { /* ignore */ }
@@ -480,6 +494,7 @@ export function extractCodexRolloutIndex(rolloutPath: string): CodexRolloutIndex
       if (type === "event_msg") {
         if (pt === "user_message") {
           emitTurn();
+          hasResult = false; // a new turn started — current-turn flag, same as the Claude scanner
           const msg = typeof p.message === "string" ? p.message : "";
           if (!msg) continue;
           appendSearchText(msg);
@@ -488,6 +503,7 @@ export function extractCodexRolloutIndex(rolloutPath: string): CodexRolloutIndex
           lastMessageRole = "user";
         } else if (pt === "task_started") {
           emitTurn();
+          hasResult = false;
           ensureTurn();
         } else if (pt === "agent_message") {
           const msg = typeof p.message === "string" ? p.message : "";
@@ -507,6 +523,7 @@ export function extractCodexRolloutIndex(rolloutPath: string): CodexRolloutIndex
           if (itemType === "UserMessage") {
             const msg = extractItemText(item);
             emitTurn();
+            hasResult = false; // new turn — current-turn flag (see user_message branch)
             if (!msg) continue;
             appendSearchText(msg);
             messageCount++;

@@ -73,14 +73,15 @@ if [ -z "$TOP_SESSION" ]; then
   skip "Learnings endpoint" "no sessions"
   skip "Session page HTML" "no sessions"
 else
-  DETAIL_JSON=$(curl -s --max-time 10 "$BASE/api/sessions/$TOP_SESSION" 2>/dev/null || echo '{}')
+  # 60s: the top session may be a multi-hundred-MB rollout, cold parse is slow
+  DETAIL_JSON=$(curl -s --max-time 60 "$BASE/api/sessions/$TOP_SESSION" 2>/dev/null || echo '{}')
   MSG_TOTAL=$(echo "$DETAIL_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('messages_total',0))" 2>/dev/null || echo "0")
   MSG_COUNT=$(echo "$DETAIL_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('messages',[])))" 2>/dev/null || echo "0")
   check "Session detail has messages ($MSG_COUNT of $MSG_TOTAL)" "$MSG_COUNT" "^[1-9]"
 
   # 4. MD content loads with pagination
   echo "4. MD content"
-  MD_JSON=$(curl -s --max-time 10 "$BASE/api/sessions/$TOP_SESSION/md" 2>/dev/null || echo '{}')
+  MD_JSON=$(curl -s --max-time 60 "$BASE/api/sessions/$TOP_SESSION/md" 2>/dev/null || echo '{}')
   MD_LEN=$(echo "$MD_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('markdown','')))" 2>/dev/null || echo "0")
   MD_TOTAL=$(echo "$MD_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('total_messages',0))" 2>/dev/null || echo "0")
   HAS_EARLIER=$(echo "$MD_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('has_earlier','missing'))" 2>/dev/null || echo "missing")

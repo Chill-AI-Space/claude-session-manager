@@ -297,9 +297,9 @@ export async function POST(request: NextRequest) {
           const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedProjectPath });
           controller.enqueue(`data: ${JSON.stringify({ type: "status", status: `Codex opened in ${terminal}` })}\n\n`);
 
-          // Poll for the new Codex thread (up to 45 seconds)
+          // Poll for the new Codex thread (up to 15 seconds)
           let sessionId: string | null = null;
-          for (let i = 0; i < 90; i++) {
+          for (let i = 0; i < 30; i++) {
             await new Promise((r) => setTimeout(r, 500));
             const threads = listCodexThreads();
             // Rely on snapshot exclusion alone — created_at filter can misfire due to clock skew

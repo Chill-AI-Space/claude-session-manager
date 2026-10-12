@@ -9,6 +9,7 @@
  */
 import { getDb } from "./db";
 import { scanOpencodeSessions } from "./opencode-scanner";
+import { checkExpiredAlarms } from "./scanner";
 import * as dlog from "./debug-logger";
 
 const SCAN_INTERVAL_MS = 30 * 1000; // 30 seconds
@@ -64,6 +65,11 @@ async function doScan() {
     if (scanned > 0) {
       dlog.info("opencode-bg-scanner", `indexed ${scanned} new/updated OpenCode sessions`);
     }
+
+    // Fire expired self-alarms (any agent) on this tick — see the note in
+    // codex-background-scanner.ts: the alarm check otherwise only runs on a
+    // Claude scan, so a pure-OpenCode workload would never fire one.
+    checkExpiredAlarms(db);
   } catch (err) {
     dlog.info("opencode-bg-scanner", `scan error: ${err instanceof Error ? err.message : String(err)}`);
   }

@@ -51,6 +51,9 @@ https://example.com/path?foo=1&bar=2`;
     expect(cmd).toContain("resume 'session-123' \"$PROMPT\"");
     expect(cmd).toContain("cd '/tmp/project with spaces'");
     expect(cmd).not.toContain(message);
+    // No `exec`: the shell must outlive codex so the window survives the turn
+    // and a later resume can reuse it (session-tty.ts same-window path).
+    expect(cmd).not.toMatch(/(^|\s)exec\s/);
 
     const promptPath = extractPromptPath(cmd);
     expect(fs.readFileSync(promptPath, "utf8")).toBe(message);

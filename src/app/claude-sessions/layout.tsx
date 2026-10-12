@@ -74,7 +74,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   const [updateStep, setUpdateStep] = useState("");
   const [updatesAvailable, setUpdatesAvailable] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const MAX_SESSIONS_IN_MEMORY = 5000;
+  const MAX_SESSIONS_IN_MEMORY = 1000;
 
   // Check for updates on mount (silent background check)
   useEffect(() => {
