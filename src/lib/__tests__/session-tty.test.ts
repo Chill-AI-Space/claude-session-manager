@@ -44,27 +44,32 @@ describe("session TTY cache", () => {
 });
 
 describe("isTtyReadyForCommand", () => {
-  const ready = (comms: string[]) => () => comms;
+  const ready = (comms: string[]) => ({ platform: "darwin" as const, listTtyComms: () => comms });
 
   it("is ready when only a shell lives on the tty", () => {
-    expect(isTtyReadyForCommand("/dev/ttys003", { listTtyComms: ready(["/usr/bin/login", "-zsh"]) })).toBe(true);
+    expect(isTtyReadyForCommand("/dev/ttys003", ready(["/usr/bin/login", "-zsh"]))).toBe(true);
   });
 
   it("is not ready when an agent is attached", () => {
-    expect(isTtyReadyForCommand("ttys003", { listTtyComms: ready(["-zsh", "codex"]) })).toBe(false);
-    expect(isTtyReadyForCommand("ttys003", { listTtyComms: ready(["/usr/local/bin/claude"]) })).toBe(false);
-    expect(isTtyReadyForCommand("ttys003", { listTtyComms: ready(["opencode"]) })).toBe(false);
+    expect(isTtyReadyForCommand("ttys003", ready(["-zsh", "codex"]))).toBe(false);
+    expect(isTtyReadyForCommand("ttys003", ready(["/usr/local/bin/claude"]))).toBe(false);
+    expect(isTtyReadyForCommand("ttys003", ready(["opencode"]))).toBe(false);
   });
 
   it("is not ready when the window is gone (empty or ps error)", () => {
-    expect(isTtyReadyForCommand("ttys003", { listTtyComms: ready([]) })).toBe(false);
+    expect(isTtyReadyForCommand("ttys003", ready([]))).toBe(false);
     expect(
       isTtyReadyForCommand("ttys003", {
+        platform: "darwin",
         listTtyComms: () => {
           throw new Error("ps: ttys003: No such file or directory");
         },
       })
     ).toBe(false);
+  });
+
+  it("does not type into a terminal on unsupported platforms", () => {
+    expect(isTtyReadyForCommand("ttys003", { ...ready(["-zsh"]), platform: "linux" })).toBe(false);
   });
 });
 

@@ -47,6 +47,7 @@ export function forgetSessionTty(sessionId: string): void {
 export interface TtyDeps {
   /** Executable names attached to the TTY; throws when the TTY no longer exists. */
   listTtyComms: (tty: string) => string[];
+  platform?: NodeJS.Platform;
 }
 
 function defaultListTtyComms(tty: string): string[] {
@@ -69,7 +70,7 @@ const AGENT_RE = /(^|[\/\s.-])(claude|codex|opencode|forge)(\.exe)?$/i;
  * to a fresh window.
  */
 export function isTtyReadyForCommand(tty: string, deps: TtyDeps = { listTtyComms: defaultListTtyComms }): boolean {
-  if (process.platform !== "darwin") return false;
+  if ((deps.platform ?? process.platform) !== "darwin") return false;
   let comms: string[];
   try {
     comms = deps.listTtyComms(tty);
