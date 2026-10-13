@@ -25,6 +25,7 @@ const applyOpencodeProfile = vi.fn((profileId: string, remember?: boolean) => {
 const getCurrentOpencodeProfile = vi.fn(() => "standard");
 vi.mock("../opencode-profiles", () => ({
   applyOpencodeProfile: (profileId: string, remember?: boolean) => applyOpencodeProfile(profileId, remember),
+  DEFAULT_OPENCODE_PROFILE: "standard",
   getCurrentOpencodeProfile: () => getCurrentOpencodeProfile(),
   hasOpencodeProfile: (profileId: string) => ["standard", "free", "fast", "master", "phd"].includes(profileId),
 }));
@@ -145,11 +146,11 @@ describe("OpenCode profile selection", () => {
     fs.unlinkSync(extractPromptFile(cmd));
   });
 
-  it("applies the last selected profile (getCurrentOpencodeProfile) when no id is passed", () => {
+  it("defaults to Standard even when the shell's remembered profile is Fast", () => {
     applyOpencodeProfile.mockClear();
-    getCurrentOpencodeProfile.mockReturnValue("phd");
+    getCurrentOpencodeProfile.mockReturnValue("fast");
     const cmd = buildOpencodeStartShellCommand("/tmp/proj", "do the thing");
-    expect(applyOpencodeProfile).toHaveBeenCalledWith("phd", undefined);
+    expect(applyOpencodeProfile).toHaveBeenCalledWith("standard", undefined);
     fs.unlinkSync(extractPromptFile(cmd));
   });
 
@@ -166,5 +167,12 @@ describe("OpenCode profile selection", () => {
     const cmd = buildResumeShellCommand({ ...opencodeSession, model: "fast" });
     expect(applyOpencodeProfile).toHaveBeenCalledWith("fast", false);
     expect(cmd).toContain('OPENCODE_CONFIG_CONTENT="$(cat');
+  });
+
+  it("preserves an explicitly selected Fast profile", () => {
+    applyOpencodeProfile.mockClear();
+    const cmd = buildOpencodeStartShellCommand("/tmp/proj", "do the thing", "fast");
+    expect(applyOpencodeProfile).toHaveBeenCalledWith("fast", undefined);
+    fs.unlinkSync(extractPromptFile(cmd));
   });
 });

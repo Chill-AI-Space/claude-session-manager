@@ -11,6 +11,7 @@ import { resolveProjectPath } from "@/lib/project-path";
 import { lookupOriginUrl } from "@/lib/origin-lookup";
 import { withWorktreeStatus } from "@/lib/session-worktree-registry";
 import { resolveOpencodeBuild } from "@/lib/opencode-builds";
+import { DEFAULT_OPENCODE_PROFILE } from "@/lib/opencode-profiles";
 import { FALLBACK_AGENT, isAgentType } from "@/lib/agents";
 
 export const dynamic = "force-dynamic";
@@ -180,8 +181,7 @@ export async function POST(request: NextRequest) {
           // Snapshot existing OpenCode session ids for this exact directory before
           // launch, so we can tell which one is new (same pattern as the Codex branch).
           const existingIds = new Set(listOpencodeSessions(resolvedProjectPath).map((s) => s.id));
-          const { getCurrentOpencodeProfile } = await import("@/lib/opencode-profiles");
-          const profileId = model || getCurrentOpencodeProfile();
+          const profileId = model || DEFAULT_OPENCODE_PROFILE;
           const shellCmd = buildOpencodeStartShellCommand(resolvedProjectPath, message.trim(), profileId, opencodeBuild);
           const { terminal } = await openInTerminal(shellCmd, { cwd: resolvedProjectPath });
           send({ type: "status", text: `Opencode opened in ${terminal}` });
