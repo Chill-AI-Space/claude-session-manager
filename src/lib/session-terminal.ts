@@ -3,7 +3,7 @@ import { getClaudePath } from "@/lib/claude-bin";
 import { getForgePath } from "@/lib/forge-bin";
 import { getCodexPath } from "@/lib/codex-bin";
 import { resolveOpencodeBuild } from "@/lib/opencode-builds";
-import { applyOpencodeProfile, getCurrentOpencodeProfile, hasOpencodeProfile } from "@/lib/opencode-profiles";
+import { applyOpencodeProfile, DEFAULT_OPENCODE_PROFILE, hasOpencodeProfile } from "@/lib/opencode-profiles";
 import { buildPromptLoader, shellQuote, writeTempPromptFile } from "@/lib/prompt-file";
 import { SessionRow } from "@/lib/types";
 
@@ -38,11 +38,9 @@ function opencodeAutoFlag(): string {
  * each of which sets models for several OpenCode roles at once (see
  * src/lib/opencode-profiles.ts). Each launch loads a private profile config
  * so concurrent sessions cannot overwrite one another's model choice. Without an
- * explicit `profileId` the last selected profile is applied
- * (getCurrentOpencodeProfile — remembered in .current-profile on every
- * applyOpencodeProfile, falling back to DEFAULT_OPENCODE_PROFILE = standard),
- * so a session started with no dropdown choice still lands on the profile
- * the user picked last (or standard on a fresh machine).
+ * explicit `profileId` the Session Manager default (Standard) is applied.
+ * The shell's remembered CLI profile is separate from a new-session default;
+ * selecting Fast for one session must not silently make later sessions Fast.
  *
  * The prompt is loaded from a temp file — long/multi-line prompts must never be
  * embedded in the command string, because iTerm2's AppleScript `write text`
@@ -50,7 +48,7 @@ function opencodeAutoFlag(): string {
  */
 export function buildOpencodeStartShellCommand(projectPath: string, message: string, profileId?: string, buildId?: string): string {
   const { binary: bin, autoFlag } = resolveOpencodeBuild(buildId);
-  const configPath = applyOpencodeProfile(profileId ?? getCurrentOpencodeProfile());
+  const configPath = applyOpencodeProfile(profileId ?? DEFAULT_OPENCODE_PROFILE);
   const promptPath = writeTempPromptFile(message, "csm-opencode-prompt");
   return `cd ${shellQuote(projectPath)} && ${buildPromptLoader(promptPath)} && OPENCODE_CONFIG_CONTENT="$(cat ${shellQuote(configPath)})" ${shellQuote(bin)}${autoFlag ? opencodeAutoFlag() : ""} --prompt "$PROMPT"`;
 }
