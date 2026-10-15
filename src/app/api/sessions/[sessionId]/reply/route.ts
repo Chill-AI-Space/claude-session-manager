@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getDb, getSetting, logAction } from "@/lib/db";
 import type { SessionRow } from "@/lib/types";
-import { detectActiveClaudeSessions, killSessionProcesses } from "@/lib/process-detector";
+import { detectActiveClaudeSessions, killSessionProcesses, getActiveSessionIds, findLiveProcessForSession } from "@/lib/process-detector";
 import { getOrchestrator } from "@/lib/orchestrator";
 import { getCodexPath } from "@/lib/codex-bin";
 import { buildCodexResumeShellCommand } from "@/lib/codex-command";
@@ -156,18 +156,13 @@ export async function POST(
   }
 
   if (agentType === "opencode") {
-    // Same reasoning as Codex above: OpenCode can't be driven over the Claude
-    // SSE runner. Before this branch existed, replying to an OpenCode session
-    // silently fell through to the Claude-only code below (PID-map/TTY
-    // detection tuned for `claude`, then a headless `orchestrator.resume()`
-    // that spawns the `claude` binary) — the wrong engine entirely.
-    //
-    // No live-terminal text injection here (unlike Claude/Codex) — detecting
-    // a *running* OpenCode TUI process for this session_id would need its
-    // own PID/TTY tracking, which doesn't exist yet. Simpler and correct for
-    // now: always resume in a (possibly new) terminal via `opencode --session
-    // <id> --prompt <message>` — the root command's interactive TUI, not the
-    // one-shot `run` subcommand (see session-terminal.ts).
+    // OpenCode can't be driven over the Claude SSE runner. OpenCode DOES
+    // expose its TTY: process-detector binds `ses_` ids to a running TUI via
+    // its `--session ses_…` flag (and via cwd+prompt binding), same as
+    // Codex. So if a live TUI exists, inject the reply straight into it
+    // (no duplicate, no second model call). Only fall back to opening a
+    // fresh (`--session <id> --prompt <msg>`) terminal when no live TUI
+    // was found — same ordering as the Codex branch above.
     db.prepare(
       "UPDATE sessions SET last_message = ?, last_message_role = 'user', modified_at = ? WHERE session_id = ?"
     ).run(message.slice(0, 1000), new Date().toISOString(), sessionId);
@@ -178,7 +173,31 @@ export async function POST(
         const send = (data: Record<string, unknown>) => {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
         };
+
         try {
+          // Fresh lookup (uncached): the cached detector returns [] when cold
+          // or >60s stale, which used to make every reply spawn a duplicate
+          // terminal next to the still-running TUI.
+          const liveProc = process.platform === "darwin"
+            ? findLiveProcessForSession(sessionId)
+            : null;
+          const tty = liveProc ? getTTY(liveProc.pid) : null;
+          if (tty) {
+            let injected = await sendTextToTerminalTTYVerified({ tty, text: message });
+            for (let attempt = 0; injected.reason === "busy" && attempt < 4; attempt++) {
+              await new Promise((r) => setTimeout(r, 3000));
+              injected = await sendTextToTerminalTTYVerified({ tty, text: message });
+            }
+            if (injected.ok) {
+              logAction("service", "opencode_reply_injected", `${injected.terminal} tty:${tty} msg_len:${message.length}`, sessionId);
+              send({ type: "status", text: `OpenCode reply sent to live ${injected.terminal} terminal` });
+              send({ type: "done", result: "OpenCode reply sent", is_error: false });
+              return;
+            }
+            logAction("service", "opencode_reply_inject_failed", `${injected.error ?? injected.reason ?? "unknown"} tty:${tty}`, sessionId);
+          }
+
+          // No live TUI / injection failed — resume in a fresh terminal.
           const { buildResumeShellCommand } = await import("@/lib/session-terminal");
           const shellCmd = buildResumeShellCommand(session, message);
           const { terminal } = await openInTerminal(shellCmd);
