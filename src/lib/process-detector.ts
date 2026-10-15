@@ -153,6 +153,10 @@ function extractOpencodeInitialPrompt(command: string): string | null {
  */
 function isAgentProcessLine(command: string): boolean {
   if (isOpencodeCommand(command)) return isOpencodeSessionCommand(command);
+  // Codex's app-server / daemon is infrastructure holding a long-lived process
+  // (sometimes bound to a thread via cwd matching) but it is not a real TUI
+  // session — must not be treated as one (see /status false-positive bindings).
+  if (isCodexCommand(command) && /\b(?:app-server|daemon)\b/.test(command)) return false;
   return /(^|[\/\s])(claude|codex)(\s|$)/.test(command);
 }
 
@@ -680,6 +684,27 @@ export function hasLiveProcessFresh(sessionId: string): boolean {
     return finalizeProcesses(raw).some((p) => p.sessionId === sessionId);
   } catch {
     return isSessionActive(sessionId);
+  }
+}
+
+/**
+ * Fresh (uncached) process bound to sessionId WITH its TTY — for callers
+ * that must not miss a live process because the cache is cold or stale:
+ * detectActiveClaudeSessions() returns [] once older than MAX_CACHE_STALE_MS
+ * (60s), and the async refresh lands seconds later — a reply decision made
+ * against that "empty" answer opened a duplicate `--resume`/`--session`
+ * terminal next to the running TUI.
+ */
+export function findLiveProcessForSession(sessionId: string): ActiveProcess | null {
+  if (isWin) return detectActiveClaudeSessions().find((p) => p.sessionId === sessionId) ?? null;
+  try {
+    const raw = detectUnix();
+    return finalizeProcesses(raw).find((p) => p.sessionId === sessionId) ?? null;
+  } catch (error) {
+    const live = detectActiveClaudeSessions().find((p) => p.sessionId === sessionId);
+    if (live) return live;
+    // An unavailable process scan is not evidence that spawning is safe.
+    throw error;
   }
 }
 
