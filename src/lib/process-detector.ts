@@ -700,8 +700,11 @@ export function findLiveProcessForSession(sessionId: string): ActiveProcess | nu
   try {
     const raw = detectUnix();
     return finalizeProcesses(raw).find((p) => p.sessionId === sessionId) ?? null;
-  } catch {
-    return detectActiveClaudeSessions().find((p) => p.sessionId === sessionId) ?? null;
+  } catch (error) {
+    const live = detectActiveClaudeSessions().find((p) => p.sessionId === sessionId);
+    if (live) return live;
+    // An unavailable process scan is not evidence that spawning is safe.
+    throw error;
   }
 }
 

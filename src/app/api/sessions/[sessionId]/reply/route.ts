@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getDb, getSetting, logAction } from "@/lib/db";
 import type { SessionRow } from "@/lib/types";
-import { detectActiveClaudeSessions, killSessionProcesses, getActiveSessionIds, findLiveProcessForSession } from "@/lib/process-detector";
+import { detectActiveClaudeSessions, killSessionProcesses, findLiveProcessForSession } from "@/lib/process-detector";
 import { getOrchestrator } from "@/lib/orchestrator";
 import { getCodexPath } from "@/lib/codex-bin";
 import { buildCodexResumeShellCommand } from "@/lib/codex-command";
@@ -182,6 +182,9 @@ export async function POST(
             ? findLiveProcessForSession(sessionId)
             : null;
           const tty = liveProc ? getTTY(liveProc.pid) : null;
+          if (liveProc && !tty) {
+            throw new Error(`OpenCode session is already running (pid ${liveProc.pid}) without a terminal; a duplicate was not started`);
+          }
           if (tty) {
             let injected = await sendTextToTerminalTTYVerified({ tty, text: message });
             for (let attempt = 0; injected.reason === "busy" && attempt < 4; attempt++) {
@@ -195,9 +198,10 @@ export async function POST(
               return;
             }
             logAction("service", "opencode_reply_inject_failed", `${injected.error ?? injected.reason ?? "unknown"} tty:${tty}`, sessionId);
+            throw new Error(`OpenCode session is live but reply delivery failed (${injected.reason ?? "unknown"}); a duplicate was not started`);
           }
 
-          // No live TUI / injection failed — resume in a fresh terminal.
+          // A new terminal is safe only when there is no live session process.
           const { buildResumeShellCommand } = await import("@/lib/session-terminal");
           const shellCmd = buildResumeShellCommand(session, message);
           const { terminal } = await openInTerminal(shellCmd);
