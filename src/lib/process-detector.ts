@@ -35,11 +35,13 @@ export interface ProcessVitals {
 // Vitals cache (ps call): 10s TTL — ps is cheap but no need to run on every 2s poll
 const vitalsCache = new Map<number, { vitals: ProcessVitals; ts: number }>();
 const VITALS_TTL_MS = 10_000;
+const VITALS_CACHE_MAX = 500;
 
 // TCP state cache: updated asynchronously so lsof never blocks the event loop.
 // lsof on a long-running Claude process with hundreds of TCP connections can take 150-500ms.
 const tcpCache = new Map<number, { hasEstablished: boolean; connections: string[]; ts: number }>();
 const TCP_TTL_MS = 15_000; // refresh TCP state at most once per 15s per PID
+const TCP_CACHE_MAX = 500;
 const tcpRefreshing = new Set<number>(); // prevent concurrent lsof runs for same PID
 
 function refreshTcpAsync(pid: number): void {
@@ -60,6 +62,18 @@ function refreshTcpAsync(pid: number): void {
         const remote = addrField.includes("->") ? addrField.split("->")[1] : addrField;
         if (remote) connections.push(remote);
       }
+    }
+    const tcpNow = Date.now();
+    for (const [k, v] of tcpCache) {
+      if (tcpNow - v.ts > TCP_TTL_MS) tcpCache.delete(k);
+    }
+    if (tcpCache.size >= TCP_CACHE_MAX) {
+      let oldestKey: number | null = null;
+      let oldestTs = Infinity;
+      for (const [k, v] of tcpCache) {
+        if (v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
+      }
+      if (oldestKey !== null) tcpCache.delete(oldestKey);
     }
     tcpCache.set(pid, { hasEstablished, connections, ts: Date.now() });
   });
@@ -865,6 +879,19 @@ export function getProcessVitals(pid: number): ProcessVitals | null {
     const tcp_connections = tcpState?.connections ?? [];
 
     const vitals: ProcessVitals = { pid, cpu_percent, mem_mb, has_established_tcp, tcp_connections, elapsed_secs };
+    // Bound the cache: evict stale entries, then oldest if over capacity
+    const vitalsNow = Date.now();
+    for (const [k, v] of vitalsCache) {
+      if (vitalsNow - v.ts > VITALS_TTL_MS) vitalsCache.delete(k);
+    }
+    if (vitalsCache.size >= VITALS_CACHE_MAX) {
+      let oldestKey: number | null = null;
+      let oldestTs = Infinity;
+      for (const [k, v] of vitalsCache) {
+        if (v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
+      }
+      if (oldestKey !== null) vitalsCache.delete(oldestKey);
+    }
     vitalsCache.set(pid, { vitals, ts: Date.now() });
     return vitals;
   } catch {
