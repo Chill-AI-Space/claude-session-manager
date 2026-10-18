@@ -18,12 +18,23 @@ type GlobalWithTtyCache = typeof globalThis & { __sessionTtyCache?: Map<string, 
 
 /** After a day the cached TTY is more likely an OS-reused port than our window. */
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_ENTRIES = 1000;
 
 export function rememberSessionTty(sessionId: string, tty: string | null | undefined): void {
   if (!sessionId || !tty) return;
   const g = globalThis as GlobalWithTtyCache;
   if (!g.__sessionTtyCache) g.__sessionTtyCache = new Map();
-  g.__sessionTtyCache.set(sessionId, { tty, ts: Date.now() });
+  const cache = g.__sessionTtyCache;
+  // Bound the cache to avoid unbounded growth across sessions.
+  if (cache.size >= MAX_ENTRIES) {
+    let oldestKey: string | null = null;
+    let oldestTs = Infinity;
+    for (const [k, v] of cache) {
+      if (v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
+    }
+    if (oldestKey) cache.delete(oldestKey);
+  }
+  cache.set(sessionId, { tty, ts: Date.now() });
 }
 
 /** Last known TTY for the session, or null when unknown/expired. */

@@ -21,7 +21,8 @@ let _opencodeDb: Database.Database | null = null;
 const _dbsByPath = new Map<string, Database.Database | null>();
 
 function openDb(dbPath: string): Database.Database | null {
-  if (_dbsByPath.has(dbPath)) return _dbsByPath.get(dbPath)!;
+  const cached = _dbsByPath.get(dbPath);
+  if (cached !== undefined) return cached;
   let db: Database.Database | null = null;
   try {
     if (fs.existsSync(dbPath)) {
@@ -30,14 +31,16 @@ function openDb(dbPath: string): Database.Database | null {
   } catch {
     db = null;
   }
-  _dbsByPath.set(dbPath, db);
+  // Only cache successful connections; a missing/unreadable file may appear later.
+  if (db) _dbsByPath.set(dbPath, db);
   return db;
 }
 
 function getOpencodeDb(): Database.Database | null {
   if (_opencodeDb) return _opencodeDb;
-  _opencodeDb = openDb(path.join(OPENCODE_DIR, "opencode.db"));
-  return _opencodeDb;
+  const db = openDb(path.join(OPENCODE_DIR, "opencode.db"));
+  if (db) _opencodeDb = db;
+  return db;
 }
 
 function listOpencodeDbPaths(): string[] {
@@ -393,6 +396,7 @@ export function readOpencodeMessages(sessionId: string): ParsedMessage[] {
  * A missing/unreadable DB is NOT cached: the file may appear later.
  */
 const firstUserMessageCache = new Map<string, string>();
+const FIRST_USER_MESSAGE_CACHE_MAX = 1000;
 
 export function getOpencodeFirstUserMessage(sessionId: string): string | null {
   const cached = firstUserMessageCache.get(sessionId);
@@ -412,6 +416,10 @@ export function getOpencodeFirstUserMessage(sessionId: string): string | null {
     for (const row of rows) {
       const text = parsePartText(row.data);
       if (text) {
+        if (firstUserMessageCache.size >= FIRST_USER_MESSAGE_CACHE_MAX) {
+          const oldest = firstUserMessageCache.keys().next().value;
+          if (oldest) firstUserMessageCache.delete(oldest);
+        }
         firstUserMessageCache.set(sessionId, text);
         return text;
       }
