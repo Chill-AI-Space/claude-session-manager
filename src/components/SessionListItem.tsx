@@ -59,7 +59,7 @@ function formatDate(dateStr: string, now: number): string {
 
 function getSessionTitle(session: SessionListItem): string {
   if (session.custom_name) return session.custom_name;
-  if (session.generated_title) return session.generated_title;
+  if (session.generated_title && !/^New session - \d{4}-\d{2}-\d{2}T/.test(session.generated_title)) return session.generated_title;
   if (session.first_prompt) {
     let text = session.first_prompt;
     if (text.startsWith("[Request interrupted")) return session.session_id.slice(0, 8) + "...";
