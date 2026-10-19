@@ -27,8 +27,29 @@ interface AgentToggleButtonProps {
   size?: "sm" | "md";
 }
 
+/** Fork builds that should sit right after Codex, before Claude. */
+const PREFERRED_BUILD_IDS = ["mem-latest", "mem-previous"];
+
+function orderBuilds(builds: AgentBuild[]): AgentBuild[] {
+  const preferred = PREFERRED_BUILD_IDS
+    .map((id) => builds.find((b) => b.id === id))
+    .filter((b): b is AgentBuild => Boolean(b));
+  const rest = builds.filter((b) => !PREFERRED_BUILD_IDS.includes(b.id));
+  return [...preferred, ...rest];
+}
+
+interface AgentBuild {
+  id: string;
+  name: string;
+  kind: string;
+  available: boolean;
+  builtAt?: string;
+  pullRequest?: string;
+  description?: string;
+}
+
 export function AgentToggleButton({ agent, onCycle, buildId, onBuildChange, size = "sm" }: AgentToggleButtonProps) {
-  const [builds, setBuilds] = useState<Array<{ id: string; name: string; kind: string; available: boolean; builtAt?: string; pullRequest?: string; description?: string }>>([]);
+  const [builds, setBuilds] = useState<AgentBuild[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
     fetch("/api/opencode/builds").then(async (r) => {
@@ -37,6 +58,14 @@ export function AgentToggleButton({ agent, onCycle, buildId, onBuildChange, size
       setBuilds(data.builds);
     }).catch((e) => setError(String(e)));
   }, []);
+  const ordered = orderBuilds(builds);
+  const forkBuilds = ordered.filter((b) => b.kind !== "upstream");
+  const upstreamBuilds = ordered.filter((b) => b.kind === "upstream");
+  const renderBuild = (b: AgentBuild) => (
+    <option key={b.id} value={`build:${b.id}`} disabled={!b.available} title={b.description}>
+      {b.name}{b.pullRequest ? ` · ${b.pullRequest}` : ""}{b.builtAt ? ` · ${b.builtAt.slice(0, 10)}` : ""}{!b.available ? " (unavailable)" : ""}
+    </option>
+  );
   return (
     <select
       aria-label="Agent and OpenCode build"
@@ -50,9 +79,9 @@ export function AgentToggleButton({ agent, onCycle, buildId, onBuildChange, size
       className={`text-[11px] font-medium rounded border border-border bg-card text-foreground max-w-[260px] ${size === "md" ? "px-2 py-1" : "px-1.5 py-0.5"}`}
     >
       <option value="codex">Codex</option>
+      {onBuildChange && forkBuilds.map(renderBuild)}
       <option value="claude">Claude</option>
-      {onBuildChange && builds.filter((b) => b.kind === "upstream").map((b) => <option key={b.id} value={`build:${b.id}`} disabled={!b.available}>{b.name}{!b.available ? " (unavailable)" : ""}</option>)}
-      {onBuildChange && builds.filter((b) => b.kind !== "upstream").map((b) => <option key={b.id} value={`build:${b.id}`} disabled={!b.available} title={b.description}>{b.name}{b.pullRequest ? ` · ${b.pullRequest}` : ""}{b.builtAt ? ` · ${b.builtAt.slice(0, 10)}` : ""}{!b.available ? " (unavailable)" : ""}</option>)}
+      {onBuildChange && upstreamBuilds.map(renderBuild)}
       <option value="opencode">OpenCode (installed)</option>
       <option value="forge">Forge</option>
       {error && <option disabled>Build catalog unavailable</option>}
