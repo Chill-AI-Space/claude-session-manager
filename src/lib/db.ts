@@ -727,11 +727,22 @@ export function setSessionAlarm(
     .run(sessionId, message, checkAfterMs, Date.now(), mode);
 }
 
-/** Reset the clock on a persistent alarm after it fires (so it won't fire again immediately). */
-export function rearmPersistentAlarm(sessionId: string): void {
+/** Reset the clock on a persistent alarm after it fires (so it won't fire again immediately).
+ *
+ *  minIntervalMs — minimum wall-clock gap between two consecutive fires of this
+ *  persistent alarm (default 0). When set, set_at is pushed out so the next fire
+ *  cannot happen sooner than minIntervalMs after the previous one, even if
+ *  check_after_ms is smaller (e.g. a 3-min alarm won't re-fire within 10 min).
+ */
+export function rearmPersistentAlarm(sessionId: string, minIntervalMs = 0): void {
+  const row = getDb()
+    .prepare("SELECT check_after_ms FROM session_alarms WHERE session_id = ? AND mode = 'persistent'")
+    .get(sessionId) as { check_after_ms: number } | undefined;
+  if (!row) return;
+  const delay = Math.max(0, minIntervalMs - (row.check_after_ms || 0));
   getDb()
     .prepare("UPDATE session_alarms SET set_at = ? WHERE session_id = ? AND mode = 'persistent'")
-    .run(Date.now(), sessionId);
+    .run(Date.now() + delay, sessionId);
 }
 
 /** Returns the alarm if active (not disabled). */

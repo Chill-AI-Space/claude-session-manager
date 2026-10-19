@@ -191,7 +191,9 @@ export async function POST(request: NextRequest) {
           // UI can navigate to the new session instead of leaving the user stuck on
           // "session started but no ID received".
           let sessionId: string | null = null;
-          for (let i = 0; i < 90; i++) {
+          // OpenCode can take longer than Codex to register its session row
+          // under heavy terminal contention; wait up to 90s before giving up.
+          for (let i = 0; i < 180; i++) {
             await new Promise((r) => setTimeout(r, 500));
             const newSession = listOpencodeSessions(resolvedProjectPath).find((s) => !existingIds.has(s.id));
             if (newSession) {
