@@ -268,6 +268,9 @@ function initTables(db: Database.Database) {
   if (!colNames.has("worktree_branch")) {
     db.exec("ALTER TABLE sessions ADD COLUMN worktree_branch TEXT");
   }
+  // Drop OpenCode's default placeholder titles ("New session - <ISO>") so the UI
+  // falls back to the first prompt instead of showing a timestamp.
+  db.exec("UPDATE sessions SET generated_title = NULL WHERE agent_type = 'opencode' AND generated_title LIKE 'New session - %'");
   // actions_log migrations
   const actionCols = db.prepare("PRAGMA table_info(actions_log)").all() as { name: string }[];
   const actionColNames = new Set(actionCols.map((c) => c.name));

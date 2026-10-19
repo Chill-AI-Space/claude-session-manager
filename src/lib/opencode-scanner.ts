@@ -80,7 +80,11 @@ export async function scanOpencodeSessions(
   const setAgentStmt = db.prepare(
     `UPDATE sessions SET agent_type = 'opencode',
        model = COALESCE(model, ?),
-       generated_title = COALESCE(generated_title, ?)
+       generated_title = CASE
+         WHEN ? IS NOT NULL THEN ?
+         WHEN generated_title LIKE 'New session - %' THEN NULL
+         ELSE generated_title
+       END
      WHERE session_id = ?`
   );
 
@@ -113,7 +117,8 @@ export async function scanOpencodeSessions(
 
         const firstPrompt = text?.firstPrompt?.slice(0, 1000) ?? null;
         const lastMessage = text?.lastMessage?.slice(-1000) ?? firstPrompt;
-        const title = session.title || null;
+        const rawTitle = session.title || null;
+        const title = rawTitle && /^New session - \d{4}-\d{2}-\d{2}T/.test(rawTitle) ? null : rawTitle;
         const modelLabel = opencodeModelLabel(session.model);
 
         upsertSession.run({
@@ -141,7 +146,7 @@ export async function scanOpencodeSessions(
           last_scanned_at: now,
         });
 
-        setAgentStmt.run(modelLabel, title, session.id);
+        setAgentStmt.run(modelLabel, title, title, session.id);
 
         const searchText = [title, firstPrompt, lastMessage].filter(Boolean).join("\n").slice(0, 20_000);
         if (searchText) ftsQueue.push({ sessionId: session.id, text: searchText });
