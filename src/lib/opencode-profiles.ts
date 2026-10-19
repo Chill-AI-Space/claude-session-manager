@@ -148,8 +148,33 @@ export function applyOpencodeProfile(profileId: string, remember = true): string
  * external_directory (...session-drops/*); auto-rejecting"). Allow reads of
  * exactly that folder, keeping any rules the user already configured.
  */
+// Permission keys OpenCode can prompt for. Setting each to "allow" keeps the
+// agent from stopping on every tool call when no one is watching (mirrors
+// --auto, but enforced in the generated config so it also applies to builds
+// that do not support --auto).
+const AUTONOMOUS_PERMISSION_KEYS = [
+  "read",
+  "edit",
+  "glob",
+  "grep",
+  "list",
+  "bash",
+  "task",
+  "external_directory",
+  "todowrite",
+  "question",
+  "webfetch",
+  "websearch",
+  "lsp",
+  "doom_loop",
+  "skill",
+] as const;
+
 function allowAttachmentDirectory(config: unknown): unknown {
-  const attachmentGlob = `${path.join(os.tmpdir(), "session-drops")}/*`;
+  const tmpDir = path.join(os.tmpdir());
+  const attachmentGlob = `${tmpDir}/session-drops/*`;
+  const tmpGlob = `${tmpDir}/*`;
+  const tmpRecursiveGlob = `${tmpDir}/**`;
   const root = (typeof config === "object" && config !== null ? config : {}) as Record<string, unknown>;
   const permission = root.permission;
 
@@ -157,15 +182,30 @@ function allowAttachmentDirectory(config: unknown): unknown {
   if (typeof permission === "string") return root;
 
   const permissionRules = (typeof permission === "object" && permission !== null ? permission : {}) as Record<string, unknown>;
-  const externalRule = permissionRules.external_directory;
-  if (typeof externalRule === "string") return root;
+  const nextPermission: Record<string, unknown> = { ...permissionRules };
 
-  const externalRules = (typeof externalRule === "object" && externalRule !== null ? externalRule : {}) as Record<string, unknown>;
+  const externalRule = permissionRules.external_directory;
+  const externalIsBlanket = typeof externalRule === "string";
+  if (externalIsBlanket) {
+    nextPermission.external_directory = externalRule;
+  } else {
+    const externalRules = (typeof externalRule === "object" && externalRule !== null ? externalRule : {}) as Record<string, unknown>;
+    nextPermission.external_directory = {
+      ...externalRules,
+      [attachmentGlob]: "allow",
+      [tmpGlob]: "allow",
+      [tmpRecursiveGlob]: "allow",
+    };
+  }
+
+  for (const key of AUTONOMOUS_PERMISSION_KEYS) {
+    if (nextPermission[key] === undefined) {
+      nextPermission[key] = key === "external_directory" ? nextPermission.external_directory : "allow";
+    }
+  }
+
   return {
     ...root,
-    permission: {
-      ...permissionRules,
-      external_directory: { ...externalRules, [attachmentGlob]: "allow" },
-    },
+    permission: nextPermission,
   };
 }
