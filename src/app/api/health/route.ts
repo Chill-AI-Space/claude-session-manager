@@ -18,6 +18,28 @@ function checkCommand(cmd: string): boolean {
   }
 }
 
+function gitInfo(): { commit: string; date: string } | null {
+  try {
+    const cwd = process.cwd();
+    const commit = execSync("git rev-parse --short HEAD", {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+    const date = execSync('git log -1 --format=%cd --date=iso', {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+    if (!commit) return null;
+    return { commit, date };
+  } catch {
+    return null;
+  }
+}
+
 export async function GET() {
   const isWindows = process.platform === "win32";
   const isMac = process.platform === "darwin";
@@ -39,6 +61,8 @@ export async function GET() {
 
   return Response.json({
     platform: process.platform,
+    version: process.env.npm_package_version || "0.1.0",
+    git: gitInfo(),
     checks: [
       {
         id: "claude_cli",

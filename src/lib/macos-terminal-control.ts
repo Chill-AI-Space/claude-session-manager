@@ -161,8 +161,18 @@ if iTerm2Running then
                 -- treated as Enter by codex (the text sat in the input box);
                 -- a real Return keypress via System Events submits reliably,
                 -- for single- and multi-line payloads alike.
-                tell s to write text payloadText newline NO
-                delay 0.15
+                -- Guard against accumulation: if the input box already contains
+                -- the marker (a previous delivery was stuck and never submitted),
+                -- don't paste again — that would append a duplicate into the
+                -- already-filled box. Just submit whatever is there.
+                set payloadMarker to ${asAppleScriptString(args.text.slice(0, 40))}
+                if (sessionText does not contain payloadMarker) then
+                  tell s to write text payloadText newline NO
+                  delay 0.15
+                else
+                  -- already in the input box; skip paste to avoid accumulation
+                  delay 0.1
+                end if
                 -- Focus after writing (for user experience only)
                 try
                   activate
@@ -176,11 +186,11 @@ if iTerm2Running then
                 try
                   select s
                 end try
-                delay 0.2
+                delay 0.5
                 try
                   tell application "System Events"
                     if not (frontmost of application "iTerm") then tell application "iTerm" to activate
-                    delay 0.1
+                    delay 0.2
                     key code 36
                   end tell
                 on error
@@ -280,10 +290,10 @@ tell application "iTerm"
             set index of w to 1
             select t
             select s
-            delay 0.2
+            delay 0.5
             tell application "System Events"
               if not (frontmost of application "iTerm") then tell application "iTerm" to activate
-              delay 0.1
+              delay 0.2
               key code 36
             end tell
             return "pressed"
@@ -346,27 +356,35 @@ export async function sendTextToTerminalTTYVerified(args: {
 
   // iTerm occasionally loses the Return to a focus race (the user typing at
   // the same moment): the text lands in the input box but never goes out.
-  // Transcript didn't grow — press Return once more on that same TTY and
-  // give it another verification window before deciding.
+  // Transcript didn't grow — press Return again on that same TTY and give
+  // it another verification window before deciding. Retry several times
+  // with increasing waits; a single lost Return is the overwhelmingly
+  // common case, but the user may be interacting with the terminal.
   if (result.terminal === "iTerm2") {
-    pressReturnInTty(args.tty);
-    for (let i = 0; i < 20; i++) {
-      await new Promise((r) => setTimeout(r, 300));
-      try {
-        const content = readFileSync(args.transcriptPath, "utf-8");
-        if (content.length > sizeBefore && content.includes(marker)) {
-          return result;
-        }
-      } catch { /* keep polling */ }
+    for (let retry = 0; retry < 5; retry++) {
+      await new Promise((r) => setTimeout(r, 500 + retry * 500));
+      pressReturnInTty(args.tty);
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 300));
+        try {
+          const content = readFileSync(args.transcriptPath, "utf-8");
+          if (content.length > sizeBefore && content.includes(marker)) {
+            return result;
+          }
+        } catch { /* keep polling */ }
+      }
     }
   }
 
   // Distinguish two cases after the polling window:
-  // 1. File grew but our marker is absent — something ELSE wrote to the transcript,
-  //    which is the signature of wrong-window delivery (text went to another session).
-  // 2. File didn't grow at all — Claude is busy or crashed; the text was typed into
-  //    the correct terminal but Claude hasn't processed it yet. The two-phase unique-ID
-  //    delivery is trusted; don't treat this as failure.
+  // 1. File grew but our marker is absent — something ELSE wrote to the
+  //    transcript, which is the signature of wrong-window delivery (text
+  //    went to another session).
+  // 2. File didn't grow at all — the Return was almost certainly lost and
+  //    the message is sitting in the input box unsent. Do NOT trust the
+  //    delivery: return failure so callers can retry instead of assuming
+  //    success (trusting it here is what produced phantom "delivered"
+  //    entries while the message accumulated unstored across retries).
   try {
     const finalContent = readFileSync(args.transcriptPath, "utf-8");
     if (finalContent.length > sizeBefore && !finalContent.includes(marker)) {
@@ -379,9 +397,12 @@ export async function sendTextToTerminalTTYVerified(args: {
     }
   } catch { /* ignore — treat as no-growth */ }
 
-  // Transcript didn't grow within timeout: Claude is busy or not yet processing.
-  // Trust the unique-ID-based delivery — the text is queued in the right terminal.
-  return result;
+  return {
+    ok: false,
+    reason: "busy",
+    terminal: result.terminal as "iTerm2" | "Terminal",
+    error: `Reply was written to tty ${args.tty} but the transcript never grew within the verification window — the message was not submitted.`,
+  };
 }
 
 export function controlTerminalSession(args: {

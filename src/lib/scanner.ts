@@ -761,7 +761,13 @@ export function checkExpiredAlarms(db: ReturnType<typeof getDb>): void {
     const wakeMessage = alarm.message + buildAlarmWakeHint(alarm.session_id);
     if (alive) {
       logAction("service", "alarm_fired_live", `[${alarm.mode}] ${alarm.message.slice(0, 100)}`, alarm.session_id);
-      orch.pokeLiveSession(alarm.session_id, wakeMessage);
+      const delivered = orch.pokeLiveSession(alarm.session_id, wakeMessage);
+      if (!delivered) {
+        // Text was typed into the input box but the Return did not submit —
+        // pressing Enter manually (or replying via the API) will deliver it.
+        logAction("service", "alarm_poke_not_submitted",
+          "message typed into input box but not submitted; press Enter manually or use the reply API", alarm.session_id);
+      }
     } else {
       logAction("service", "alarm_fired", `[${alarm.mode}] ${alarm.message.slice(0, 100)}`, alarm.session_id);
       orch.resumeSessionBackground(alarm.session_id, wakeMessage);
@@ -772,7 +778,7 @@ export function checkExpiredAlarms(db: ReturnType<typeof getDb>): void {
     } else {
       // Persistent: re-arm the clock so it won't fire again until the session
       // goes silent for check_after_ms again.
-      rearmPersistentAlarm(alarm.session_id);
+      rearmPersistentAlarm(alarm.session_id, 600_000);
     }
   }
 }
